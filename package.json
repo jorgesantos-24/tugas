@@ -6,6 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "node scripts/dev.js",
     "verificar": "node scripts/verificar.js",
     "deploy": "node scripts/deploy.js"
   },

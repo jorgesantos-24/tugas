@@ -24,6 +24,8 @@ function credentials() {
   const file = path.resolve(__dirname, process.env.FIREBASE_SERVICE_ACCOUNT || process.env.GOOGLE_APPLICATION_CREDENTIALS || 'firebase-service-account.json');
   if (!fs.existsSync(file)) {
     console.error(`\n[Firebase] Falta a chave da conta de serviço: ${file}
+  Só quer testar no seu computador? Use  npm run dev  (base de dados de teste, não precisa de chave).
+  Para ligar à base de dados REAL (só a equipa autorizada):
   1. Abra https://console.firebase.google.com/project/${WEB_CONFIG.projectId}/settings/serviceaccounts/adminsdk
   2. Clique em "Gerar nova chave privada"
   3. Guarde o ficheiro nesta pasta com o nome firebase-service-account.json\n`);

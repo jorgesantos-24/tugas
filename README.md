@@ -4,6 +4,17 @@ Jogos e odds ao vivo (feed ESPN), contas no **Firebase**, depósitos por **PIX (
 e saques **pagos à mão pela equipa** no painel `/admin`.
 Sem chave da BravoPay, depósitos e saques ficam indisponíveis.
 
+## Colaboradores: testar no seu computador (sem chaves)
+
+Não precisa do `.env` nem da chave do Firebase. Usa uma base de dados de **teste** (apagada ao fechar),
+sem dinheiro real e sem tocar na produção.
+
+1. Instale o [Node.js 22.13+](https://nodejs.org), o [Java 11+](https://adoptium.net) e o Firebase CLI: `npm install -g firebase-tools`
+2. Na pasta do projeto: `npm install` e depois `npm run dev`
+3. Abra http://localhost:3100, crie uma conta de teste e use "+ R$ 1.000 teste" para ter saldo.
+
+Não use `npm start` nem `iniciar.bat`: esses ligam à base de dados **real** e exigem a chave da conta de serviço.
+
 ## 1. Configuração (uma vez)
 
 ### Firebase (projeto `golaco-ac746`)
