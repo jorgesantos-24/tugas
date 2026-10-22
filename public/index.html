@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<title>Tugas — Apostas Esportivas</title>
+<meta name="description" content="Apostas esportivas com odds ao vivo. Jogue com responsabilidade. Proibido para menores de 18 anos.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <button class="icon-btn only-mobile" id="menuBtn" aria-label="Menu">☰</button>
+  <a class="logo" href="#" id="logoLink"><img src="img/logo.png" alt="TugasBet" class="logo-img"></a>
+  <nav class="topnav">
+    <a href="#" data-view="home" class="active">Esportes</a>
+    <a href="#" data-view="live"><span class="live-dot"></span>Ao Vivo <b id="liveCountNav">0</b></a>
+    <a href="#" data-view="mybets">Minhas Apostas</a>
+    <a href="#cassino" data-view="casino" class="casino-only">🎰 Cassino</a>
+  </nav>
+  <div class="search"><input id="search" placeholder="Buscar time ou liga..." autocomplete="off"></div>
+  <div class="wallet" id="wallet"></div>
+</header>
+
+<div class="layout">
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main" id="main">
+    <div class="skeleton" id="skeleton">
+      <div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div>
+    </div>
+  </main>
+
+  <aside class="slip" id="slip">
+    <div class="slip-tabs">
+      <button class="active" data-tab="slip">Boletim <span class="badge" id="slipCount">0</span></button>
+      <button data-tab="open">Apostas abertas <span class="badge" id="openCount">0</span></button>
+    </div>
+    <div id="slipBody"></div>
+  </aside>
+</div>
+
+<button class="slip-fab only-mobile" id="slipFab">Boletim <span class="badge" id="slipFabCount">0</span> <span id="slipFabOdds"></span></button>
+
+<footer class="footer">
+  <div class="footer-in">
+    <div><span class="age">18+</span> Jogue com responsabilidade. Proibido para menores de 18 anos.</div>
+    <div class="footer-links"><a href="/termos">Termos de uso</a><a href="/privacidade">Privacidade</a><a href="/jogo-responsavel">Jogo responsável</a><span id="siteInfo"></span></div>
+    <div class="muted">Placares e odds ao vivo: feed público ESPN (odds DraftKings). Atualização automática a cada 15s. <span id="lastUpdate"></span></div>
+  </div>
+</footer>
+
+<div class="overlay" id="overlay"></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="markets.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

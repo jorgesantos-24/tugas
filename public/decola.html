@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b141d">
+<link rel="icon" type="image/png" href="img/favicon.png">
+<title>Decola — Golaço</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="decola.css">
+</head>
+<body class="dc-body">
+
+<header class="topbar">
+  <a class="logo" href="/"><img src="img/logo.png" alt="Golaço" class="logo-img"></a>
+  <nav class="topnav">
+    <a href="/">Esportes</a>
+    <a href="/#cassino" class="active">🎰 Cassino</a>
+  </nav>
+  <div class="wallet" id="wallet"></div>
+</header>
+
+<div class="dc-test" id="testBar" hidden>TESTE LOCAL · saldo de teste nos emuladores do Firebase · nada aqui é dinheiro real</div>
+
+<main class="dc">
+  <section class="dc-game">
+    <div class="dc-histwrap">
+      <div class="dc-history" id="history"></div>
+      <button class="dc-histmore" id="histMore" title="Ver mais resultados">⋯</button>
+    </div>
+
+    <div class="dc-stage" id="stage">
+      <canvas id="cv"></canvas>
+      <div class="dc-center" id="center"></div>
+      <div class="dc-fx" id="fx"></div>
+      <button class="dc-sound" id="soundBtn" title="Som"></button>
+    </div>
+
+    <div class="dc-panels">
+      <div class="dc-panel" data-slot="0"></div>
+      <div class="dc-panel" data-slot="1"></div>
+    </div>
+  </section>
+
+  <aside class="dc-side">
+    <div class="dc-tabs" id="sideTabs">
+      <button data-side="all" class="active">Todas</button>
+      <button data-side="my">Minhas</button>
+      <button data-side="top">Top</button>
+      <button data-side="chat">Chat <span class="dc-dot" id="chatDot" hidden></span></button>
+    </div>
+    <div class="dc-side-head" id="sideHead"></div>
+    <div class="dc-sidebody" id="sideBody"></div>
+    <form class="dc-chatform" id="chatForm" hidden>
+      <input id="chatInput" maxlength="160" autocomplete="off" placeholder="Escreva uma mensagem...">
+      <button class="btn btn-green">Enviar</button>
+    </form>
+    <button class="dc-fair-btn" id="fairBtn">🔒 Jogo verificável: como funciona</button>
+  </aside>
+</main>
+
+<footer class="footer">
+  <div class="footer-in">
+    <div><span class="age">18+</span> Jogue com responsabilidade. Proibido para menores de 18 anos.</div>
+    <div class="footer-links"><a href="/termos">Termos de uso</a><a href="/jogo-responsavel">Jogo responsável</a><span id="certInfo"></span></div>
+  </div>
+</footer>
+
+<div class="overlay" id="overlay"></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="decola.js"></script>
+</body>
+</html>

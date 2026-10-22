@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel da equipa</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<style>
+  body{min-height:100vh}
+  .adm-top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:16px;padding:0 16px;height:58px;background:#0e1a25;border-bottom:1px solid var(--line)}
+  .adm-top .logo{font-size:18px}
+  .adm-tabs{display:flex;gap:4px;overflow-x:auto}
+  .adm-tabs button{padding:8px 12px;border-radius:8px;color:var(--muted);font-weight:600;white-space:nowrap}
+  .adm-tabs button.active,.adm-tabs button:hover{color:var(--text);background:var(--panel2)}
+  .adm-tabs .cnt{background:var(--red);color:#fff;border-radius:10px;padding:0 6px;font-size:11px;margin-left:4px}
+  .adm-who{margin-left:auto;color:var(--muted);font-size:12px;white-space:nowrap}
+  .adm-main{max-width:1200px;margin:0 auto;padding:18px 16px 60px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+  .card small{display:block;color:var(--muted);font-size:12px;margin-bottom:6px}
+  .card b{font-size:20px}
+  .card span{display:block;color:var(--muted);font-size:12px;margin-top:4px}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+  .bar h2{margin:0 auto 0 0;font-size:18px}
+  .bar select,.bar input{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 10px;font-size:13px;outline:none}
+  .tbl-wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:10px 12px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;white-space:nowrap}
+  tr:last-child td{border-bottom:0}
+  td .sub{color:var(--muted);font-size:12px;margin-top:2px}
+  .num{text-align:right;white-space:nowrap;font-weight:700}
+  .acts{display:flex;gap:6px;flex-wrap:wrap}
+  .acts .btn{padding:6px 10px;font-size:12px}
+  .btn-red{background:var(--red);color:#fff}
+  .pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700;background:var(--panel3);color:var(--muted);white-space:nowrap}
+  .pill.PENDING,.pill.REVIEW{background:#3a2f0b;color:var(--yellow)}
+  .pill.PROCESSING{background:#0f2c4d;color:var(--blue)}
+  .pill.PAID,.pill.ok{background:#123222;color:var(--green)}
+  .pill.REJECTED,.pill.FAILED,.pill.CHARGEBACK,.pill.REFUNDED,.pill.bad{background:#3a1218;color:var(--red)}
+  .key{font-family:ui-monospace,monospace;font-weight:700;letter-spacing:.3px}
+  .copy{margin-left:6px;font-size:11px;color:var(--blue);text-decoration:underline}
+  .empty{padding:30px;text-align:center;color:var(--muted)}
+  .center-box{max-width:380px;margin:60px auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:800px){.grid2{grid-template-columns:1fr}.adm-who{display:none}}
+  .kv2{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+  .kv2 span{color:var(--muted)}
+  .section{margin-top:22px}
+  .section h3{font-size:15px;margin:0 0 10px}
+  .warn{background:#3a2f0b;color:var(--yellow);border-radius:10px;padding:10px 12px;font-size:13px;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header class="adm-top">
+  <a class="logo" href="/"><span class="logo-mark">T</span>Painel</a>
+  <nav class="adm-tabs" id="tabs"></nav>
+  <div class="adm-who" id="who"></div>
+</header>
+<main class="adm-main" id="main"><div class="spinner"></div></main>
+
+<div class="overlay" id="overlay"></div>
+<div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+<div class="toasts" id="toasts"></div>
+<script src="admin.js"></script>
+</body>
+</html>

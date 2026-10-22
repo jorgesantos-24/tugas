@@ -1,0 +1,10 @@
+rules_version = '2';
+// Só o servidor (Admin SDK) acede à base. O navegador e qualquer outra pessoa ficam bloqueados.
+// Cole isto em: Console do Firebase > Firestore Database > Regras > Publicar
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

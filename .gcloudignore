@@ -1,0 +1,17 @@
+# nunca vai para a imagem: chaves e dados locais
+.env
+.env.*
+!.env.example
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+node_modules
+data
+.git
+*.log
+
+# ficheiros do gcloud
+.gcloudignore
+hosting
+firebase.json
+.firebaserc
+.firebase

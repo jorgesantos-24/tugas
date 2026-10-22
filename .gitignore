@@ -1,0 +1,10 @@
+# chaves e dados locais — nunca vão para o GitHub
+.env
+.env.*
+!.env.example
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+data/
+node_modules/
+.firebase/
+*.log
