@@ -328,23 +328,23 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador' },
-  { soon: true }, { soon: true }, { soon: true },
+  { name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: 'img/decola-capa.webp?v=4' },
+  { name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: 'img/mines-capa.webp?v=1' },
+  { soon: true }, { soon: true },
 ];
-const DECOLA_ART = `<img src="img/decola-capa.webp?v=3" class="cg-cover" alt="" aria-hidden="true">`;
 const casinoCard = (g) => g.soon
     ? `<div class="cg-card soon"><div class="cg-art"><span class="cg-lock">🔒</span></div><div class="cg-info"><b>Em breve</b><span>Novo jogo</span></div></div>`
-    : `<a class="cg-card" href="${g.href}"><div class="cg-art">${DECOLA_ART}<span class="cg-play">▶ Jogar</span></div><div class="cg-info"><b>${esc(g.name)}</b><span>${esc(g.tag)} · ${esc(g.desc)}</span></div></a>`;
+    : `<a class="cg-card" href="${g.href}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="" aria-hidden="true"><span class="cg-play">▶ Jogar</span></div><div class="cg-info"><b>${esc(g.name)}</b><span>${esc(g.tag)} · ${esc(g.desc)}</span></div></a>`;
 function homeCasino() {
   if (!S.casino) return '';
-  return `<div class="section-head"><h2>🎰 Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
+  return `<div class="section-head"><h2>Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
     <div class="cg-grid cg-row">${CASINO_GAMES.map(casinoCard).join('')}</div>`;
 }
 function renderCasino() {
   if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
   const card = casinoCard;
   return `<div class="cg-hero"><h1>Cassino</h1></div>
-    <div class="section-head"><h2>Jogos</h2><span class="muted">${CASINO_GAMES.filter((g) => !g.soon).length} disponível</span></div>
+    <div class="section-head"><h2>Jogos</h2><span class="muted">${CASINO_GAMES.filter((g) => !g.soon).length} disponíveis</span></div>
     <div class="cg-grid">${CASINO_GAMES.map(card).join('')}</div>
     <p class="muted" style="font-size:12px;margin-top:18px">18+ · Jogue com responsabilidade. Os seus limites de perda e a pausa da conta valem também para o cassino.</p>`;
 }
@@ -576,9 +576,10 @@ function renderSidebar() {
     html += `</div>`;
   }
   if (S.casino) {
-    html += `<div class="side-title side-casino-title">🎰 Cassino</div>
+    html += `<div class="side-title side-casino-title">Cassino</div>
     <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Todos os jogos<span class="cnt">${CASINO_GAMES.filter((g) => !g.soon).length}</span></button>
-    <a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator<span class="cnt hot">NOVO</span></a>`;
+    <a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator</a>
+    <a class="side-item side-sport" href="/mines"><span class="ic">💎</span>Mines<span class="cnt hot">NOVO</span></a>`;
   }
   $('#sidebar').innerHTML = html;
   $('#liveCountNav').textContent = liveN;

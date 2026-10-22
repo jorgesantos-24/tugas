@@ -1021,13 +1021,17 @@ require('./admin.js')(routes, {
   openBets, M, eventInfo: (id) => events.get(id) || null, VF,
 });
 
-/* Cassino (Decola)
+/* Cassino (Decola e Mines)
    - Teste local: emuladores do Firebase + CASINO_TEST=1 (saldo de teste).
    - Produção (saldo real): CASINO_LIVE=1 e CASINO_CERT=<n.º do certificado do laboratório para esta versão do jogo>. */
 const CASINO_CERT = String(process.env.CASINO_CERT || '').trim().slice(0, 80);
 const CASINO = EMULATOR ? (!!process.env.FIREBASE_AUTH_EMULATOR_HOST && process.env.CASINO_TEST === '1')
   : (process.env.CASINO_LIVE === '1' && CASINO_CERT.length >= 3);
 const crashGame = CASINO ? require('./crash.js')(routes, {
+  db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
+  lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT,
+}) : null;
+const minesGame = CASINO ? require('./mines.js')(routes, {
   db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
   lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT,
 }) : null;
@@ -1044,13 +1048,13 @@ if (EMULATOR) {
 }
 
 /* ---------------- servidor HTTP ---------------- */
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
 const PAGES = { '/': '/index.html', '/admin': '/admin.html', '/termos': '/termos.html', '/privacidade': '/privacidade.html', '/jogo-responsavel': '/jogo-responsavel.html' };
 
 function serveStatic(req, res) {
   let p;
   try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400); res.end(); return; }
-  if (p === '/decola' || p === '/decola.html' || p === '/decola.js' || p === '/decola.css') { if (!CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola') p = '/decola.html'; }
+  if (/^\/(decola|mines)(\.html|\.js|\.css)?$/.test(p)) { if (!CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola' || p === '/mines') p += '.html'; }
   p = PAGES[p] || p;
   const file = path.normalize(path.join(PUB, p));
   if (!file.startsWith(PUB + path.sep) || /app\.old\.js$/.test(file)) { res.writeHead(404); res.end('Não encontrado'); return; }
@@ -1168,5 +1172,6 @@ const server = http.createServer(async (req, res) => {
     setInterval(reconcileDeposits, 30000);
   } else console.warn('Pagamentos: DESLIGADOS — defina BRAVOPAY_API_KEY no .env. Depósitos e saques ficam indisponíveis.');
   if (crashGame) await crashGame.start();
+  if (minesGame) await minesGame.start();
   server.listen(PORT, () => console.log(`\n${SITE.name} a correr em http://localhost:${PORT}   ·   painel da equipa: http://localhost:${PORT}/admin\n`));
 })();
