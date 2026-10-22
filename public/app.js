@@ -12,7 +12,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 
 const S = {
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
-  view: 'home', league: null, sport: null, eventId: null, query: '',
+  view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null,
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
   acceptAnyLocal: lsGet('gl_acceptAny', true),
   user: null, bets: [], tx: [], payments: { live: false },
@@ -264,7 +264,7 @@ function evRow(ev) {
   const goal = ev.goalAt && Date.now() - ev.goalAt < 12000;
   const oddsHtml = ev.state === 'post' ? '' :
     main.map((s) => oddBtn(s, ev)).join('') + '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join('');
-  return `<div class="ev-row ${goal ? 'goal' : ''}" data-ev="${ev.id}">
+  return `<div class="ev-row ${goal ? 'goal' : ''} ${ev.state === 'in' ? 'live' : ''}" data-ev="${ev.id}">
     <div class="ev-time">${timeCell(ev)}</div>
     <div class="ev-teams">${teamLine(ev.home, ev, ev.away)}${teamLine(ev.away, ev, ev.home)}</div>
     <div class="ev-odds">${oddsHtml}</div>
@@ -292,7 +292,16 @@ function leagueBlocks(list) {
 
 function filtered(pred) {
   const q = S.query.trim().toLowerCase();
-  return [...S.events.values()].filter((ev) => pred(ev) && (!q || `${ev.home.name} ${ev.away.name} ${ev.leagueName}`.toLowerCase().includes(q)));
+  const tab = ['home', 'live', 'all'].includes(S.view) && S.sportTab !== 'all' ? S.sportTab : null;
+  return [...S.events.values()].filter((ev) => pred(ev) && (!tab || ev.sport === tab) && (!q || `${ev.home.name} ${ev.away.name} ${ev.leagueName}`.toLowerCase().includes(q)));
+}
+
+function sportTabs() {
+  const evs = [...S.events.values()].filter((e) => e.state !== 'post' && (S.view !== 'live' || e.state === 'in'));
+  const sports = Object.entries(SPORTS).filter(([k]) => evs.some((e) => e.sport === k));
+  if (S.sportTab !== 'all' && !sports.some(([k]) => k === S.sportTab)) S.sportTab = 'all';
+  const btn = (k, label, n) => `<button class="${S.sportTab === k ? 'active' : ''}" data-sporttab="${k}">${label}<span class="tab-cnt">${n}</span></button>`;
+  return `<div class="tabs sport-tabs">${btn('all', 'Todos', evs.length)}${sports.map(([k, sp]) => btn(k, `${sp.icon} ${esc(sp.name)}`, evs.filter((e) => e.sport === k).length)).join('')}</div>`;
 }
 const isToday = (ev) => sameDay(ev.date, new Date());
 const isTomorrow = (ev) => { const t = new Date(); t.setDate(t.getDate() + 1); return sameDay(ev.date, t); };
@@ -319,15 +328,21 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Saque antes de o avião voar embora' },
+  { name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador' },
   { soon: true }, { soon: true }, { soon: true },
 ];
-const DECOLA_ART = `<img src="img/decola-capa.png" class="cg-img" alt="" aria-hidden="true">`;
-function renderCasino() {
-  if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
-  const card = (g) => g.soon
+const DECOLA_ART = `<img src="img/decola-capa.webp?v=3" class="cg-cover" alt="" aria-hidden="true">`;
+const casinoCard = (g) => g.soon
     ? `<div class="cg-card soon"><div class="cg-art"><span class="cg-lock">🔒</span></div><div class="cg-info"><b>Em breve</b><span>Novo jogo</span></div></div>`
     : `<a class="cg-card" href="${g.href}"><div class="cg-art">${DECOLA_ART}<span class="cg-play">▶ Jogar</span></div><div class="cg-info"><b>${esc(g.name)}</b><span>${esc(g.tag)} · ${esc(g.desc)}</span></div></a>`;
+function homeCasino() {
+  if (!S.casino) return '';
+  return `<div class="section-head"><h2>🎰 Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
+    <div class="cg-grid cg-row">${CASINO_GAMES.map(casinoCard).join('')}</div>`;
+}
+function renderCasino() {
+  if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
+  const card = casinoCard;
   return `<div class="cg-hero"><h1>Cassino</h1></div>
     <div class="section-head"><h2>Jogos</h2><span class="muted">${CASINO_GAMES.filter((g) => !g.soon).length} disponível</span></div>
     <div class="cg-grid">${CASINO_GAMES.map(card).join('')}</div>
@@ -351,15 +366,18 @@ function renderMain() {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
       html += homeBanner();
+      html += homeCasino();
+      html += sportTabs();
       const featured = live.filter((e) => e.markets).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
       const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && e.markets);
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
       html += upcoming.length ? leagueBlocks(upcoming) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {
-      const titles = { live: 'Ao vivo', today: 'Hoje', tomorrow: 'Amanhã', results: 'Resultados', league: LEAGUE_BY_KEY[S.league]?.name, sport: SPORTS[S.sport]?.name };
+      const titles = { all: 'Todos os jogos', live: 'Ao vivo', today: 'Hoje', tomorrow: 'Amanhã', results: 'Resultados', league: LEAGUE_BY_KEY[S.league]?.name, sport: SPORTS[S.sport]?.name };
       const preds = {
         live: (e) => e.state === 'in',
+        all: (e) => e.state !== 'post',
         today: (e) => isToday(e) && e.state !== 'post',
         tomorrow: (e) => isTomorrow(e) && e.state === 'pre',
         results: (e) => e.state === 'post',
@@ -367,6 +385,7 @@ function renderMain() {
         sport: (e) => e.sport === S.sport && e.state !== 'post',
       };
       const list = filtered(preds[v]);
+      if (v === 'live' || v === 'all') html += sportTabs();
       html += `<div class="section-head">${v === 'live' ? '<span class="live-dot"></span>' : ''}<h2>${esc(titles[v])}</h2><span class="muted">${list.length} eventos</span></div>`;
       if (v === 'league') {
         const lv = list.filter((e) => e.state === 'in'), pre = list.filter((e) => e.state === 'pre'), post = list.filter((e) => e.state === 'post');
@@ -535,20 +554,31 @@ function renderSidebar() {
   const item = (view, label, cnt) => `<button class="side-item ${S.view === view ? 'active' : ''}" data-view="${view}">${label}<span class="cnt ${view === 'live' && cnt ? 'live' : ''}">${cnt ?? ''}</span></button>`;
   let html = `<div class="side-title">Esportes</div>
     ${item('home', '🏠 Destaques', '')}
-    ${item('live', '<span class="live-dot"></span> Ao Vivo', liveN)}
-    ${item('today', '📅 Hoje', evs.filter((e) => isToday(e) && e.state !== 'post').length)}
-    ${item('tomorrow', '🗓️ Amanhã', evs.filter((e) => isTomorrow(e) && e.state === 'pre').length)}
-    ${item('results', '✅ Resultados', evs.filter((e) => e.state === 'post').length)}`;
+    ${item('live', '<span class="live-dot"></span> Ao Vivo', liveN)}`;
+  html += `<div class="side-title">Modalidades</div>`;
+  html += `<button class="side-item side-sport ${S.view === 'all' ? 'active' : ''}" data-view="all"><span class="ic">🏆</span>Todos<span class="cnt">${evs.filter((e) => e.state !== 'post').length}</span></button>`;
+  const curSport = S.view === 'league' ? LEAGUE_BY_KEY[S.league]?.sport : S.view === 'sport' ? S.sport : null;
   for (const [sk, sp] of Object.entries(SPORTS)) {
     const lgs = LEAGUES.filter((l) => l.sport === sk && S.leagueEvents.get(l.key)?.size);
     if (!lgs.length) continue;
-    html += `<div class="side-title">${sp.icon} ${sp.name}</div>`;
-    if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${evs.filter((e) => e.sport === sk && e.state !== 'post').length}</span></button>`;
+    const open = S.openSport === sk;
+    const sLive = evs.filter((e) => e.sport === sk && e.state === 'in').length;
+    const sCnt = evs.filter((e) => e.sport === sk && e.state !== 'post').length;
+    html += `<button class="side-item side-sport ${open ? 'open' : ''} ${curSport === sk ? 'cur' : ''}" data-togglesport="${sk}"><span class="ic">${sp.icon}</span>${esc(sp.name)}<span class="cnt ${sLive ? 'live' : ''}">${sLive ? '● ' + sLive : sCnt}</span><span class="chev">›</span></button>`;
+    if (!open) continue;
+    html += `<div class="side-leagues">`;
+    if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
     for (const l of lgs) {
       const le = evs.filter((e) => e.league === l.key);
       const lv = le.filter((e) => e.state === 'in').length;
       html += `<button class="side-item ${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
     }
+    html += `</div>`;
+  }
+  if (S.casino) {
+    html += `<div class="side-title side-casino-title">🎰 Cassino</div>
+    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Todos os jogos<span class="cnt">${CASINO_GAMES.filter((g) => !g.soon).length}</span></button>
+    <a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator<span class="cnt hot">NOVO</span></a>`;
   }
   $('#sidebar').innerHTML = html;
   $('#liveCountNav').textContent = liveN;
@@ -920,6 +950,8 @@ document.addEventListener('click', async (e) => {
   }
   if (d.league) { e.preventDefault(); go('league', { league: d.league }); return; }
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
+  if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; renderSidebar(); return; }
+  if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
   if (d.view) { e.preventDefault(); go(d.view); return; }
   if (d.ev) { S.prevView = S.view === 'event' ? S.prevView : { view: S.view, league: S.league, sport: S.sport }; go('event', { eventId: d.ev }); return; }
   if (!d.action) return;

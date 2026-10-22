@@ -1,5 +1,5 @@
 /* DECOLA — jogo crash (cores do Golaço: verde e amarelo) */
-.dc-body{--dc-acc:#19c26b;--dc-acc2:#13a95c;--dc-plane:#ffc83d;--dc-bad:#ff4d5e;--dc-cash:#ffb23d;--dc-sky:#08111a}
+.dc-body{--dc-acc:#19c26b;--dc-acc2:#13a95c;--dc-plane:#ffc83d;--dc-bad:#ff4d5e;--dc-cash:#ffb23d;--dc-sky:#04200f}
 .dc-test{background:#3b2b00;color:var(--yellow);text-align:center;font-weight:700;font-size:12px;padding:6px 12px;border-bottom:1px solid #5a4300}
 .dc{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;max-width:1320px;margin:0 auto;padding:14px 16px 24px}
 .dc-game{min-width:0;display:flex;flex-direction:column;gap:12px}
