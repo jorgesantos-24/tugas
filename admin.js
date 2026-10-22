@@ -364,4 +364,5 @@ module.exports = function adminRoutes(routes, D) {
       return { logs: qs.docs.map((d) => d.data()) };
     },
   });
+  return { requireAdmin, log };
 };

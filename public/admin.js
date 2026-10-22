@@ -1,5 +1,5 @@
 'use strict';
-/* Painel da equipa: pedidos de saque, depósitos, jogadores e registo de ações. */
+/* Painel da equipa: pedidos de saque, depósitos, apostas, esportes e mercados, jogadores e registo de ações. */
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -32,7 +32,8 @@ function closeModal() { $('#modal').classList.remove('show'); $('#overlay').clas
 const formErr = (msg) => { const el = $('#formErr'); if (el) { el.textContent = msg; el.style.display = msg ? 'block' : 'none'; } };
 const pill = (status, label) => `<span class="pill ${esc(status)}">${esc(label || status)}</span>`;
 
-const A = { me: null, view: 'saques', wdFilter: 'OPEN', depFilter: 'ALL', betFilter: 'late', userQuery: '', userId: null, summary: null };
+const A = { me: null, view: 'saques', wdFilter: 'OPEN', depFilter: 'ALL', betFilter: 'late', userQuery: '', userId: null, summary: null,
+  catTab: 'eventos', catArchived: false, catEv: null, cat: null, catData: null, realQuery: '' };
 
 /* ---------- entrada ---------- */
 async function boot() {
@@ -56,8 +57,8 @@ function showLogin() {
 function renderTabs() {
   const s = A.summary;
   const open = s ? s.withdrawals.pending + s.withdrawals.processing : 0;
-  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
-  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
+  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Esportes e mercados', 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
+  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') || (k === 'mercados' && A.view === 'mercado-ev') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
   document.title = (open ? `(${open}) ` : '') + 'Painel da equipa';
 }
 async function loadSummary() {
@@ -75,6 +76,8 @@ async function render() {
     if (A.view === 'saques') m.innerHTML = await viewWithdrawals();
     else if (A.view === 'depositos') m.innerHTML = await viewDeposits();
     else if (A.view === 'apostas') m.innerHTML = await viewBets();
+    else if (A.view === 'mercados') m.innerHTML = await viewCatalog();
+    else if (A.view === 'mercado-ev') m.innerHTML = A.catEv ? await viewCatEvent() : await viewCatalog();
     else if (A.view === 'jogadores') m.innerHTML = await viewUsers();
     else if (A.view === 'jogador') m.innerHTML = await viewUser();
     else if (A.view === 'registo') m.innerHTML = await viewLogs();
@@ -270,6 +273,200 @@ function updateSettlePreview() {
   el.innerHTML = `${money(payout)} <span class="sub">(saldo do jogador ${diff >= 0 ? '+' : ''}${money(diff)})</span>`;
 }
 
+/* ---------- esportes e mercados ---------- */
+const EV_STATE = { pre: ['PENDING', 'por começar'], in: ['PROCESSING', 'ao vivo'], post: ['', 'encerrado'] };
+const MK_STATE = { open: ['ok', 'aberto'], suspended: ['REVIEW', 'suspenso'], settled: ['', 'liquidado'] };
+const RES_PILL = { won: ['ok', 'Ganhou'], lost: ['bad', 'Perdeu'], void: ['', 'Devolvida'] };
+const SPORT_ICONS = ['🎾', '🏐', '🥊', '🥋', '🏎️', '🎮', '🏓', '🏉', '🤾', '⛳', '🏇', '🎯', '🏸', '🚴', '🏊', '🎱'];
+const fmtOddIn = (o) => String(o.toFixed(2));
+const localInput = (t) => { const d = new Date(t); return new Date(t - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
+const evState = (ev) => pill(EV_STATE[ev.state][0], EV_STATE[ev.state][1] + (ev.score ? ` ${ev.score.h}-${ev.score.a}` : '') + (ev.state === 'in' && ev.clock ? ' · ' + ev.clock : ''));
+const evName = (ev) => `${ev.home}${ev.away ? ' x ' + ev.away : ''}`;
+async function catalog(fresh) { if (fresh || !A.cat) A.cat = await api('GET', '/api/admin/catalog'); return A.cat; }
+
+async function viewCatalog() {
+  const subs = [['eventos', 'Eventos da equipa'], ['jogos', 'Mercados em jogos reais'], ['campeonatos', 'Modalidades e campeonatos']];
+  const head = `<div class="bar"><h2>Esportes e mercados</h2></div>
+    <div class="subtabs">${subs.map(([k, l]) => `<button class="${A.catTab === k ? 'active' : ''}" data-cattab="${k}">${l}</button>`).join('')}</div>`;
+  if (A.catTab === 'jogos') return head + await viewRealEvents();
+  const cat = await catalog(true);
+  return head + (A.catTab === 'campeonatos' ? viewLeagues(cat) : viewManualEvents(cat));
+}
+
+function viewManualEvents(cat) {
+  const list = cat.events.filter((ev) => ev.archived === A.catArchived);
+  const rows = list.map((ev) => `<tr>
+    <td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${evState(ev)}</td>
+    <td>${ev.markets ? `${ev.open} abertos de ${ev.markets}` : '<span class="sub">nenhum</span>'}${ev.toSettle && ev.state === 'post' ? `<div class="sub" style="color:var(--yellow)">${ev.toSettle} por liquidar</div>` : ''}</td>
+    <td class="num">${ev.bets || ''}</td>
+    <td><button class="btn btn-green" style="padding:6px 10px;font-size:12px" data-catev="${esc(ev.id)}">Gerir mercados</button></td></tr>`).join('');
+  return `<div class="bar"><h2 style="font-size:15px">Eventos criados pela equipa</h2>
+      <select id="catArchived"><option value="0" ${A.catArchived ? '' : 'selected'}>Ativos</option><option value="1" ${A.catArchived ? 'selected' : ''}>Arquivados</option></select>
+      <button class="btn btn-green" data-action="newEvent">+ Novo evento</button></div>
+    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>Início</th><th>Campeonato</th><th>Evento</th><th>Estado</th><th>Mercados</th><th class="num">Apostas abertas</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${A.catArchived ? 'Nenhum evento arquivado.' : 'Ainda não há eventos. Crie um com "+ Novo evento" (pode ser num campeonato da ESPN ou num criado por si em "Modalidades e campeonatos").'}</div>`}</div>
+    <p class="note" style="text-align:left">Num evento da equipa, todos os mercados e odds são definidos por si. O placar e o estado (por começar / ao vivo / encerrado) também são atualizados à mão. As apostas são pagas quando <b>liquidar</b> cada mercado.</p>`;
+}
+
+function viewLeagues(cat) {
+  const vis = (x) => (x.hidden ? pill('REVIEW', 'oculto') : pill('ok', 'no site'));
+  const sportRows = cat.sports.map((s) => `<tr><td style="font-size:18px">${esc(s.icon)}</td><td><b>${esc(s.name)}</b></td><td>${s.builtin ? '<span class="sub">automática (ESPN)</span>' : 'equipa'}</td><td class="num">${s.leagues}</td>
+    <td>${s.builtin ? '' : vis(s)}</td>
+    <td>${s.builtin ? '' : `<div class="acts"><button class="btn btn-ghost" data-sportedit="${esc(s.key)}">Editar</button><button class="btn btn-ghost" data-sporthide="${esc(s.key)}">${s.hidden ? 'Mostrar' : 'Ocultar'}</button><button class="btn btn-ghost" data-sportdel="${esc(s.key)}">Apagar</button></div>`}</td></tr>`).join('');
+  const mine = cat.leagues.filter((l) => !l.builtin), auto = cat.leagues.filter((l) => l.builtin);
+  const lgRows = mine.map((l) => `<tr><td>${esc(l.sportName)}</td><td><b>${esc(l.name)}</b></td><td>${esc(l.country || '—')}</td><td class="num">${l.events}</td><td>${vis(l)}</td>
+    <td><div class="acts"><button class="btn btn-ghost" data-lgedit="${esc(l.key)}">Editar</button><button class="btn btn-ghost" data-lghide="${esc(l.key)}">${l.hidden ? 'Mostrar' : 'Ocultar'}</button><button class="btn btn-ghost" data-lgdel="${esc(l.key)}">Apagar</button></div></td></tr>`).join('');
+  return `<div class="bar"><h2 style="font-size:15px">Modalidades</h2><button class="btn btn-green" data-action="newSport">+ Nova modalidade</button></div>
+    <div class="tbl-wrap"><table><thead><tr><th></th><th>Modalidade</th><th>Origem</th><th class="num">Campeonatos</th><th>Estado</th><th></th></tr></thead><tbody>${sportRows}</tbody></table></div>
+    <div class="section"><div class="bar"><h2 style="font-size:15px">Campeonatos da equipa</h2><button class="btn btn-green" data-action="newLeague">+ Novo campeonato</button></div>
+    <div class="tbl-wrap">${mine.length ? `<table><thead><tr><th>Modalidade</th><th>Campeonato</th><th>País/região</th><th class="num">Eventos</th><th>Estado</th><th></th></tr></thead><tbody>${lgRows}</tbody></table>` : '<div class="empty">Nenhum campeonato criado pela equipa.</div>'}</div></div>
+    <p class="note" style="text-align:left">Modalidades e campeonatos novos aparecem no menu do site assim que tiverem eventos. Campeonatos automáticos da ESPN (${auto.length}): ${esc(auto.map((l) => l.name).join(', '))}.</p>`;
+}
+
+async function viewRealEvents() {
+  const { events } = await api('GET', '/api/admin/catalog/real');
+  const q = A.realQuery.trim().toLowerCase();
+  const list = events.filter((ev) => !q || `${ev.home} ${ev.away} ${ev.leagueName}`.toLowerCase().includes(q)).slice(0, 200);
+  const rows = list.map((ev) => `<tr><td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${evState(ev)}</td>
+    <td>${ev.markets ? `${ev.markets}${ev.toSettle ? ` · <span style="color:var(--yellow)">${ev.toSettle} por liquidar</span>` : ''}` : '<span class="sub">—</span>'}</td><td class="num">${ev.bets || ''}</td>
+    <td><button class="btn ${ev.markets ? 'btn-green' : 'btn-ghost'}" style="padding:6px 10px;font-size:12px" data-catev="${esc(ev.id)}">${ev.markets ? 'Gerir mercados' : '+ Mercados'}</button></td></tr>`).join('');
+  return `<div class="bar"><h2 style="font-size:15px">Jogos do feed da ESPN</h2>
+      <form id="realSearch" style="display:flex;gap:8px"><input name="q" value="${esc(A.realQuery)}" placeholder="Equipa ou campeonato" style="min-width:220px"><button class="btn btn-ghost" type="submit">Filtrar</button></form></div>
+    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>Início</th><th>Campeonato</th><th>Jogo</th><th>Estado</th><th>Mercados da equipa</th><th class="num">Apostas abertas</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Nenhum jogo encontrado.</div>'}</div>
+    <p class="note" style="text-align:left">Os mercados da ESPN (resultado, totais, handicap...) continuam automáticos. Aqui acrescenta mercados seus a um jogo real (ex.: escanteios, cartões, marca primeiro), com odds e liquidação feitas pela equipa.</p>`;
+}
+
+async function viewCatEvent() {
+  const d = await api('GET', '/api/admin/catalog/event?id=' + encodeURIComponent(A.catEv));
+  A.catData = d;
+  const ev = d.event;
+  let info;
+  if (ev.manual) {
+    const cat = await catalog();
+    info = `<div class="card"><form id="evForm" data-id="${esc(ev.id)}" class="ev-form">
+      <label>Campeonato<select class="mini" name="league">${leagueOptions(cat, ev.league)}</select></label>
+      <label>Casa / participante 1<input class="mini" name="home" value="${esc(ev.home)}" required></label>
+      <label>Fora / participante 2<input class="mini" name="away" value="${esc(ev.away)}" required></label>
+      <label>Início<input class="mini" type="datetime-local" name="startsAt" value="${localInput(ev.startsAt)}" required></label>
+      <label>Estado<select class="mini" name="state">${Object.entries(EV_STATE).map(([k, [, l]]) => `<option value="${k}" ${ev.state === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label>Placar casa<input class="mini" name="scoreH" type="number" min="0" max="999" value="${ev.score ? ev.score.h : ''}"></label>
+      <label>Placar fora<input class="mini" name="scoreA" type="number" min="0" max="999" value="${ev.score ? ev.score.a : ''}"></label>
+      <label>Tempo (texto livre)<input class="mini" name="clock" value="${esc(ev.clock)}" placeholder="Ex.: 2º tempo 67'"></label>
+      <button class="btn btn-green" type="submit">Guardar evento</button>
+    </form><div class="form-err" id="formErr"></div>
+    <div class="acts" style="margin-top:10px"><button class="btn btn-ghost" data-archive="${esc(ev.id)}" data-val="${ev.archived ? '0' : '1'}">${ev.archived ? 'Reativar no site' : 'Arquivar (tirar do site)'}</button></div></div>`;
+  } else {
+    info = `<div class="card"><div class="kv2"><span>Campeonato</span><b>${esc(ev.leagueName)}</b></div><div class="kv2"><span>Início</span><b>${dt(ev.startsAt)}</b></div>
+      <div class="kv2"><span>Estado (feed da ESPN)</span><b>${evState(ev)}</b></div>
+      <p class="sub" style="margin:8px 0 0">Jogo real: placar e mercados automáticos vêm da ESPN. Os mercados abaixo são só os da equipa.</p></div>`;
+  }
+  const markets = d.markets.map(marketCard).join('');
+  const pendingN = d.markets.filter((m) => m.status !== 'settled').length;
+  return `<div class="bar"><h2>${esc(evName(ev))}</h2><span class="sub">${esc(ev.leagueName)}</span><button class="btn btn-ghost" data-go="mercados">← Voltar</button></div>
+    ${ev.state === 'post' && pendingN ? `<div class="warn">O evento terminou e há ${pendingN} mercado(s) por liquidar. As apostas só são pagas depois de liquidar.</div>` : ''}
+    ${info}
+    <div class="section"><div class="bar"><h2 style="font-size:15px">Mercados (${d.markets.length})</h2>
+      ${pendingN ? `<button class="btn btn-ghost" data-mkstatus="*|suspended">Suspender todos</button><button class="btn btn-ghost" data-mkstatus="*|open">Abrir todos</button>` : ''}
+      <button class="btn btn-green" data-action="newMarket">+ Novo mercado</button></div>
+    ${markets || '<div class="tbl-wrap"><div class="empty">Sem mercados. Crie o primeiro com "+ Novo mercado".</div></div>'}</div>`;
+}
+
+function marketCard(m) {
+  const [cls, label] = MK_STATE[m.status];
+  const betsN = m.sels.reduce((s, x) => s + x.bets, 0);
+  if (m.status === 'settled') {
+    return `<div class="mk-card settled"><div class="mk-head"><b class="grow">${esc(m.name)}</b>${pill(cls, label)}<span class="sub">${dt(m.settledAt)} · ${esc(m.settledBy || '')}</span></div>
+      <table><tbody>${m.sels.map((s) => `<tr><td>${esc(s.name)}</td><td class="num">${s.odds.toFixed(2)}</td><td>${pill(...RES_PILL[s.result])}</td></tr>`).join('')}</tbody></table>
+      ${m.note ? `<div class="sub" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
+  }
+  const rows = m.sels.map((s) => selRow(s)).join('');
+  return `<form class="mk-card mkForm" data-mk="${esc(m.id)}">
+    <div class="mk-head"><input class="mini grow" name="name" value="${esc(m.name)}" required maxlength="80" title="Nome do mercado">${pill(cls, label)}
+      <label class="sub" style="display:flex;gap:6px;align-items:center">Aposta máx. R$<input class="mini" name="maxStake" style="width:90px" value="${m.maxStake != null ? String(m.maxStake).replace('.', ',') : ''}" placeholder="sem limite"></label></div>
+    <div class="tbl-wrap" style="border:0"><table><thead><tr><th>Seleção</th><th>Odd</th><th class="num">Apostas</th><th class="num">Apostado</th><th class="num" title="Prêmio a pagar se esta seleção ganhar (apostas simples)">A pagar se ganhar</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    <div class="mk-foot"><button type="button" class="btn btn-ghost" data-seladd="${esc(m.id)}">+ Seleção</button>
+      <button type="submit" class="btn btn-green">Guardar odds</button>
+      <button type="button" class="btn btn-ghost" data-mkstatus="${esc(m.id)}|${m.status === 'open' ? 'suspended' : 'open'}">${m.status === 'open' ? 'Suspender' : 'Abrir'}</button>
+      <button type="button" class="btn btn-ghost" data-mksettle="${esc(m.id)}">Liquidar</button>
+      ${betsN ? '' : `<button type="button" class="btn btn-ghost" data-mkdel="${esc(m.id)}">Apagar</button>`}
+      <span class="sub">${betsN ? `${betsN} seleção(ões) em apostas abertas` : 'sem apostas'}${m.maxStake != null ? ` · máx. ${money(m.maxStake)} por aposta` : ''}</span></div>
+  </form>`;
+}
+const selRow = (s = {}) => `<tr data-sel="${esc(s.id || '')}">
+  <td><input class="mini" name="sname" value="${esc(s.name || '')}" required maxlength="60" style="width:100%"></td>
+  <td><input class="mini odd-in" name="sodds" value="${s.odds ? fmtOddIn(s.odds) : ''}" required inputmode="decimal" placeholder="1.85"></td>
+  <td class="num">${s.bets || ''}</td><td class="num">${s.bets ? money(s.stake) : ''}</td><td class="num">${s.bets ? money(s.singles) : ''}</td>
+  <td>${s.bets ? '' : '<button type="button" class="rm" data-selrm="1" title="Remover">×</button>'}</td></tr>`;
+
+function leagueOptions(cat, cur) {
+  const groups = new Map();
+  for (const l of cat.leagues) { if (!groups.has(l.sportName)) groups.set(l.sportName, []); groups.get(l.sportName).push(l); }
+  return [...groups].map(([sp, ls]) => `<optgroup label="${esc(sp)}">${ls.map((l) => `<option value="${esc(l.key)}" ${l.key === cur ? 'selected' : ''}>${esc(l.name)}${l.builtin ? '' : ' (equipa)'}${l.hidden ? ' — oculto' : ''}</option>`).join('')}</optgroup>`).join('');
+}
+async function newEventModal() {
+  const cat = await catalog(true);
+  const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(t.getHours() + 2);
+  openModal(`<h3>Novo evento</h3><p class="sub">Escolha o campeonato (pode criar um novo em "Modalidades e campeonatos"). Depois adicione os mercados.</p>
+    <form id="newEvForm"><label class="lbl">Campeonato *</label><select class="inp" name="league" required>${leagueOptions(cat, cat.leagues.find((l) => !l.builtin)?.key)}</select>
+      <label class="lbl">Casa / participante 1 *</label><input class="inp" name="home" required maxlength="60">
+      <label class="lbl">Fora / participante 2 *</label><input class="inp" name="away" required maxlength="60">
+      <label class="lbl">Início *</label><input class="inp" type="datetime-local" name="startsAt" value="${localInput(t.getTime())}" required>
+      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Criar evento</button></form>`);
+}
+function sportModal(s) {
+  openModal(`<h3>${s ? 'Editar modalidade' : 'Nova modalidade'}</h3>
+    <form id="sportForm" data-key="${esc(s?.key || '')}" data-hidden="${s?.hidden ? '1' : ''}"><label class="lbl">Nome *</label><input class="inp" name="name" value="${esc(s?.name || '')}" required maxlength="40" placeholder="Ex.: Tênis, Vôlei, MMA, eSports">
+      <label class="lbl">Ícone (emoji)</label><input class="inp" name="icon" id="sportIcon" value="${esc(s?.icon || '')}" maxlength="8" placeholder="🏅">
+      <div class="icons">${SPORT_ICONS.map((i) => `<button type="button" data-icon="${i}">${i}</button>`).join('')}</div>
+      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Guardar</button></form>`);
+}
+async function leagueModal(l) {
+  const cat = await catalog();
+  openModal(`<h3>${l ? 'Editar campeonato' : 'Novo campeonato'}</h3>
+    <form id="leagueForm" data-key="${esc(l?.key || '')}" data-hidden="${l?.hidden ? '1' : ''}"><label class="lbl">Modalidade *</label>
+      <select class="inp" name="sport" required>${cat.sports.filter((s) => !s.hidden || s.key === l?.sport).map((s) => `<option value="${esc(s.key)}" ${s.key === l?.sport ? 'selected' : ''}>${esc(s.icon)} ${esc(s.name)}</option>`).join('')}</select>
+      <label class="lbl">Nome *</label><input class="inp" name="name" value="${esc(l?.name || '')}" required maxlength="60" placeholder="Ex.: Campeonato Carioca, Roland Garros, UFC 320">
+      <label class="lbl">País / região</label><input class="inp" name="country" value="${esc(l?.country || '')}" maxlength="40" placeholder="Ex.: Brasil, Mundo">
+      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Guardar</button></form>`);
+}
+function marketModal() {
+  const ev = A.catData.event;
+  const tpls = [
+    ['Vencedor (1X2)', 'Vencedor', `${ev.home}; \nEmpate; \n${ev.away}; `],
+    ['Vencedor (sem empate)', 'Vencedor', `${ev.home}; \n${ev.away}; `],
+    ['Sim / Não', '', 'Sim; \nNão; '],
+    ['Mais / Menos', 'Total — 2.5', 'Mais de 2.5; \nMenos de 2.5; '],
+    ['Handicap', 'Handicap', `${ev.home} -1.5; \n${ev.away} +1.5; `],
+  ];
+  openModal(`<h3>Novo mercado</h3><p class="sub">${esc(evName(ev))}</p>
+    <form id="newMkForm"><label class="lbl">Nome do mercado *</label><input class="inp" name="name" id="mkName" required maxlength="80" placeholder="Ex.: Total de escanteios, Marca primeiro, Vencedor do set">
+      <label class="lbl">Seleções e odds * (uma por linha: <b>Nome; odd</b>)</label>
+      <div class="tpl">${tpls.map(([l, n, v], i) => `<button type="button" data-tpl="${i}" data-name="${esc(n)}" data-val="${esc(v)}">${esc(l)}</button>`).join('')}</div>
+      <textarea class="inp" name="sels" id="mkSels" required placeholder="Flamengo; 1.85&#10;Empate; 3.40&#10;Palmeiras; 4.20"></textarea>
+      <label class="lbl">Aposta máxima por aposta (R$, opcional)</label><input class="inp" name="maxStake" placeholder="sem limite">
+      <label class="check"><input type="checkbox" name="open" checked> Abrir já para apostas (senão fica suspenso)</label>
+      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit">Criar mercado</button></form>`);
+}
+function parseSelLines(text) {
+  return text.split('\n').map((l) => l.trim()).filter(Boolean).map((line, i) => {
+    const m = line.match(/^(.+?)\s*[;@\t|]\s*([\d.,]+)\s*$/);
+    if (!m) throw new Error(`Linha ${i + 1} ("${line}"): falta a odd. Use "Nome; 1.85".`);
+    return { name: m[1].trim(), odds: m[2].replace(',', '.') };
+  });
+}
+function settleMkModal(id) {
+  const m = A.catData.markets.find((x) => x.id === id);
+  if (!m) return;
+  const betsN = m.sels.reduce((s, x) => s + x.bets, 0);
+  openModal(`<h3>Liquidar mercado</h3><p class="sub">${esc(evName(A.catData.event))} · <b>${esc(m.name)}</b><br>${betsN ? `${betsN} seleção(ões) em apostas abertas serão decididas agora.` : 'Sem apostas abertas neste mercado.'} Não pode ser desfeito (só corrigindo aposta a aposta).</p>
+    <form id="settleMkForm" data-id="${esc(m.id)}">
+      ${m.sels.map((s) => `<div class="kv2" style="align-items:center"><span style="color:var(--text)"><b>${esc(s.name)}</b> @${s.odds.toFixed(2)}<br><small class="muted">${s.bets ? `${s.bets} aposta(s) · a pagar se ganhar ${money(s.singles)}` : 'sem apostas'}</small></span>
+        <select class="inp" style="width:140px" data-res="${esc(s.id)}"><option value="">—</option><option value="won">Ganhou</option><option value="lost">Perdeu</option><option value="void">Devolvida</option></select></div>`).join('')}
+      <div class="acts" style="margin:10px 0"><button type="button" class="btn btn-ghost" data-allvoid="1">Anular mercado (tudo devolvido)</button></div>
+      <label class="lbl">Observação (opcional, fica no registo)</label><input class="inp" name="note" maxlength="300" placeholder="Ex.: resultado oficial confirmado na súmula">
+      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Liquidar e pagar apostas</button></form>`);
+}
+
 /* ---------- eventos ---------- */
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, tr[data-user]');
@@ -285,6 +482,43 @@ document.addEventListener('click', async (e) => {
     if (d.wdClaim) { await api('POST', '/api/admin/withdrawals/claim', { id: d.wdClaim }); toast('Saque assumido. Faça o PIX e marque como pago.', 'ok'); return render(); }
     if (d.wdRelease) { await api('POST', '/api/admin/withdrawals/release', { id: d.wdRelease }); toast('Saque devolvido à fila'); return render(); }
     if (d.settle) { const [uid, id, expect] = d.settle.split('|'); return settleModal(uid, id, expect); }
+    // esportes e mercados
+    if (d.cattab) { A.catTab = d.cattab; return render(); }
+    if (d.catev) return go('mercado-ev', { catEv: d.catev });
+    if (d.action === 'newEvent') return newEventModal();
+    if (d.action === 'newSport') return sportModal(null);
+    if (d.action === 'newLeague') return leagueModal(null);
+    if (d.action === 'newMarket') return marketModal();
+    if (d.icon) { $('#sportIcon').value = d.icon; return; }
+    if (d.tpl) { $('#mkSels').value = d.val; if (d.name && !$('#mkName').value) $('#mkName').value = d.name; $('#mkSels').focus(); return; }
+    if (d.sportedit) return sportModal(A.cat.sports.find((x) => x.key === d.sportedit));
+    if (d.lgedit) return leagueModal(A.cat.leagues.find((x) => x.key === d.lgedit));
+    if (d.sporthide) {
+      const s = A.cat.sports.find((x) => x.key === d.sporthide);
+      await api('POST', '/api/admin/catalog/sport', { key: s.key, name: s.name, icon: s.icon, hidden: !s.hidden });
+      toast(s.hidden ? 'Modalidade visível no site' : 'Modalidade oculta do site', 'ok'); return render();
+    }
+    if (d.lghide) {
+      const l = A.cat.leagues.find((x) => x.key === d.lghide);
+      await api('POST', '/api/admin/catalog/league', { key: l.key, name: l.name, country: l.country, sport: l.sport, hidden: !l.hidden });
+      toast(l.hidden ? 'Campeonato visível no site' : 'Campeonato oculto do site', 'ok'); return render();
+    }
+    if (d.sportdel) { if (!confirm('Apagar esta modalidade?')) return; await api('POST', '/api/admin/catalog/sport/delete', { key: d.sportdel }); toast('Modalidade apagada', 'ok'); return render(); }
+    if (d.lgdel) { if (!confirm('Apagar este campeonato?')) return; await api('POST', '/api/admin/catalog/league/delete', { key: d.lgdel }); toast('Campeonato apagado', 'ok'); return render(); }
+    if (d.archive) {
+      await api('POST', '/api/admin/catalog/event/archive', { id: d.archive, archived: d.val === '1' });
+      toast(d.val === '1' ? 'Evento arquivado (saiu do site)' : 'Evento de volta ao site', 'ok'); return render();
+    }
+    if (d.mkstatus) {
+      const [id, status] = d.mkstatus.split('|');
+      await api('POST', '/api/admin/catalog/market/status', { evId: A.catEv, id, status });
+      toast(status === 'open' ? 'Aberto para apostas' : 'Suspenso', 'ok'); return render();
+    }
+    if (d.mksettle) return settleMkModal(d.mksettle);
+    if (d.mkdel) { if (!confirm('Apagar este mercado?')) return; await api('POST', '/api/admin/catalog/market/delete', { evId: A.catEv, id: d.mkdel }); toast('Mercado apagado', 'ok'); return render(); }
+    if (d.seladd) { t.closest('form').querySelector('tbody').insertAdjacentHTML('beforeend', selRow()); return; }
+    if (d.selrm) { t.closest('tr').remove(); return; }
+    if (d.allvoid) { document.querySelectorAll('select[data-res]').forEach((x) => { x.value = 'void'; }); return; }
     if (d.wdPay) return payModal(d.wdPay);
     if (d.wdReject) return rejectModal(d.wdReject);
     if (d.depCredit) {
@@ -319,6 +553,9 @@ $('#overlay').onclick = closeModal;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 document.addEventListener('change', (e) => {
   if (e.target.matches('select[data-leg]')) return updateSettlePreview();
+  // liquidar mercado: ao marcar uma vencedora, as que ainda não têm resultado passam a "Perdeu"
+  if (e.target.matches('select[data-res]') && e.target.value === 'won') document.querySelectorAll('select[data-res]').forEach((x) => { if (!x.value) x.value = 'lost'; });
+  if (e.target.id === 'catArchived') { A.catArchived = e.target.value === '1'; render(); }
   if (e.target.id === 'betFilter') { A.betFilter = e.target.value; render(); }
   if (e.target.id === 'wdFilter') { A.wdFilter = e.target.value; render(); }
   if (e.target.id === 'depFilter') { A.depFilter = e.target.value; render(); }
@@ -331,6 +568,32 @@ document.addEventListener('submit', async (e) => {
   try {
     if (f.id === 'loginForm') { await api('POST', '/api/login', fd); return boot(); }
     if (f.id === 'userSearch') { A.userQuery = fd.q.trim(); return render(); }
+    if (f.id === 'realSearch') { A.realQuery = fd.q; return render(); }
+    if (f.id === 'sportForm') { await api('POST', '/api/admin/catalog/sport', { key: f.dataset.key || undefined, name: fd.name, icon: fd.icon, hidden: !!f.dataset.hidden }); closeModal(); toast('Modalidade guardada', 'ok'); }
+    if (f.id === 'leagueForm') { await api('POST', '/api/admin/catalog/league', { key: f.dataset.key || undefined, name: fd.name, country: fd.country, sport: fd.sport, hidden: !!f.dataset.hidden }); closeModal(); toast('Campeonato guardado', 'ok'); }
+    if (f.id === 'newEvForm') {
+      const r = await api('POST', '/api/admin/catalog/event', { league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: 'pre' });
+      closeModal(); toast('Evento criado. Agora adicione os mercados.', 'ok'); return go('mercado-ev', { catEv: r.id });
+    }
+    if (f.id === 'evForm') {
+      await api('POST', '/api/admin/catalog/event', { id: f.dataset.id, league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: fd.state, scoreH: fd.scoreH, scoreA: fd.scoreA, clock: fd.clock });
+      toast('Evento atualizado', 'ok');
+    }
+    if (f.id === 'newMkForm') {
+      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, name: fd.name, sels: parseSelLines(fd.sels), maxStake: fd.maxStake, open: !!fd.open });
+      closeModal(); toast('Mercado criado', 'ok');
+    }
+    if (f.classList.contains('mkForm')) {
+      const sels = [...f.querySelectorAll('tr[data-sel]')].map((tr) => ({ id: tr.dataset.sel || undefined, name: tr.querySelector('[name=sname]').value, odds: tr.querySelector('[name=sodds]').value }));
+      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, id: f.dataset.mk, name: fd.name, maxStake: fd.maxStake, sels });
+      toast('Mercado guardado', 'ok');
+    }
+    if (f.id === 'settleMkForm') {
+      const results = Object.fromEntries([...f.querySelectorAll('select[data-res]')].map((x) => [x.dataset.res, x.value]));
+      if (Object.values(results).some((v) => !v)) { formErr('Escolha o resultado de todas as seleções.'); if (btn) btn.disabled = false; return; }
+      await api('POST', '/api/admin/catalog/market/settle', { evId: A.catEv, id: f.dataset.id, results, note: fd.note });
+      closeModal(); toast('Mercado liquidado. As apostas foram decididas.', 'ok');
+    }
     if (f.id === 'payForm') { await api('POST', '/api/admin/withdrawals/pay', { id: f.dataset.id, proof: fd.proof, note: fd.note }); closeModal(); toast('Saque marcado como pago ✓', 'ok'); }
     if (f.id === 'rejectForm') { await api('POST', '/api/admin/withdrawals/reject', { id: f.dataset.id, reason: fd.reason }); closeModal(); toast('Saque recusado; valor devolvido ao jogador', 'ok'); }
     if (f.id === 'depForm') { await api('POST', '/api/admin/deposits/resolve', { id: f.dataset.id, action: f.dataset.act, amount: parseMoney(fd.amount), reason: fd.reason }); closeModal(); toast('Feito', 'ok'); }
@@ -343,7 +606,11 @@ document.addEventListener('submit', async (e) => {
     if (f.id === 'adjForm') { await api('POST', '/api/admin/user/adjust', { id: f.dataset.id, amount: parseMoney(fd.amount), reason: fd.reason }); closeModal(); toast('Saldo ajustado', 'ok'); }
     if (f.id === 'blockForm') { await api('POST', '/api/admin/user/block', { id: f.dataset.id, blocked: f.dataset.val === '1', reason: fd.reason }); closeModal(); toast('Feito', 'ok'); }
     render();
-  } catch (err) { formErr(err.message); if (btn) btn.disabled = false; if (!$('#formErr')) toast(err.message, 'err'); }
+  } catch (err) {
+    if (btn) btn.disabled = false;
+    // os cartões de mercado não têm caixa de erro própria
+    if (f.classList.contains('mkForm') || !$('#formErr')) toast(err.message, 'err'); else formErr(err.message);
+  }
 });
 
 boot();

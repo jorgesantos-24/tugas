@@ -98,6 +98,7 @@ async function loadEvents() {
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     S.etag = r.headers.get('ETag');
+    setCatalog(d.catalog); // modalidades e campeonatos criados pela equipa
     const list = d.events.map((ev) => ({
       ...ev, date: new Date(ev.date),
       suspendedUntil: ev.suspendedUntil ? ev.suspendedUntil + offset : 0,
@@ -148,7 +149,7 @@ function toggleSel(key) {
   if (i >= 0) { S.slip.splice(i, 1); delete S.stakes[key]; }
   else {
     const { ev, sel } = findSel(key);
-    if (!sel || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
+    if (!sel || sel.locked || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
     if (S.slip.length >= 20) { toast('Máximo de 20 seleções', 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
     if (S.slip.length >= 2 && !hasConflict()) S.slipMode = 'multiple';
@@ -161,7 +162,7 @@ const hasConflict = () => new Set(S.slip.map((s) => s.evId)).size !== S.slip.len
 function slipState() {
   return S.slip.map((s) => {
     const { ev, sel } = findSel(s.key);
-    return { s, ev, sel, suspended: !sel || isSuspended(ev), changed: !!sel && sel.odds !== s.odds };
+    return { s, ev, sel, suspended: !sel || sel.locked || isSuspended(ev), changed: !!sel && sel.odds !== s.odds };
   });
 }
 
@@ -239,7 +240,7 @@ function oddBtn(sel, ev, opts = {}) {
   const mv = S.moves.get(sel.key);
   const move = mv && mv.until > Date.now() ? mv.dir : '';
   const label = esc(opts.wide ? sel.name : sel.lbl);
-  if (isSuspended(ev)) return `<span class="odd lock ${opts.cls || ''}" title="Suspenso"><span class="lbl">${label}</span><span class="val">🔒</span></span>`;
+  if (isSuspended(ev) || sel.locked) return `<span class="odd lock ${opts.cls || ''}" title="Suspenso"><span class="lbl">${label}</span><span class="val">🔒</span></span>`;
   return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}" data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(sel.odds)}</span></button>`;
 }
 
@@ -256,14 +257,25 @@ function teamLine(t, ev, other) {
   return `<div class="team-line ${won ? 'won' : ''}">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span class="nm">${esc(t.name)}</span>${showScore ? `<span class="sc">${t.score}</span>` : ''}</div>`;
 }
 
+// seleções que aparecem na linha do jogo: 1X2 / vencedor; sem estes, o primeiro mercado da equipa (até 3 seleções)
+function mainSels(ev, sels) {
+  const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
+  if (!by('ml', 'home')) {
+    const first = sels.find((s) => s.market === 'custom');
+    if (first) return sels.filter((s) => s.market === 'custom' && s.pick.split('.')[0] === first.pick.split('.')[0]).slice(0, 3);
+  }
+  return ev.sport === 'soccer' ? [by('ml', 'home'), by('ml', 'draw'), by('ml', 'away')] : [by('ml', 'home'), by('ml', 'away')];
+}
+
 function evRow(ev) {
   const sels = selections(ev);
   const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
-  const main = ev.sport === 'soccer' ? [by('ml', 'home'), by('ml', 'draw'), by('ml', 'away')] : [by('ml', 'home'), by('ml', 'away')];
-  const tot = [by('total', 'over'), by('total', 'under')];
+  const main = mainSels(ev, sels);
+  const custom = LEAGUE_BY_KEY[ev.league]?.custom;
+  const tot = custom ? [] : [by('total', 'over'), by('total', 'under')];
   const goal = ev.goalAt && Date.now() - ev.goalAt < 12000;
   const oddsHtml = ev.state === 'post' ? '' :
-    main.map((s) => oddBtn(s, ev)).join('') + '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join('');
+    main.map((s) => oddBtn(s, ev)).join('') + (custom ? '' : '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join(''));
   return `<div class="ev-row ${goal ? 'goal' : ''} ${ev.state === 'in' ? 'live' : ''}" data-ev="${ev.id}">
     <div class="ev-time">${timeCell(ev)}</div>
     <div class="ev-teams">${teamLine(ev.home, ev, ev.away)}${teamLine(ev.away, ev, ev.home)}</div>
@@ -283,7 +295,7 @@ function leagueBlocks(list) {
     const allPost = evs.every((e) => e.state === 'post');
     return `<section class="league">
       <div class="league-head">${SPORTS[lg.sport].icon} ${esc(lg.name)} <span class="country">· ${esc(lg.country)}</span>
-        ${allPost ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
+        ${allPost || lg.custom ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
       </div>
       ${evs.map(evRow).join('')}
     </section>`;
@@ -307,7 +319,7 @@ const isToday = (ev) => sameDay(ev.date, new Date());
 const isTomorrow = (ev) => { const t = new Date(); t.setDate(t.getDate() + 1); return sameDay(ev.date, t); };
 
 function heroCard(ev) {
-  const sels = selections(ev).filter((s) => s.market === 'ml');
+  const sels = mainSels(ev, selections(ev)).filter(Boolean);
   return `<div class="hero-card" data-ev="${ev.id}">
     <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center"><span class="live-dot"></span>${esc(ev.clock || '')}</span></div>
     <div class="hero-teams">
@@ -368,9 +380,9 @@ function renderMain() {
       html += homeBanner();
       html += homeCasino();
       html += sportTabs();
-      const featured = live.filter((e) => e.markets).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
+      const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
-      const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && e.markets);
+      const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && (e.markets || e.cm));
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
       html += upcoming.length ? leagueBlocks(upcoming) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {

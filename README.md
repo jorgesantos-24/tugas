@@ -70,6 +70,14 @@ e diz exatamente o que falta.
 - **Depósitos**: todos os PIX e os que ficaram *em revisão* (valor pago diferente do pedido) para creditar ou descartar.
 - **Jogadores**: procurar por e-mail, CPF, nome ou ID; ver saldo, extrato, apostas, depósitos e saques;
   **ajustar saldo** (com motivo) e **bloquear/desbloquear** a conta.
+- **Esportes e mercados**:
+  - *Modalidades e campeonatos* — criar modalidades novas (Tênis, MMA, eSports...) e campeonatos; ocultar/mostrar no site.
+  - *Eventos da equipa* — criar um evento num campeonato (da equipa ou da ESPN) e atualizar à mão o estado
+    (por começar / ao vivo / encerrado), o placar e o tempo.
+  - *Mercados em jogos reais* — acrescentar mercados próprios (escanteios, cartões...) a um jogo do feed da ESPN.
+  - Em cada evento: criar mercados com seleções e **odds definidas pela equipa**, aposta máxima opcional, mudar odds,
+    suspender/abrir (um ou todos), ver as apostas e o valor a pagar por seleção e **liquidar** (Ganhou / Perdeu / Devolvida).
+    As apostas desse mercado são pagas logo a seguir. Mercados com apostas em aberto não podem ser apagados.
 - **Registo**: todas as ações da equipa (quem, quando, o quê).
 
 ## 5. Jogo responsável (área do jogador)
@@ -100,6 +108,9 @@ Saem do ar quando o jogo começa. Ao contratar um fornecedor de odds, estes merc
 | `sessions` | Sessões de login |
 | `webhookEvents` | Webhooks da BravoPay já processados |
 | `adminLogs` | Ações da equipa |
+| `catalogSports`, `catalogLeagues` | Modalidades e campeonatos criados pela equipa |
+| `manualEvents` | Eventos criados pela equipa, com os seus mercados (`markets`) |
+| `manualMarkets/{id do jogo}` | Mercados da equipa em jogos reais da ESPN |
 
 Valores em **centavos** (`11895` = R$ 118,95). As contas (e-mail/senha) ficam em *Authentication*.
 
@@ -132,6 +143,7 @@ Valores em **centavos** (`11895` = R$ 118,95). As contas (e-mail/senha) ficam em
 |---|---|
 | `server.js` | Servidor: contas, sessões, carteira, apostas, liquidação, depósitos, pedidos de saque, jogo responsável |
 | `admin.js` | API do painel da equipa |
+| `catalog.js` | API do painel: modalidades, campeonatos, eventos e mercados da equipa |
 | `firebase.js` | Ligação ao Firebase (Firestore + Authentication + e-mails) |
 | `bravopay.js` | Cliente da API BravoPay e verificação da assinatura dos webhooks |
 | `scripts/verificar.js` | `npm run verificar` — confere a configuração |

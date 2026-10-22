@@ -92,6 +92,11 @@ const col = {
   cpfs: () => db.collection('cpfs'),
   webhookEvents: () => db.collection('webhookEvents'),
   adminLogs: () => db.collection('adminLogs'),
+  // catálogo gerido pela equipa no painel (modalidades, campeonatos, eventos e mercados manuais)
+  catSports: () => db.collection('catalogSports'),
+  catLeagues: () => db.collection('catalogLeagues'),
+  manualEvents: () => db.collection('manualEvents'),
+  manualMarkets: () => db.collection('manualMarkets'), // mercados extra em jogos reais (ESPN), por id do jogo
 };
 
 /* Confere se as regras do Firestore bloqueiam o acesso público (sem login).

@@ -45,6 +45,20 @@ const LEAGUES = [
   ]);
 const LEAGUE_BY_KEY = Object.fromEntries(LEAGUES.map((l, i) => [l.key, { ...l, order: i }]));
 
+/* ---------- catálogo da equipa ----------
+   Modalidades e campeonatos criados no painel /admin. Entram nos mesmos objetos (SPORTS, LEAGUES,
+   LEAGUE_BY_KEY), depois dos da ESPN; os campeonatos da equipa não têm "path" (não vêm do feed). */
+const BUILTIN_SPORTS = new Set(Object.keys(SPORTS));
+const BUILTIN_LEAGUES = LEAGUES.length;
+function setCatalog(cat) {
+  for (const k of Object.keys(SPORTS)) if (!BUILTIN_SPORTS.has(k)) delete SPORTS[k];
+  for (const s of cat?.sports || []) if (!BUILTIN_SPORTS.has(s.key)) SPORTS[s.key] = { name: s.name, icon: s.icon, custom: true };
+  LEAGUES.length = BUILTIN_LEAGUES;
+  for (const l of cat?.leagues || []) if (SPORTS[l.sport]) LEAGUES.push({ key: l.key, name: l.name, country: l.country, sport: l.sport, path: null, custom: true });
+  for (const k of Object.keys(LEAGUE_BY_KEY)) delete LEAGUE_BY_KEY[k];
+  LEAGUES.forEach((l, i) => { LEAGUE_BY_KEY[l.key] = { ...l, order: i }; });
+}
+
 const round2 = (n) => Math.round(n * 100) / 100;
 
 /* ---------- odds ---------- */
@@ -267,8 +281,7 @@ const MARKET_NAMES = {
 };
 
 function selections(ev) {
-  const m = ev.markets; const out = [];
-  if (!m) return out;
+  const m = ev.markets || {}; const out = []; // sem odds da ESPN pode ainda haver mercados da equipa
   const H = ev.home.short, A = ev.away.short, soc = ev.sport === 'soccer';
   if (m.ml) {
     out.push({ market: 'ml', pick: 'home', lbl: soc ? '1' : H, name: H, odds: m.ml.home });
@@ -318,11 +331,20 @@ function selections(ev) {
     s.key = `${ev.id}|${s.market}|${s.pick}` + (s.line != null ? `|${s.line}` : '');
     s.marketName = MARKET_NAMES[s.market](ev, s.line);
   }
+  // mercados da equipa (odds definidas à mão no painel); suspensos aparecem com cadeado
+  for (const cm of ev.cm || []) {
+    for (const c of cm.sels) {
+      out.push({
+        market: 'custom', pick: `${cm.id}.${c.id}`, lbl: c.name, name: c.name, odds: c.odds, marketName: cm.name,
+        locked: cm.status !== 'open', maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
+      });
+    }
+  }
   return out.filter((s) => s.odds);
 }
 
 function isSuspended(ev, now = Date.now()) {
-  return !ev || ev.state === 'post' || !ev.markets || (ev.suspendedUntil || 0) > now;
+  return !ev || ev.state === 'post' || (!ev.markets && !ev.cm?.length) || (ev.suspendedUntil || 0) > now;
 }
 
 /* ---------- liquidação ---------- */
@@ -389,7 +411,7 @@ function cashoutFactor(bet, findSel, now = Date.now()) {
   for (const leg of bet.legs) {
     if (leg.result) { f *= outcomeFactor(leg.value, leg.odds); continue; }
     const { ev, sel } = findSel(leg.key);
-    if (!sel || isSuspended(ev, now)) return null;
+    if (!sel || sel.locked || isSuspended(ev, now)) return null;
     f *= leg.odds / sel.odds;
   }
   if (f <= 0) return null;
@@ -397,7 +419,7 @@ function cashoutFactor(bet, findSel, now = Date.now()) {
 }
 
 const Markets = {
-  SPORTS, LEAGUES, LEAGUE_BY_KEY, round2, am2dec, parseOdds, parseEvent, STATUS_PT, translateDetail,
+  SPORTS, LEAGUES, LEAGUE_BY_KEY, setCatalog, round2, am2dec, parseOdds, parseEvent, STATUS_PT, translateDetail,
   fmtLine, MARKET_NAMES, selections, isSuspended, regulationScore, legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, DERIVED_MARKETS, deriveSoccer, scoreMatrix, sumP, fitModel, priceWithMargin, ladder, devig,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Markets;

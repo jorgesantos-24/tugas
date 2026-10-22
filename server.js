@@ -16,7 +16,10 @@
      cpfs/{cpf}                        garante 1 CPF por conta
      sessions/{sha256(token)}          sessões de login
      webhookEvents/{id}                webhooks da BravoPay já processados
-     adminLogs/{id}                    tudo o que a equipa faz no painel */
+     adminLogs/{id}                    tudo o que a equipa faz no painel
+     catalogSports/{key}, catalogLeagues/{key}   modalidades e campeonatos criados pela equipa
+     manualEvents/{id}                 eventos criados pela equipa (com os seus mercados)
+     manualMarkets/{evId}              mercados extra da equipa em jogos reais da ESPN */
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -201,19 +204,20 @@ function addTx(w, uid, type, amount, ref, extra = {}) {
 }
 
 // mantém em memória o resultado de uma consulta do Firestore, em tempo real
-function watch(query, map, label, onReady) {
+function watch(query, map, label, onReady, onChange) {
   let ready = false;
   query.onSnapshot((snap) => {
     for (const ch of snap.docChanges()) {
       if (ch.type === 'removed') map.delete(ch.doc.id); else map.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() });
     }
+    if (onChange) onChange();
     if (!ready) { ready = true; onReady && onReady(); }
   }, (err) => {
     console.error(`[Firebase] Ligação em tempo real (${label}) caiu: ${err.message}. A religar em 5s...`);
-    setTimeout(() => watch(query, map, label, ready ? null : onReady), 5000);
+    setTimeout(() => watch(query, map, label, ready ? null : onReady, onChange), 5000);
   });
 }
-const watchReady = (query, map, label) => new Promise((ok) => watch(query, map, label, ok));
+const watchReady = (query, map, label, onChange) => new Promise((ok) => watch(query, map, label, ok, onChange));
 
 const openBets = new Map();        // apostas em aberto (todas as contas)
 const pendingDeposits = new Map(); // PIX à espera de pagamento
@@ -229,6 +233,7 @@ async function fetchJSON(url) {
   return r.json();
 }
 async function fetchLeague(lg, date) {
+  if (!lg || !lg.path) return null; // campeonato da equipa: não vem da ESPN
   try {
     const d = await fetchJSON(`${API}${lg.path}/scoreboard${date ? `?dates=${date}` : ''}`);
     return (d.events || []).map((e) => M.parseEvent(e, lg)).filter(Boolean);
@@ -248,6 +253,7 @@ function mergeEvents(list) {
       if (scored) { ev.suspendedUntil = t + 20000; ev.goalAt = t; }
       else { ev.suspendedUntil = old.suspendedUntil; ev.goalAt = old.goalAt; }
     }
+    ev.cm = extraMarketsOf(ev.id);
     events.set(ev.id, ev);
   }
 }
@@ -262,11 +268,11 @@ async function refresh(full) {
     if (full) {
       // todas as ligas: ontem (resultados), hoje, amanhã e depois de amanhã (calendário da ESPN)
       const days = [...new Set([etDay(t - DAY), etDay(t), etDay(t + DAY), etDay(t + 2 * DAY)])];
-      for (const l of M.LEAGUES) for (const d of days) jobs.push(fetchLeague(l, d));
+      for (const l of M.LEAGUES) if (l.path) for (const d of days) jobs.push(fetchLeague(l, d));
     } else {
       // só as ligas com jogos ao vivo / a começar / com apostas em aberto, no dia certo de cada jogo
       const want = new Map();
-      const add = (lg, ts) => { if (!M.LEAGUE_BY_KEY[lg]) return; if (!want.has(lg)) want.set(lg, new Set()); want.get(lg).add(etDay(ts)); };
+      const add = (lg, ts) => { if (!M.LEAGUE_BY_KEY[lg]?.path) return; if (!want.has(lg)) want.set(lg, new Set()); want.get(lg).add(etDay(ts)); };
       for (const ev of events.values()) {
         const dt = ev.date - t;
         if (ev.state === 'in' || (ev.state === 'pre' && dt < 45 * 60000 && dt > -6 * 3600000)) add(ev.league, +ev.date);
@@ -279,9 +285,9 @@ async function refresh(full) {
       mergeEvents(res.flat());
       if (res.length) lastFeedOk = now();
     }
-    if (full) for (const [id, ev] of events) if (t - ev.date > 36 * 3600000) events.delete(id);
+    if (full) for (const [id, ev] of events) if (!ev.manual && t - ev.date > 36 * 3600000) events.delete(id);
     feedVersion++; feedCache = null;
-    await settleBets();
+    await settleQueued();
   } catch (e) {
     console.error('Erro ao atualizar feed:', e.message);
   } finally { refreshing = false; }
@@ -298,7 +304,7 @@ function liveSnapshot(evIds) {
   return snap;
 }
 async function refreshEvents(evIds) {
-  const pairs = new Set([...evIds].map((id) => events.get(id)).filter(Boolean).map((ev) => `${ev.league}|${etDay(+ev.date)}`));
+  const pairs = new Set([...evIds].map((id) => events.get(id)).filter((ev) => ev && !ev.manual).map((ev) => `${ev.league}|${etDay(+ev.date)}`));
   const res = await Promise.all([...pairs].map((p) => { const [lg, d] = p.split('|'); return M.LEAGUE_BY_KEY[lg] ? fetchLeague(M.LEAGUE_BY_KEY[lg], d) : null; }));
   const list = res.filter(Boolean).flat();
   if (list.length) { mergeEvents(list); feedVersion++; feedCache = null; }
@@ -323,9 +329,70 @@ function findSel(key) {
 function feedPayload() {
   if (!feedCache) {
     const list = [...events.values()].map(({ goalAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
-    feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, events: list }) };
+    feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, catalog: catalogCache, events: list }) };
   }
   return feedCache;
+}
+
+/* ---------------- catálogo da equipa ----------------
+   Modalidades, campeonatos, eventos e mercados criados no painel /admin. Ficam em memória
+   (ligação em tempo real ao Firestore) e entram no feed ao lado dos jogos da ESPN.
+   Os mercados da equipa são liquidados quando a equipa marca o resultado no painel. */
+const catSports = new Map(), catLeagues = new Map();
+const manualEvents = new Map();  // eventos da equipa (cada um com os seus mercados)
+const manualMarkets = new Map(); // id do jogo da ESPN -> { markets } (mercados extra em jogos reais)
+let catalogCache = null;
+
+// o que o site vê de cada mercado: só os abertos e suspensos, sem resultados
+function pubMarkets(list) {
+  const out = (list || []).filter((m) => m.status !== 'settled')
+    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, sels: m.sels.map((s) => ({ id: s.id, name: s.name, odds: s.odds })) }));
+  return out.length ? out : null;
+}
+const extraMarketsOf = (evId) => pubMarkets(manualMarkets.get(evId)?.markets);
+// mercados da equipa de um evento (manual ou da ESPN), com resultados
+const teamMarkets = (evId) => (manualEvents.get(evId) || manualMarkets.get(evId))?.markets || [];
+
+function publicCatalog() {
+  const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt;
+  const sports = [...catSports.values()].filter((s) => !s.hidden).sort(byOrder).map((s) => ({ key: s.id, name: s.name, icon: s.icon }));
+  const visible = (k) => (M.SPORTS[k] && !M.SPORTS[k].custom) || sports.some((s) => s.key === k);
+  const leagues = [...catLeagues.values()].filter((l) => !l.hidden && visible(l.sport)).sort(byOrder)
+    .map((l) => ({ key: l.id, name: l.name, country: l.country || '', sport: l.sport }));
+  return { sports, leagues };
+}
+
+function manualToEvent(d) {
+  const lg = M.LEAGUE_BY_KEY[d.league];
+  const side = (name, score, id) => ({ id, name, short: name, logo: '', score: d.state === 'pre' ? null : score ?? 0, form: '' });
+  return {
+    id: d.id, manual: true, league: d.league, leagueName: lg.name, country: lg.country, sport: lg.sport, path: null,
+    date: new Date(d.startsAt), state: d.state, completed: d.state === 'post', statusName: '',
+    clock: d.clock || (d.state === 'post' ? 'Encerrado' : d.state === 'in' ? 'Ao vivo' : undefined),
+    home: side(d.home, d.score?.h, 'h'), away: side(d.away, d.score?.a, 'a'), details: [], venue: '', markets: null, cm: pubMarkets(d.markets),
+  };
+}
+
+// reconstrói tudo o que depende do catálogo (corre a cada mudança no Firestore)
+function applyCatalog() {
+  catalogCache = publicCatalog();
+  M.setCatalog(catalogCache);
+  for (const [id, ev] of events) if (ev.manual) events.delete(id);
+  for (const d of manualEvents.values()) if (!d.archived && M.LEAGUE_BY_KEY[d.league]) events.set(d.id, manualToEvent(d));
+  for (const ev of events.values()) if (!ev.manual) ev.cm = extraMarketsOf(ev.id);
+  feedVersion++; feedCache = null;
+}
+
+// seleção de um mercado da equipa: fica decidida quando a equipa liquida o mercado
+const CUSTOM_RESULT = { won: 1, lost: -1, void: 0 };
+function settleCustomLeg(leg) {
+  const [mId, sId] = String(leg.pick).split('.');
+  const mk = teamMarkets(leg.evId).find((m) => m.id === mId);
+  if (!mk || mk.status !== 'settled') return false;
+  const r = mk.sels.find((s) => s.id === sId)?.result || 'void'; // seleção removida: devolvida
+  leg.result = r; leg.value = CUSTOM_RESULT[r] ?? 0;
+  leg.final = mk.sels.filter((s) => s.result === 'won').map((s) => s.name).join(', ') || 'anulado';
+  return true;
 }
 
 /* ---------------- liquidação ---------------- */
@@ -365,6 +432,7 @@ async function settleBets() {
       let changed = false;
       for (const leg of legs) {
         if (leg.result) continue;
+        if (leg.market === 'custom') { if (settleCustomLeg(leg)) changed = true; continue; }
         let ev = events.get(leg.evId);
         if (!ev && now() - row.placedAt > 3 * 3600000) ev = await eventFromSummary(leg);
         // futebol: só paga se a segunda fonte (API-Football) confirmar o placar da ESPN
@@ -391,6 +459,9 @@ async function settleBets() {
     } catch (e) { console.error(`Erro ao liquidar aposta ${row.id}:`, e.message); }
   }
 }
+// uma liquidação de cada vez (o feed e o painel podem pedir ao mesmo tempo)
+let settleRun = Promise.resolve();
+const settleQueued = () => (settleRun = settleRun.then(settleBets, settleBets));
 
 /* ---------------- depósitos (BravoPay) ---------------- */
 const DEP_MIN = toCents(process.env.DEPOSIT_MIN || 20), DEP_MAX = 5000000; // mínimo R$ 20 (configurável), máximo R$ 50.000
@@ -838,7 +909,7 @@ const routes = {
     let live = false;
     for (const tk of parsed) for (const k of tk.keys) {
       const { ev, sel } = findSel(k);
-      if (!sel || M.isSuspended(ev)) fail(409, 'Uma das seleções está suspensa. Remova-a do boletim.');
+      if (!sel || sel.locked || M.isSuspended(ev)) fail(409, 'Uma das seleções está suspensa. Remova-a do boletim.');
       if (ev.state === 'in') live = true;
     }
     if (userLocks.has(u.id)) fail(429, 'Aguarde a confirmação da aposta anterior.');
@@ -859,8 +930,9 @@ const routes = {
         if (liveReason && tk.keys.some((k) => snap.has(String(k).split('|')[0]))) { rejected.push({ index: i, reason: liveReason }); continue; }
         for (let j = 0; j < tk.keys.length; j++) {
           const { ev, sel } = findSel(tk.keys[j]);
-          if (!sel || M.isSuspended(ev)) { reason = 'mercado suspenso'; break; }
+          if (!sel || sel.locked || M.isSuspended(ev)) { reason = 'mercado suspenso'; break; }
           if (!acceptAny && tk.seen[j] != null && Number(tk.seen[j]) !== sel.odds) { reason = 'odds alteradas'; break; }
+          if (sel.maxStake && tk.stake > sel.maxStake) { reason = `aposta máxima no mercado "${sel.marketName}": ${brl(sel.maxStake)}`; break; }
           legs.push({
             key: sel.key, evId: ev.id, league: ev.league, path: ev.path, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null,
             name: sel.name, marketName: sel.marketName, event: `${ev.home.short} x ${ev.away.short}`, leagueName: ev.leagueName,
@@ -1015,10 +1087,15 @@ const routes = {
 };
 
 // painel da equipa (/admin)
-require('./admin.js')(routes, {
+const ADM = require('./admin.js')(routes, {
   db, col, auth, FieldValue, runTx, addTx, getUser, dirty, fail, now, brl, fromCents, toCents, dayStart, dayKey, DAY,
   requireUser, authInfo, authState, endSessions, openWithdrawals, pendingDeposits, depositWindow, ADMIN_EMAILS, BP, SITE,
   openBets, M, eventInfo: (id) => events.get(id) || null, VF,
+});
+// painel: modalidades, campeonatos, eventos e mercados da equipa
+require('./catalog.js')(routes, {
+  col, runTx, fail, now, fromCents, toCents, M, requireAdmin: ADM.requireAdmin, log: ADM.log,
+  events, openBets, catSports, catLeagues, manualEvents, manualMarkets, applyCatalog, settle: settleQueued,
 });
 
 /* Cassino (Decola)
@@ -1150,6 +1227,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (!ADMIN_EMAILS.size) console.warn('[Admin] Nenhum administrador definido. Ponha ADMIN_EMAILS=seu@email no .env para usar o painel /admin.');
   await Promise.all([
+    watchReady(col.catSports(), catSports, 'modalidades', applyCatalog),
+    watchReady(col.catLeagues(), catLeagues, 'campeonatos', applyCatalog),
+    watchReady(col.manualEvents(), manualEvents, 'eventos da equipa', applyCatalog),
+    watchReady(col.manualMarkets(), manualMarkets, 'mercados da equipa', applyCatalog),
     watchReady(col.openBets(), openBets, 'apostas abertas'),
     watchReady(col.deposits().where('status', '==', 'PENDING'), pendingDeposits, 'depósitos pendentes'),
     watchReady(col.withdrawals().where('status', 'in', ['PENDING', 'PROCESSING']), openWithdrawals, 'pedidos de saque'),
