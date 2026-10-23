@@ -363,8 +363,11 @@ const casinoCard = (g) =>
   `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
 function homeCasino() {
   if (!S.casino) return '';
-  return `<div class="section-head"><h2>Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
-    <div class="cg-grid cg-row">${casinoGames().map(casinoCard).join('')}</div>`;
+  const cards = casinoGames().map(casinoCard).join('');
+  // data-key: o bloco só é recriado quando a lista de jogos muda (ver renderMain)
+  return `<div id="homeCasino" data-key="${esc(casinoGames().map((g) => g.abrir || g.id).join(','))}">
+    <div class="section-head"><h2>Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
+    <div class="cg-grid cg-row">${cards}</div></div>`;
 }
 function renderCasino() {
   if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
@@ -379,6 +382,7 @@ function renderMain() {
   const main = $('#main');
   if (!S.loaded) return;
   if (S.failed && !S.events.size) {
+    S.lastMainHtml = null;
     main.innerHTML = `<div class="empty-state">Não foi possível conectar ao servidor.<br>Verifique se o servidor está rodando (iniciar.bat) — tentaremos de novo automaticamente.</div>`;
     return;
   }
@@ -424,7 +428,18 @@ function renderMain() {
       }
     }
   }
+  // nada mudou: não mexe na página (evita que as imagens pisquem a cada atualização)
+  if (html === S.lastMainHtml && main.firstChild) { S.keepScroll = true; return; }
+  S.lastMainHtml = html;
+  // reaproveita o bloco do cassino já carregado (imagens e posição da fila mantêm-se)
+  const oldCasino = main.querySelector('#homeCasino');
+  const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
+  const newCasino = main.querySelector('#homeCasino');
+  if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
+    newCasino.replaceWith(oldCasino);
+    oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
+  }
   if (S.keepScroll) window.scrollTo(0, scrollY);
   S.keepScroll = true;
 }
