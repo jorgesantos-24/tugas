@@ -85,7 +85,7 @@ async function loadMe() {
     const d = await api('GET', '/api/me');
     G.user = d.user; G.testMode = !!d.testMode;
     $('#testBar').hidden = !G.testMode;
-    if (d.casinoCert) $('#certInfo').textContent = 'Mines · certificado ' + d.casinoCert;
+    if (d.minesCert) $('#certInfo').textContent = 'Mines · certificado ' + d.minesCert;
   } catch { /* tenta de novo depois */ }
   renderWallet();
 }

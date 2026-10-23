@@ -2,7 +2,7 @@
 /* MINES — tabuleiro 5x5 com minas escondidas. O jogador escolhe quantas minas (1 a 24), aposta e vai abrindo casas:
    cada diamante sobe o multiplicador; uma mina perde a aposta. Pode sacar a qualquer momento depois da 1.ª casa.
    O server.js só carrega este módulo junto com o cassino (emuladores com CASINO_TEST=1, ou produção com
-   CASINO_LIVE=1 + CASINO_CERT). Mudanças à matemática ou ao código do jogo exigem nova certificação.
+   MINES_LIVE=1 + MINES_CERT — chave própria). Mudanças à matemática ou ao código do jogo exigem nova certificação.
 
    Justo e verificável: no início de cada jogo mostramos sha256(semente); no fim revelamos a semente.
    As minas = as primeiras N casas de um baralhamento feito com HMAC-SHA256(semente, idDoJogo:i).

@@ -16,7 +16,8 @@
      cpfs/{cpf}                        garante 1 CPF por conta
      sessions/{sha256(token)}          sessões de login
      webhookEvents/{id}                webhooks da BravoPay já processados
-     adminLogs/{id}                    tudo o que a equipa faz no painel */
+     adminLogs/{id}                    tudo o que a equipa faz no painel
+     pgsoftTxns/{txn_id}               rodadas dos slots já processadas (idempotência) */
 
 const http = require('node:http');
 const fs = require('node:fs');
@@ -665,7 +666,9 @@ const routes = {
     user: ctx.user ? publicUser(ctx.user) : null,
     liveDelay: LIVE_DELAY_MS / 1000, liveCashoutDelay: LIVE_CASHOUT_DELAY_MS / 1000,
     payments: BP.enabled ? { live: true, depositMin: DEP_MIN / 100, depositMax: DEP_MAX / 100, withdrawMin: WD_MIN / 100, withdrawEta: SITE.withdrawEta } : { live: false },
-    casino: CASINO, casinoCert: CASINO ? CASINO_CERT || null : null, testMode: EMULATOR,
+    casino: CASINO || MINES || SLOTS, games: { decola: CASINO, mines: MINES, slots: SLOTS },
+    slotsGames: SLOTS ? SLOTS_GAMES : [],
+    casinoCert: CASINO ? CASINO_CERT || null : null, minesCert: MINES ? MINES_CERT || null : null, testMode: EMULATOR,
   }),
 
   'POST /api/account/verify-email': async (ctx) => {
@@ -1014,6 +1017,109 @@ const routes = {
   },
 };
 
+/* ---------------- Slots PG Soft — carteira seamless ----------------
+   O jogo corre num serviço à parte (api-pgsoft-node). Este bloco é a "carteira":
+   o jogo pergunta o saldo e comunica cada rodada; o Firestore é a única fonte de verdade.
+   Vale para TODOS os jogos da lista: o saldo e as apostas são comuns a todos. */
+const PGS_BASE = String(process.env.PGSOFT_API_URL || '').replace(/\/$/, '');
+const PGS_AGENT = String(process.env.PGSOFT_AGENT_TOKEN || '');
+const PGS_SECRET = String(process.env.PGSOFT_SECRET || '');
+const SLOTS = !!(PGS_BASE && PGS_AGENT && PGS_SECRET);
+
+// jogos disponíveis (o código tem de existir no serviço dos jogos)
+const SLOTS_GAMES_MAP = {
+  'fortune-tiger': 'Fortune Tiger',
+  'fortune-ox': 'Fortune Ox',
+  'fortune-dragon': 'Fortune Dragon',
+  'fortune-rabbit': 'Fortune Rabbit',
+  'fortune-mouse': 'Fortune Mouse',
+  'bikini-paradise': 'Bikini Paradise',
+  'jungle-delight': 'Jungle Delight',
+  'ganesha-gold': 'Ganesha Gold',
+  'double-fortune': 'Double Fortune',
+  'dragon-tiger-luck': 'Dragon Tiger Luck',
+  'ninja-raccoon': 'Ninja Raccoon Frenzy',
+  'lucky-clover': 'Lucky Clover Lady',
+  'ultimate-striker': 'Ultimate Striker',
+  'prosper-ftree': 'Prosperity Fortune Tree',
+  'chicky-run': 'Chicky Run',
+  'butterfly-blossom': 'Butterfly Blossom',
+  'piggy-gold': 'Piggy Gold',
+  'wild-bandito': 'Wild Bandito',
+  'zombie-outbreak': 'Zombie Outbreak',
+  'majestic-ts': 'Majestic Treasures',
+  'thai-river': 'Thai River Wonders',
+  'gdn-ice-fire': 'Guardians of Ice & Fire',
+  'rise-apollo': 'Rise of Apollo',
+  'wild-bounty-sd': 'Wild Bounty Showdown',
+  'treasures-aztec': 'Treasures of Aztec',
+  'three-cz-pigs': 'Three Crazy Piggies',
+};
+const SLOTS_GAMES = Object.keys(SLOTS_GAMES_MAP);
+const slotName = (code) => SLOTS_GAMES_MAP[code] || 'Slot';
+
+// 1) O jogo pergunta o saldo (antes de cada rodada)
+routes['POST /api/pgsoft/gold_api/user_balance'] = async (ctx) => {
+  const code = String(ctx.body.user_code || '');
+  const u = await getUser(code, true);
+  if (!u || u.blocked) return { msg: 'INVALID_USER' };
+  return { msg: 'SUCCESS', user_balance: fromCents(u.balance), currency: 'BRL' };
+};
+
+// 2) O jogo comunica o resultado da rodada (débito/crédito). Idempotente por txn_id.
+routes['POST /api/pgsoft/gold_api/game_callback'] = async (ctx) => {
+  const b = ctx.body || {};
+  const s = b.slot || {};
+  const uid = String(b.user_code || '');
+  const txnId = String(s.txn_id || '') || payId('T');
+  const bet = toCents(s.bet || 0);
+  const win = toCents(s.win || 0);
+
+  const txRef = db.collection('pgsoftTxns').doc(txnId);
+  if ((await txRef.get()).exists) { // já processámos esta rodada
+    const cur = await getUser(uid, true);
+    return { status: 1, msg: 'SUCCESS', user_balance: cur ? fromCents(cur.balance) : 0 };
+  }
+
+  let novo = 0;
+  await runTx([uid], async (t) => {
+    const ref = col.user(uid);
+    const fu = (await t.get(ref)).data();
+    if (!fu) fail(400, 'Utilizador inexistente.');
+    novo = Math.max(0, fu.balance + win - bet);
+    t.set(txRef, { uid, bet, win, delta: win - bet, game: s.game_code || null, at: now() });
+    t.update(ref, { balance: novo });
+    if (bet) addTx(t, uid, `${slotName(s.game_code)}: aposta`, -bet, txnId);
+    if (win) addTx(t, uid, `${slotName(s.game_code)}: prémio`, win, txnId);
+  });
+  return { status: 1, msg: 'SUCCESS', user_balance: fromCents(novo) };
+};
+
+// 3) O site chama isto para abrir o jogo escolhido
+routes['POST /api/slots/launch'] = async (ctx) => {
+  const u = requireUser(ctx);
+  if (!SLOTS) fail(503, 'Jogos de slots indisponíveis de momento.');
+  const game = String((ctx.body && ctx.body.game) || 'fortune-tiger');
+  if (!SLOTS_GAMES_MAP[game]) fail(400, 'Jogo desconhecido.');
+  const me = await getUser(u.id, true);
+  let j = null;
+  try {
+    const r = await fetch(`${PGS_BASE}/api/v1/game_launch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentToken: PGS_AGENT, secretKey: PGS_SECRET,
+        user_code: u.id, game_type: 'slot', provider_code: 'PGSOFT',
+        game_code: game, user_balance: fromCents(me.balance),
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    j = await r.json();
+  } catch { fail(502, 'Servidor dos jogos não respondeu.'); }
+  if (!j || j.status !== 1) fail(502, (j && j.message) || 'Não foi possível abrir o jogo.');
+  return { url: j.launch_url };
+};
+
 // painel da equipa (/admin)
 require('./admin.js')(routes, {
   db, col, auth, FieldValue, runTx, addTx, getUser, dirty, fail, now, brl, fromCents, toCents, dayStart, dayKey, DAY,
@@ -1031,9 +1137,14 @@ const crashGame = CASINO ? require('./crash.js')(routes, {
   db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
   lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT,
 }) : null;
-const minesGame = CASINO ? require('./mines.js')(routes, {
+/* Mines tem chave própria (o certificado do Decola não cobre outro jogo):
+   - Teste: igual ao cassino (emuladores + CASINO_TEST=1).
+   - Produção: MINES_LIVE=1 e MINES_CERT=<n.º do certificado do Mines>. */
+const MINES_CERT = String(process.env.MINES_CERT || '').trim().slice(0, 80);
+const MINES = EMULATOR ? CASINO : (process.env.MINES_LIVE === '1' && MINES_CERT.length >= 3);
+const minesGame = MINES ? require('./mines.js')(routes, {
   db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
-  lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT,
+  lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT: MINES_CERT,
 }) : null;
 if (EMULATOR) {
   // saldo de teste (só existe nos emuladores)
@@ -1054,7 +1165,7 @@ const PAGES = { '/': '/index.html', '/admin': '/admin.html', '/termos': '/termos
 function serveStatic(req, res) {
   let p;
   try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400); res.end(); return; }
-  if (/^\/(decola|mines)(\.html|\.js|\.css)?$/.test(p)) { if (!CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola' || p === '/mines') p += '.html'; }
+  if (/^\/(decola|mines)(\.html|\.js|\.css)?$/.test(p)) { if (p.startsWith('/mines') ? !MINES : !CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola' || p === '/mines') p += '.html'; }
   p = PAGES[p] || p;
   const file = path.normalize(path.join(PUB, p));
   if (!file.startsWith(PUB + path.sep) || /app\.old\.js$/.test(file)) { res.writeHead(404); res.end('Não encontrado'); return; }
@@ -1171,6 +1282,8 @@ const server = http.createServer(async (req, res) => {
     reconcileDeposits();
     setInterval(reconcileDeposits, 30000);
   } else console.warn('Pagamentos: DESLIGADOS — defina BRAVOPAY_API_KEY no .env. Depósitos e saques ficam indisponíveis.');
+  if (SLOTS) console.log(`Slots PG Soft: LIGADOS (${SLOTS_GAMES.length} jogos).`);
+  else console.log('Slots PG Soft: desligados — defina PGSOFT_API_URL, PGSOFT_AGENT_TOKEN e PGSOFT_SECRET no .env.');
   if (crashGame) await crashGame.start();
   if (minesGame) await minesGame.start();
   server.listen(PORT, () => console.log(`\n${SITE.name} a correr em http://localhost:${PORT}   ·   painel da equipa: http://localhost:${PORT}/admin\n`));

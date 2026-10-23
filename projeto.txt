@@ -1,0 +1,128 @@
+﻿### ARVORE DE ARQUIVOS
+.dockerignore
+.env.example
+.firebaserc
+.gcloudignore
+.gitattributes
+.gitignore
+Dockerfile
+README.md
+admin.js
+bravopay.js
+crash.js
+firebase.js
+firebase.json
+firestore.indexes.json
+firestore.rules
+hosting/README.txt
+iniciar.bat
+mines.js
+package-lock.json
+package.json
+public/admin.html
+public/admin.js
+public/app.js
+public/decola.css
+public/decola.html
+public/decola.js
+public/img/decola-capa.png
+public/img/decola-capa.webp
+public/img/favicon.png
+public/img/logo.png
+public/img/mines-capa.webp
+public/index.html
+public/jogo-responsavel.html
+public/legal.css
+public/legal.js
+public/markets.js
+public/mines.css
+public/mines.html
+public/mines.js
+public/privacidade.html
+public/styles.css
+public/termos.html
+scripts/boltodds-teste.js
+scripts/deploy.js
+scripts/dev.js
+scripts/verificar.js
+server.js
+testar-cassino.bat
+verify.js
+
+### PACKAGE.JSON
+{
+  "name": "tugas",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Casa de apostas com jogos e odds ao vivo, Firebase e pagamentos PIX (BravoPay)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node scripts/dev.js",
+    "verificar": "node scripts/verificar.js",
+    "deploy": "node scripts/deploy.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "dependencies": {
+    "firebase-admin": "^14.5.0"
+  }
+}
+
+### FIREBASE.JSON
+{
+  "hosting": {
+    "public": "hosting",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "README.txt"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "tugas",
+          "region": "southamerica-east1"
+        }
+      }
+    ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "emulators": {
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "ui": {
+      "enabled": false
+    },
+    "singleProjectMode": true
+  }
+}
+
+### FUNCTIONS PACKAGE.JSON
+
+### FUNCTIONS INDEX.JS
+
+### FIRESTORE.RULES
+rules_version = '2';
+// SÃ³ o servidor (Admin SDK) acede Ã  base. O navegador e qualquer outra pessoa ficam bloqueados.
+// Cole isto em: Console do Firebase > Firestore Database > Regras > Publicar
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
+
+### FIM

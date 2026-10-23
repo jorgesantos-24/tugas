@@ -57,6 +57,94 @@
 <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
 <div class="toasts" id="toasts"></div>
 
+<!-- ============ Slots PG Soft — modal com iframe (serve para todos os jogos) ============ -->
+<style>
+  /* jogo em ecrã inteiro (telemóvel e computador), sem barra de título */
+  #ftOverlay { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; background: #000; display: none; z-index: 500; }
+  #ftOverlay.show { display: block; }
+  #ftBox { position: absolute; inset: 0; }
+  #ftFrame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+  #ftClose { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 2; width: 34px; height: 34px; border: 0; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; font: 700 16px/1 Inter, system-ui, sans-serif; cursor: pointer; display: grid; place-items: center; }
+  #ftClose:hover { background: rgba(0,0,0,.8); }
+  #ftLoading { position: absolute; color: #cfd5e0; font: 600 13px Inter, sans-serif; pointer-events: none; }
+  body.ft-open { overflow: hidden; }
+</style>
+
+<div id="ftOverlay" aria-hidden="true">
+  <div id="ftBox">
+    <button id="ftClose" type="button" aria-label="Fechar o jogo">✕</button>
+    <iframe id="ftFrame" title="Slot" allow="autoplay; fullscreen; clipboard-write" referrerpolicy="no-referrer"></iframe>
+  </div>
+</div>
+
+<script>
+(function () {
+  const overlay = document.getElementById('ftOverlay');
+  const frame = document.getElementById('ftFrame');
+  let aberto = false, carregando = false;
+
+  // chamada pelo app.js quando se clica num elemento com data-abrir="<jogo>"
+  window.abrirFortuneTiger = async function (game, nome) {
+    if (aberto || carregando) return;
+    game = game || 'fortune-tiger';
+    frame.title = nome || 'Slot';
+    carregando = true;
+    // ecrã inteiro a sério (tem de ser pedido logo no clique); onde não houver suporte, o CSS já ocupa o ecrã todo
+    try { const fs = overlay.requestFullscreen || overlay.webkitRequestFullscreen; if (fs) Promise.resolve(fs.call(overlay)).catch(() => {}); } catch (_) {}
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('ft-open');
+    frame.src = 'about:blank';
+    try {
+      const r = await fetch('/api/slots/launch', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: game }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || j.message || 'Não foi possível abrir o jogo.');
+      frame.src = j.url;
+      aberto = true;
+    } catch (e) {
+      sairEcraInteiro();
+      overlay.classList.remove('show');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('ft-open');
+      alert(e.message);
+    }
+    carregando = false;
+  };
+
+  function sairEcraInteiro() {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (_) {}
+  }
+
+  function fechar() {
+    if (!aberto && !carregando) return;
+    aberto = false;
+    sairEcraInteiro();
+    overlay.classList.remove('show');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('ft-open');
+    frame.src = 'about:blank';
+    // o jogador pode ter ganho ou perdido: atualiza o saldo mostrado no site
+    if (window.tugasRefreshSaldo) window.tugasRefreshSaldo();
+  }
+
+  document.getElementById('ftClose').addEventListener('click', fechar);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
+
+  // se os slots estiverem desligados no servidor, esconde os atalhos dos jogos
+  fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((d) => {
+    if (d && d.games && !d.games.slots) document.querySelectorAll('[data-abrir]').forEach((el) => { el.style.display = 'none'; });
+  }).catch(() => {});
+})();
+</script>
+
 <script src="markets.js"></script>
 <script src="app.js"></script>
 </body>

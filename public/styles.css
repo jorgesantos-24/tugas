@@ -372,14 +372,13 @@ form .btn-block{margin-top:14px}
 .cg-hero h1{color:var(--yellow)}
 .cg-hero h1{margin:0 0 4px;font-size:26px}
 .cg-hero p{margin:0;color:var(--muted)}
-.cg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px}
+.cg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
 .cg-card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:transform .15s,border-color .15s}
 a.cg-card:hover{transform:translateY(-3px);border-color:var(--yellow);box-shadow:0 8px 24px rgba(255,204,31,.15)}
 .cg-art{position:relative;aspect-ratio:4/3;background:radial-gradient(120% 100% at 0% 100%,#0f5a31 0%,#04200f 70%);display:grid;place-items:center;overflow:hidden}
 .cg-svg{position:absolute;inset:0;width:100%;height:100%}
 .cg-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .35s}
-a.cg-card:hover .cg-cover{transform:scale(1.06)}
-.cg-img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:84%;width:auto;max-width:92%;object-fit:contain}
+a.cg-card:hover .cg-cover{transform:scale(1.06)}.cg-img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:84%;width:auto;max-width:92%;object-fit:contain}
 .cg-play{position:relative;background:var(--green);color:#03200f;font-weight:800;padding:8px 16px;border-radius:999px;opacity:0;transform:translateY(6px);transition:.15s}
 a.cg-card:hover .cg-play{opacity:1;transform:none}
 .cg-info{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
