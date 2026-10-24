@@ -8,7 +8,7 @@ const money = (v) => (v == null ? '—' : BRL.format(v));
 const dt = (t) => (t ? new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—');
 const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} d`; };
 const parseMoney = (s) => { const n = parseFloat(String(s ?? '').replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
-const DEP_LABEL = { CREATING: 'a gerar', PENDING: 'à espera do PIX', PAID: 'pago', EXPIRED: 'expirado', FAILED: 'falhou', REFUNDED: 'estornado', CHARGEBACK: 'contestado', REVIEW: 'em revisão', DISMISSED: 'descartado' };
+const DEP_LABEL = { CREATING: 'a gerar', PENDING: 'à espera do PIX', PAID: 'pago', EXPIRED: 'expirado', FAILED: 'falhou', REFUNDED: 'estornado', CHARGEBACK: 'contestado', REVIEW: 'em revisão', DISMISSED: 'descartado', DUPLICATE: 'duplicado (não creditado)' };
 
 function toast(msg, kind = '') {
   const el = document.createElement('div');
@@ -148,7 +148,7 @@ async function rejectModal(id) {
 /* ---------- depósitos ---------- */
 async function viewDeposits() {
   const { deposits } = await api('GET', '/api/admin/deposits?status=' + A.depFilter);
-  const opts = ['ALL', 'PAID', 'PENDING', 'REVIEW', 'EXPIRED', 'REFUNDED', 'CHARGEBACK', 'FAILED', 'DISMISSED'];
+  const opts = ['ALL', 'PAID', 'PENDING', 'REVIEW', 'EXPIRED', 'REFUNDED', 'CHARGEBACK', 'FAILED', 'DISMISSED', 'DUPLICATE'];
   const rows = deposits.map((d) => `<tr>
     <td>${dt(d.createdAt)}<div class="sub">${esc(d.id)}${d.bpId ? ' · BravoPay ' + esc(d.bpId) : ''}</div></td>
     <td><a href="#" class="link" data-user="${esc(d.userId)}">${esc(d.userName || d.userId)}</a><div class="sub">${esc(d.userEmail || '')}</div></td>

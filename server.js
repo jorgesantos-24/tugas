@@ -426,6 +426,18 @@ async function applyDepositStatus(depId, bt) {
     const us = await t.get(userRef);
     const log = depositWindow(us.exists ? us.data().depositLog : []);
     if (st === 'PAID' && dep.status === 'PENDING') {
+      /* A BravoPay pode devolver a MESMA cobrança para vários pedidos de PIX (ex.: o jogador clica
+         "gerar PIX" várias vezes). Um pagamento só pode creditar UM depósito: se outro depósito com
+         a mesma cobrança já foi pago (ou está em revisão), este fica DUPLICATE e não credita.
+         A consulta é feita dentro da transação, por isso duas confirmações em simultâneo não passam as duas. */
+      if (dep.bpId) {
+        const sib = await t.get(col.deposits().where('bpId', '==', dep.bpId));
+        if (sib.docs.some((d) => d.id !== depId && ['PAID', 'REVIEW', 'REFUNDED', 'CHARGEBACK'].includes(d.data().status))) {
+          t.update(depRef, { status: 'DUPLICATE', note: 'mesma cobrança BravoPay de outro depósito já pago' });
+          t.update(userRef, { depositLog: log.filter((e) => e.id !== dep.id) });
+          res = { dep, kind: 'duplicate' }; return;
+        }
+      }
       if (bt.amount_cents != null && Number(bt.amount_cents) !== dep.amount) {
         t.update(depRef, { status: 'REVIEW', paidAmount: Number(bt.amount_cents), reviewReason: `valor pago ${brl(Number(bt.amount_cents))} diferente de ${brl(dep.amount)}` });
         res = { dep, kind: 'review' }; return;
@@ -451,6 +463,7 @@ async function applyDepositStatus(depId, bt) {
   pendingDeposits.delete(depId); // já não está PENDING (o listener confirma logo a seguir)
   if (res.kind === 'paid') console.log(`[BravoPay] Depósito ${depId} pago: ${brl(res.dep.amount)} (user ${res.dep.userId})`);
   if (res.kind === 'review') console.error(`[BravoPay] Depósito ${depId}: valor pago ${bt.amount_cents} difere do esperado ${res.dep.amount}. Ficou em REVIEW (ver painel).`);
+  if (res.kind === 'duplicate') console.warn(`[BravoPay] Depósito ${depId} ignorado: cobrança ${res.dep.bpId} já creditada noutro depósito (user ${res.dep.userId})`);
   if (res.kind === 'reversed') console.warn(`[BravoPay] Depósito ${depId} ${st}: ${brl(res.dep.amount)} retirado do saldo do user ${res.dep.userId}`);
 }
 
@@ -500,14 +513,14 @@ async function handleWebhook(req, res) {
   try {
     if ((await evtRef.get()).exists) return reply(200, 'duplicate');
     if (evt.type.startsWith('transaction.')) {
-      let depId = null;
+      // a mesma cobrança pode estar ligada a vários depósitos: o estado aplica-se a todos
+      // (só um é creditado; os outros ficam DUPLICATE — ver applyDepositStatus)
+      const depIds = new Set();
       const ext = String(data.external_reference || '');
-      if (/^D[0-9A-F]{12}$/.test(ext) && (await col.deposits().doc(ext).get()).exists) depId = ext;
-      else if (data.id) { const qs = await col.deposits().where('bpId', '==', String(data.id)).limit(1).get(); if (!qs.empty) depId = qs.docs[0].id; }
-      if (depId) {
-        const st = data.status || { 'transaction.paid': 'PAID', 'transaction.expired': 'EXPIRED', 'transaction.failed': 'FAILED', 'transaction.refunded': 'REFUNDED', 'transaction.chargeback': 'CHARGEBACK' }[evt.type];
-        await applyDepositStatus(depId, { ...data, status: st });
-      }
+      if (/^D[0-9A-F]{12}$/.test(ext) && (await col.deposits().doc(ext).get()).exists) depIds.add(ext);
+      if (data.id) for (const d of (await col.deposits().where('bpId', '==', String(data.id)).get()).docs) depIds.add(d.id);
+      const st = data.status || { 'transaction.paid': 'PAID', 'transaction.expired': 'EXPIRED', 'transaction.failed': 'FAILED', 'transaction.refunded': 'REFUNDED', 'transaction.chargeback': 'CHARGEBACK' }[evt.type];
+      for (const depId of depIds) await applyDepositStatus(depId, { ...data, status: st });
     } // os saques são manuais: eventos withdrawal.* são ignorados
     await evtRef.set({ type: evt.type, at: now() });
     reply(200, 'ok');
@@ -749,10 +762,27 @@ const routes = {
       fail(502, 'Não foi possível gerar o PIX agora. Tente de novo em instantes.');
     }
     const dep = {
-      id, userId: u.id, amount: amt, status: 'PENDING', bpId: bt.id, pixCode: bt.pix.copy_paste, pixQr: bt.pix.qr_code || null,
+      id, userId: u.id, amount: amt, status: 'PENDING', bpId: String(bt.id), pixCode: bt.pix.copy_paste, pixQr: bt.pix.qr_code || null,
       expiresAt: isoMs(bt.pix.expires_at) || now() + PIX_EXPIRES * 1000, createdAt: now(),
     };
-    await col.deposits().doc(id).update({ status: dep.status, bpId: dep.bpId, pixCode: dep.pixCode, pixQr: dep.pixQr, expiresAt: dep.expiresAt, fee: bt.fee_cents ?? null });
+    /* A BravoPay pode devolver uma cobrança que já existe (mesmo CPF e valor, ainda por pagar).
+       Nesse caso não se cria outro depósito ligado à mesma cobrança: mostra-se o PIX que já existe. */
+    const existing = await runTx([u.id], async (t) => {
+      const sib = (await t.get(col.deposits().where('bpId', '==', dep.bpId))).docs.map((d) => d.data()).filter((d) => d.id !== id);
+      if (!sib.length) {
+        t.update(col.deposits().doc(id), { status: dep.status, bpId: dep.bpId, pixCode: dep.pixCode, pixQr: dep.pixQr, expiresAt: dep.expiresAt, fee: bt.fee_cents ?? null });
+        return null;
+      }
+      const fu = (await t.get(userRef)).data();
+      t.update(userRef, { depositLog: depositWindow(fu.depositLog).filter((x) => x.id !== id) });
+      t.update(col.deposits().doc(id), { status: 'DUPLICATE', bpId: dep.bpId, note: `mesma cobrança BravoPay do depósito ${sib[0].id}` });
+      return sib.find((d) => d.status === 'PENDING' && d.userId === u.id) || sib[0];
+    });
+    if (existing) {
+      console.warn(`[BravoPay] PIX ${id}: a BravoPay devolveu a cobrança ${dep.bpId}, já usada pelo depósito ${existing.id}. Ficou DUPLICATE.`);
+      if (existing.status === 'PENDING' && existing.userId === u.id) return { deposit: publicDeposit(existing), user: await meUser(u.id) };
+      fail(502, 'Não foi possível gerar o PIX agora. Tente de novo em instantes.');
+    }
     pendingDeposits.set(id, dep); depChecked.set(id, now());
     console.log(`[BravoPay] PIX gerado ${id}: ${brl(amt)} (user ${u.id})`);
     return { deposit: publicDeposit(dep), user: await meUser(u.id) };

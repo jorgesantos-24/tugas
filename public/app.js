@@ -860,7 +860,7 @@ async function doWithdraw() {
   }
 }
 
-const WD_LABEL = { PENDING: 'pendente', PROCESSING: 'em processamento', PAID: 'pago', REJECTED: 'recusado', CANCELED: 'cancelado', CREATING: 'pendente', FAILED: 'falhou', REVIEW: 'em análise' };
+const WD_LABEL = { PENDING: 'pendente', PROCESSING: 'em processamento', PAID: 'pago', REJECTED: 'recusado', CANCELED: 'cancelado', CREATING: 'pendente', FAILED: 'falhou', REVIEW: 'em análise', DUPLICATE: 'cancelado' };
 const LIMITS = [
   ['depositLimit', 'Limite de depósito (24 horas)'],
   ['lossLimitDay', 'Limite de perda por dia'],
