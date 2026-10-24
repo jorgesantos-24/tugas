@@ -42,7 +42,9 @@ const initials = (n) => String(n || '?').trim().split(/\s+/).map((p) => p[0]).sl
 function toast(msg, kind = '') {
   const el = document.createElement('div');
   el.className = 'toast ' + kind; el.textContent = msg;
-  $('#toasts').appendChild(el);
+  const box = $('#toasts');
+  if (!box) { console.warn('[toast]', msg); return; } // sem o contentor não rebenta quem chamou
+  box.appendChild(el);
   setTimeout(() => el.remove(), 4500);
 }
 
@@ -207,8 +209,7 @@ async function placeBets() {
       if (S.slip.length < 2) S.slipMode = 'single';
     }
   } catch (e) {
-    toast(e.message, 'err');
-    if (e.status === 401) { S.user = null; openLogin(); }
+    if (!sessionExpired(e, 'apostar')) toast(e.message, 'err');
   }
   S.placing = false;
   render();
@@ -221,8 +222,15 @@ async function doCashout(id) {
     setUser(res.user);
     toast(`Cash Out realizado: ${money(res.value)}`, 'ok');
     await loadAccount();
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) { if (!sessionExpired(e, 'fazer o Cash Out')) toast(e.message, 'err'); }
   S.cashoutBusy = null; render();
+}
+// sessão terminou no servidor (401): em vez do aviso vermelho, abre o login com uma mensagem clara
+function sessionExpired(e, what) {
+  if (!e || e.status !== 401) return false;
+  S.user = null; S.bets = [];
+  openLogin(`A sua sessão terminou. Entre novamente para ${what}.`);
+  return true;
 }
 const cashoutValue = (bet) => {
   if (bet.status !== 'open') return null;
@@ -955,7 +963,12 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, .ev-row, .hero-card');
   if (!t) return;
   const d = t.dataset;
-  if (d.abrir) { e.preventDefault(); if (window.abrirFortuneTiger) window.abrirFortuneTiger(d.abrir, d.nome); return; }// slots: abre o modal
+  if (d.abrir) { // slots: abre o jogo (sem conta: pede login e abre o jogo logo a seguir)
+    e.preventDefault();
+    const abrir = () => window.abrirFortuneTiger && window.abrirFortuneTiger(d.abrir, d.nome);
+    if (!S.user) { afterAuth = abrir; openLogin(`Entre na sua conta para jogar ${d.nome || 'este jogo'}.`); return; }
+    abrir(); return;
+  }
   if (d.key) { e.stopPropagation(); toggleSel(d.key); return; }
   if (d.cashout) {
     if (S.cashoutConfirm === d.cashout) doCashout(d.cashout);
@@ -1005,7 +1018,7 @@ document.addEventListener('click', async (e) => {
     case 'clear': S.slip = []; S.stakes = {}; S.comboStake = ''; S.slipMode = 'single'; render(); break;
     case 'accept': S.slip.forEach((s) => { const { sel } = findSel(s.key); if (sel) s.odds = sel.odds; }); renderSlip(); break;
     case 'back': { const p = S.prevView || { view: 'home' }; go(p.view, { league: p.league, sport: p.sport }); } break;
-    case 'login': openLogin(); break;
+    case 'login': afterAuth = null; openLogin(); break; // login pedido pelo próprio jogador: não reabre nada pendente
     case 'register': openRegister(); break;
     case 'account': openAccount('profile'); break;
     case 'logout': logout(); break;
@@ -1013,7 +1026,7 @@ document.addEventListener('click', async (e) => {
     case 'do-deposit': doDeposit(); break;
     case 'withdraw': openWithdraw(); break;
     case 'do-withdraw': doWithdraw(); break;
-    case 'close-modal': closeModal(); break;
+    case 'close-modal': afterAuth = null; closeModal(); break;
     case 'forgot': openForgot(); break;
     case 'verify-resend': try { await api('POST', '/api/account/verify-email'); toast('E-mail enviado. Veja a caixa de entrada e o spam.', 'ok'); } catch (err) { toast(err.message, 'err'); } break;
     case 'verify-check': try { const { user } = await api('POST', '/api/account/verify-check'); setUser(user); if (user.emailVerified) { toast('E-mail confirmado ✓', 'ok'); closeModal(); } else toast('Ainda não confirmado. Abra o link do e-mail que enviámos.', 'err'); } catch (err) { toast(err.message, 'err'); } break;
@@ -1087,7 +1100,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#logoLink').onclick = (e) => { e.preventDefault(); go('home'); };
-$('#overlay').onclick = closeModal;
+$('#overlay').onclick = () => { afterAuth = null; closeModal(); }; // fechou sem entrar: esquece a ação pendente
 $('#menuBtn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); };
 $('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').classList.add('show'); };
 

@@ -110,7 +110,12 @@
       overlay.classList.remove('show');
       overlay.setAttribute('aria-hidden', 'true');
       document.body.classList.remove('ft-open');
-      alert(e.message);
+      // sessão expirada: abre o login; outros erros: aviso discreto do site (em vez do alert do navegador)
+      try {
+        if (/entre na sua conta/i.test(e.message) && window.openLogin) window.openLogin('Entre na sua conta para jogar ' + (nome || 'este jogo') + '.');
+        else if (window.toast) window.toast(e.message, 'err');
+        else console.warn(e.message);
+      } catch (_) { console.warn(e.message); } // o aviso nunca pode deixar o jogo bloqueado
     }
     carregando = false;
   };
