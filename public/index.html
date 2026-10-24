@@ -73,7 +73,7 @@
 <div id="ftOverlay" aria-hidden="true">
   <div id="ftBox">
     <button id="ftClose" type="button" aria-label="Fechar o jogo">✕</button>
-    <iframe id="ftFrame" title="Slot" allow="autoplay; fullscreen; clipboard-write" referrerpolicy="no-referrer"></iframe>
+    <iframe id="ftFrame" title="Slot" allow="autoplay; clipboard-write" referrerpolicy="no-referrer"></iframe>
   </div>
 </div>
 
@@ -81,7 +81,9 @@
 (function () {
   const overlay = document.getElementById('ftOverlay');
   const frame = document.getElementById('ftFrame');
-  let aberto = false, carregando = false;
+  let aberto = false, carregando = false, sessao = 0;
+  // só no telemóvel/tablet o jogo vai para ecrã inteiro; no computador ocupa a janela do site e o X fica sempre visível
+  const ecraInteiroNoAbrir = () => window.matchMedia('(pointer: coarse)').matches;
 
   // chamada pelo app.js quando se clica num elemento com data-abrir="<jogo>"
   window.abrirFortuneTiger = async function (game, nome) {
@@ -89,8 +91,11 @@
     game = game || 'fortune-tiger';
     frame.title = nome || 'Slot';
     carregando = true;
-    // ecrã inteiro a sério (tem de ser pedido logo no clique); onde não houver suporte, o CSS já ocupa o ecrã todo
-    try { const fs = overlay.requestFullscreen || overlay.webkitRequestFullscreen; if (fs) Promise.resolve(fs.call(overlay)).catch(() => {}); } catch (_) {}
+    const minha = ++sessao; // se o jogador fechar antes de o jogo carregar, a resposta é ignorada
+    // ecrã inteiro tem de ser pedido logo no clique; onde não houver suporte, o CSS já ocupa o ecrã todo
+    if (ecraInteiroNoAbrir()) {
+      try { const fs = overlay.requestFullscreen || overlay.webkitRequestFullscreen; if (fs) Promise.resolve(fs.call(overlay)).catch(() => {}); } catch (_) {}
+    }
     overlay.classList.add('show');
     overlay.setAttribute('aria-hidden', 'false');
     document.body.classList.add('ft-open');
@@ -102,10 +107,12 @@
         body: JSON.stringify({ game: game }),
       });
       const j = await r.json().catch(() => ({}));
+      if (minha !== sessao) return; // já foi fechado
       if (!r.ok) throw new Error(j.error || j.message || 'Não foi possível abrir o jogo.');
       frame.src = j.url;
       aberto = true;
     } catch (e) {
+      if (minha !== sessao) return;
       sairEcraInteiro();
       overlay.classList.remove('show');
       overlay.setAttribute('aria-hidden', 'true');
@@ -116,8 +123,9 @@
         else if (window.toast) window.toast(e.message, 'err');
         else console.warn(e.message);
       } catch (_) { console.warn(e.message); } // o aviso nunca pode deixar o jogo bloqueado
+    } finally {
+      if (minha === sessao) carregando = false;
     }
-    carregando = false;
   };
 
   function sairEcraInteiro() {
@@ -128,8 +136,8 @@
   }
 
   function fechar() {
-    if (!aberto && !carregando) return;
-    aberto = false;
+    if (!overlay.classList.contains('show')) return;
+    sessao++; aberto = false; carregando = false;
     sairEcraInteiro();
     overlay.classList.remove('show');
     overlay.setAttribute('aria-hidden', 'true');
@@ -138,6 +146,14 @@
     // o jogador pode ter ganho ou perdido: atualiza o saldo mostrado no site
     if (window.tugasRefreshSaldo) window.tugasRefreshSaldo();
   }
+
+  // se o próprio jogo se puser em ecrã inteiro, tapa o X e o jogador fica preso: desfaz logo
+  const fsMudou = () => {
+    const el = document.fullscreenElement || document.webkitFullscreenElement;
+    if (el && el !== overlay) sairEcraInteiro();
+  };
+  document.addEventListener('fullscreenchange', fsMudou);
+  document.addEventListener('webkitfullscreenchange', fsMudou);
 
   document.getElementById('ftClose').addEventListener('click', fechar);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
