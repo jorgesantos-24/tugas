@@ -34,7 +34,7 @@ const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailV
 const PORT = Number(process.env.PORT) || 3000;
 const PUB = path.join(__dirname, 'public');
 const API = 'https://site.api.espn.com/apis/site/v2/sports/';
-const FAST_MS = 15000, SLOW_MS = 120000;
+const FAST_MS = 5000, SLOW_MS = 120000; // ao vivo: 5 s (só as ligas com jogos a decorrer); completo: 2 min
 // tempo de aprovação: ao vivo 25s (configurável) para dar tempo de o feed apanhar o que acontece no campo
 const LIVE_DELAY_MS = Number(process.env.LIVE_BET_DELAY || 25) * 1000, PRE_DELAY_MS = 800, CASHOUT_DELAY_MS = 2000;
 const LIVE_CASHOUT_DELAY_MS = Number(process.env.LIVE_CASHOUT_DELAY || process.env.LIVE_BET_DELAY || 25) * 1000;
@@ -222,7 +222,7 @@ const openWithdrawals = new Map(); // pedidos de saque à espera da equipa
 
 /* ---------------- feed ESPN ---------------- */
 const events = new Map();
-let feedVersion = 0, feedCache = null, lastFeedOk = 0;
+let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 
 async function fetchJSON(url) {
   const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(12000) });
@@ -240,23 +240,33 @@ async function fetchLeague(lg, date) {
 const ET_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
 const etDay = (t) => ET_FMT.format(new Date(t)).replace(/-/g, '');
 
-function mergeEvents(list) {
+// fetchedAt = quando o pedido à ESPN começou. Uma resposta mais antiga (ex.: a atualização completa,
+// que demora alguns segundos) nunca substitui um placar mais recente já recebido.
+function mergeEvents(list, fetchedAt) {
   const t = now();
+  let changed = false;
+  const same = (a, b) => { const { fetchedAt: x, ...ra } = a; const { fetchedAt: y, ...rb } = b; return JSON.stringify(ra) === JSON.stringify(rb); };
   for (const ev of list) {
     const old = events.get(ev.id);
+    if (old && old.fetchedAt > fetchedAt) continue;
+    ev.fetchedAt = fetchedAt;
     if (old) {
       const scored = old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score);
       if (scored) { ev.suspendedUntil = t + 20000; ev.goalAt = t; }
       else { ev.suspendedUntil = old.suspendedUntil; ev.goalAt = old.goalAt; }
     }
+    if (!old || !same(old, ev)) changed = true;
     events.set(ev.id, ev);
   }
+  return changed;
 }
 
-let refreshing = false;
+// atualização completa e atualização ao vivo correm em separado: a completa não bloqueia a ao vivo
+const refreshing = { full: false, live: false };
 async function refresh(full) {
-  if (refreshing) return;
-  refreshing = true;
+  const kind = full ? 'full' : 'live';
+  if (refreshing[kind]) return;
+  refreshing[kind] = true;
   try {
     const t = now();
     const jobs = [];
@@ -276,16 +286,19 @@ async function refresh(full) {
       for (const [lg, days] of want) for (const d of days) jobs.push(fetchLeague(M.LEAGUE_BY_KEY[lg], d));
     }
     const res = (await Promise.all(jobs)).filter(Boolean);
+    let changed = false;
     if (res.length || !full) {
-      mergeEvents(res.flat());
+      changed = mergeEvents(res.flat(), t);
       if (res.length) lastFeedOk = now();
     }
-    if (full) for (const [id, ev] of events) if (t - ev.date > 36 * 3600000) events.delete(id);
-    feedVersion++; feedCache = null;
+    if (full) for (const [id, ev] of events) if (t - ev.date > 36 * 3600000) { events.delete(id); changed = true; }
+    // só muda a versão (e os navegadores só voltam a descarregar tudo) quando há novidades,
+    // ou a cada 30 s para o "Última atualização" do site continuar a andar
+    if (changed || now() - lastBump > 30000) { feedVersion++; feedCache = null; lastBump = now(); }
     await settleBets();
   } catch (e) {
     console.error('Erro ao atualizar feed:', e.message);
-  } finally { refreshing = false; }
+  } finally { refreshing[kind] = false; }
 }
 
 /* Proteção das apostas e cash out ao vivo: guarda o estado dos jogos no pedido, espera,
@@ -299,10 +312,11 @@ function liveSnapshot(evIds) {
   return snap;
 }
 async function refreshEvents(evIds) {
+  const t = now();
   const pairs = new Set([...evIds].map((id) => events.get(id)).filter(Boolean).map((ev) => `${ev.league}|${etDay(+ev.date)}`));
   const res = await Promise.all([...pairs].map((p) => { const [lg, d] = p.split('|'); return M.LEAGUE_BY_KEY[lg] ? fetchLeague(M.LEAGUE_BY_KEY[lg], d) : null; }));
   const list = res.filter(Boolean).flat();
-  if (list.length) { mergeEvents(list); feedVersion++; feedCache = null; }
+  if (list.length) { mergeEvents(list, t); feedVersion++; feedCache = null; }
 }
 // devolve o motivo da recusa, ou null se nada mudou desde o pedido
 function liveChanged(snap, t0) {
@@ -323,7 +337,7 @@ function findSel(key) {
 
 function feedPayload() {
   if (!feedCache) {
-    const list = [...events.values()].map(({ goalAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
+    const list = [...events.values()].map(({ goalAt, fetchedAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
     feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, events: list }) };
   }
   return feedCache;
@@ -359,7 +373,14 @@ async function closeBet(bet, status, payout, legs, txType) {
   return ok;
 }
 
+// as duas atualizações chamam isto: se já estiver a correr, a próxima (daqui a 5 s) apanha o que faltar
+let settling = false;
 async function settleBets() {
+  if (settling) return;
+  settling = true;
+  try { await settleAll(); } finally { settling = false; }
+}
+async function settleAll() {
   for (const row of [...openBets.values()]) {
     try {
       const legs = structuredClone(row.legs);
