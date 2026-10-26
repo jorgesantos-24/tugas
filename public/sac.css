@@ -1,0 +1,78 @@
+/* Página de atendimento (SAC) — complementa legal.css */
+.sac-hero{margin:14px 0 22px}
+.sac-hero h1{margin-bottom:6px}
+
+.sac-channels{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.sac-card{display:flex;flex-direction:column;gap:4px;padding:18px;border-radius:14px;background:var(--panel);border:1px solid var(--line);transition:border-color .15s,transform .15s}
+.sac-card[href]:hover{border-color:var(--green);transform:translateY(-2px)}
+.sac-card b{font-size:16px;color:var(--green);word-break:break-word}
+.sac-card small{line-height:1.45}
+.sac-card-t{font-weight:700;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.6px}
+.sac-ico{display:grid;place-items:center;width:38px;height:38px;border-radius:10px;background:rgba(31,211,111,.12);color:var(--green);font-size:19px;margin-bottom:6px}
+
+.sac-trust{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:22px 0 6px}
+.sac-trust div{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--panel2)}
+.sac-trust div>span{font-size:20px;line-height:1.3}
+.sac-trust p{margin:0;font-size:13.5px;line-height:1.5}
+
+.sac-warn{padding:10px 12px;border-radius:10px;background:rgba(255,204,31,.08);border:1px solid rgba(255,204,31,.35);font-size:14px}
+
+.sac-faq details{border:1px solid var(--line);border-radius:12px;background:var(--panel);margin:8px 0}
+.sac-faq summary{cursor:pointer;padding:13px 40px 13px 14px;font-weight:600;list-style:none;position:relative}
+.sac-faq summary::-webkit-details-marker{display:none}
+.sac-faq summary::after{content:"+";position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--green);font-size:20px;font-weight:700}
+.sac-faq details[open] summary::after{content:"−"}
+.sac-faq details[open] summary{border-bottom:1px solid var(--line)}
+.sac-faq details p{margin:0;padding:12px 14px;color:var(--muted)}
+.sac-faq summary:focus-visible{outline:2px solid var(--green);outline-offset:2px;border-radius:12px}
+
+.sac-steps{padding-left:22px}
+.sac-steps li{margin:8px 0}
+
+.sac-help{margin-top:30px;padding:14px;border-radius:12px;background:var(--panel2);border-left:3px solid var(--green);font-size:14px}
+
+@media (max-width:600px){
+  .sac-channels,.sac-trust{grid-template-columns:1fr}
+}
+
+/* cartão do chat (é um botão) */
+.sac-card-chat{font:inherit;color:inherit;text-align:left;cursor:pointer}
+.sac-card-chat:hover{border-color:var(--green);transform:translateY(-2px)}
+
+/* chat flutuante */
+.chat-fab{position:fixed;right:18px;bottom:18px;z-index:40;display:flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;font-weight:700;font-size:15px;background:linear-gradient(180deg,#34e381,var(--green2));color:#03200f;box-shadow:0 8px 24px rgba(31,211,111,.35)}
+.chat-fab:hover{box-shadow:0 10px 28px rgba(31,211,111,.5)}
+.chat-on .chat-fab{display:none}
+
+.chat{position:fixed;right:18px;bottom:18px;z-index:41;width:370px;max-width:calc(100vw - 32px);height:min(560px,calc(100vh - 36px));display:flex;flex-direction:column;border-radius:16px;background:var(--panel);border:1px solid var(--line);box-shadow:0 18px 50px rgba(0,0,0,.55);overflow:hidden}
+.chat[hidden]{display:none}
+.chat-head{display:flex;align-items:center;gap:10px;padding:12px 14px;background:linear-gradient(90deg,#0b2216,#0c120f);border-bottom:1px solid var(--line)}
+.chat-head div{flex:1;display:flex;flex-direction:column;line-height:1.3}
+.chat-head small{color:var(--muted);font-size:12px}
+.chat-avatar{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,var(--green),#0d8f4d);color:#04210f;font-weight:800}
+.chat-x{font-size:24px;line-height:1;color:var(--muted);padding:2px 8px;border-radius:8px}
+.chat-x:hover{color:var(--text);background:var(--panel2)}
+
+.chat-log{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px}
+.msg{max-width:86%;padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45}
+.msg p{margin:0}
+.msg p+p{margin-top:6px}
+.msg .link{display:inline-block;margin-top:6px;color:var(--green);font-weight:600}
+.msg-bot{align-self:flex-start;background:var(--panel2);border-bottom-left-radius:4px}
+.msg-user{align-self:flex-end;background:rgba(31,211,111,.16);border:1px solid rgba(31,211,111,.3);border-bottom-right-radius:4px}
+
+.chat-quick{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 10px;max-height:110px;overflow-y:auto}
+.chip{padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel3);font-size:13px;font-weight:600}
+.chip:hover{border-color:var(--green);color:var(--green)}
+.chip-human{border-color:rgba(255,204,31,.45);color:var(--yellow)}
+
+.chat-form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
+.chat-form input{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 12px;outline:none;font-size:16px}
+.chat-form input:focus{border-color:var(--green)}
+.chat-form .btn{padding:10px 14px}
+
+@media (max-width:600px){
+  .chat{right:0;bottom:0;width:100%;max-width:none;height:100dvh;border-radius:0;border:0}
+  .chat-fab span{display:none}
+  .chat-fab{padding:14px 16px}
+}
