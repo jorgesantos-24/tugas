@@ -349,52 +349,48 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: 'img/decola-capa.webp?v=4' },
-  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: 'img/mines-capa.webp?v=1' },
-  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: 'img/slots/fortune-tiger.webp' },
-  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: 'img/slots/fortune-ox.webp' },
-  { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: 'img/slots/fortune-dragon.webp' },
-  { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: 'img/slots/fortune-rabbit.webp' },
-  { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: 'img/slots/fortune-mouse.webp' },
-  { abrir: 'bikini-paradise', name: 'Bikini Paradise', tag: 'PG Soft', href: '#', desc: 'Praia e prémios', img: 'img/slots/bikini-paradise.webp' },
-  { abrir: 'jungle-delight', name: 'Jungle Delight', tag: 'PG Soft', href: '#', desc: 'Selva selvagem', img: 'img/slots/jungle-delight.webp' },
-  { abrir: 'ganesha-gold', name: 'Ganesha Gold', tag: 'PG Soft', href: '#', desc: 'Deus da prosperidade', img: 'img/slots/ganesha-gold.webp' },
-  { abrir: 'double-fortune', name: 'Double Fortune', tag: 'PG Soft', href: '#', desc: 'Fortuna em dobro', img: 'img/slots/double-fortune.webp' },
-  { abrir: 'dragon-tiger-luck', name: 'Dragon Tiger Luck', tag: 'PG Soft', href: '#', desc: 'Dragão contra tigre', img: 'img/slots/dragon-tiger-luck.webp' },
-  { abrir: 'ninja-raccoon', name: 'Ninja Raccoon Frenzy', tag: 'PG Soft', href: '#', desc: 'Guaxinim ninja', img: 'img/slots/ninja-raccoon.webp' },
-  { abrir: 'lucky-clover', name: 'Lucky Clover Lady', tag: 'PG Soft', href: '#', desc: 'Trevo da sorte', img: 'img/slots/lucky-clover.webp' },
-  { abrir: 'ultimate-striker', name: 'Ultimate Striker', tag: 'PG Soft', href: '#', desc: 'Futebol e prémios', img: 'img/slots/ultimate-striker.webp' },
-  { abrir: 'prosper-ftree', name: 'Prosperity Fortune Tree', tag: 'PG Soft', href: '#', desc: 'Árvore da prosperidade', img: 'img/slots/prosper-ftree.webp' },
-  { abrir: 'chicky-run', name: 'Chicky Run', tag: 'PG Soft', href: '#', desc: 'A galinha corredora', img: 'img/slots/chicky-run.webp' },
-  { abrir: 'butterfly-blossom', name: 'Butterfly Blossom', tag: 'PG Soft', href: '#', desc: 'Borboletas douradas', img: 'img/slots/butterfly-blossom.webp' },
-  { abrir: 'piggy-gold', name: 'Piggy Gold', tag: 'PG Soft', href: '#', desc: 'Porquinho da fortuna', img: 'img/slots/piggy-gold.webp' },
-  { abrir: 'wild-bandito', name: 'Wild Bandito', tag: 'PG Soft', href: '#', desc: 'Fora da lei', img: 'img/slots/wild-bandito.webp' },
-  { abrir: 'zombie-outbreak', name: 'Zombie Outbreak', tag: 'PG Soft', href: '#', desc: 'Zumbis na cidade', img: 'img/slots/zombie-outbreak.webp' },
-  { abrir: 'majestic-ts', name: 'Majestic Treasures', tag: 'PG Soft', href: '#', desc: 'Tesouros majestosos', img: 'img/slots/majestic-ts.webp' },
-  { abrir: 'thai-river', name: 'Thai River Wonders', tag: 'PG Soft', href: '#', desc: 'Rio tailandês', img: 'img/slots/thai-river.webp' },
-  { abrir: 'gdn-ice-fire', name: 'Guardians of Ice & Fire', tag: 'PG Soft', href: '#', desc: 'Gelo e fogo', img: 'img/slots/gdn-ice-fire.webp' },
-  { abrir: 'rise-apollo', name: 'Rise of Apollo', tag: 'PG Soft', href: '#', desc: 'O deus do sol', img: 'img/slots/rise-apollo.webp' },
-  { abrir: 'wild-bounty-sd', name: 'Wild Bounty Showdown', tag: 'PG Soft', href: '#', desc: 'Caça ao tesouro', img: 'img/slots/wild-bounty-sd.webp' },
-  { abrir: 'treasures-aztec', name: 'Treasures of Aztec', tag: 'PG Soft', href: '#', desc: 'Tesouros astecas', img: 'img/slots/treasures-aztec.webp' },
-  { abrir: 'three-cz-pigs', name: 'Three Crazy Piggies', tag: 'PG Soft', href: '#', desc: 'Três porquinhos', img: 'img/slots/three-cz-pigs.webp' },
+  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: '/img/decola-capa.webp?v=4' },
+  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: '/img/mines-capa.webp?v=1' },
+  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: '/img/slots/fortune-tiger.webp' },
+  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: '/img/slots/fortune-ox.webp' },
+  { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: '/img/slots/fortune-dragon.webp' },
+  { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: '/img/slots/fortune-rabbit.webp' },
+  { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: '/img/slots/fortune-mouse.webp' },
+  { abrir: 'bikini-paradise', name: 'Bikini Paradise', tag: 'PG Soft', href: '#', desc: 'Praia e prémios', img: '/img/slots/bikini-paradise.webp' },
+  { abrir: 'jungle-delight', name: 'Jungle Delight', tag: 'PG Soft', href: '#', desc: 'Selva selvagem', img: '/img/slots/jungle-delight.webp' },
+  { abrir: 'ganesha-gold', name: 'Ganesha Gold', tag: 'PG Soft', href: '#', desc: 'Deus da prosperidade', img: '/img/slots/ganesha-gold.webp' },
+  { abrir: 'double-fortune', name: 'Double Fortune', tag: 'PG Soft', href: '#', desc: 'Fortuna em dobro', img: '/img/slots/double-fortune.webp' },
+  { abrir: 'dragon-tiger-luck', name: 'Dragon Tiger Luck', tag: 'PG Soft', href: '#', desc: 'Dragão contra tigre', img: '/img/slots/dragon-tiger-luck.webp' },
+  { abrir: 'ninja-raccoon', name: 'Ninja Raccoon Frenzy', tag: 'PG Soft', href: '#', desc: 'Guaxinim ninja', img: '/img/slots/ninja-raccoon.webp' },
+  { abrir: 'lucky-clover', name: 'Lucky Clover Lady', tag: 'PG Soft', href: '#', desc: 'Trevo da sorte', img: '/img/slots/lucky-clover.webp' },
+  { abrir: 'ultimate-striker', name: 'Ultimate Striker', tag: 'PG Soft', href: '#', desc: 'Futebol e prémios', img: '/img/slots/ultimate-striker.webp' },
+  { abrir: 'prosper-ftree', name: 'Prosperity Fortune Tree', tag: 'PG Soft', href: '#', desc: 'Árvore da prosperidade', img: '/img/slots/prosper-ftree.webp' },
+  { abrir: 'chicky-run', name: 'Chicky Run', tag: 'PG Soft', href: '#', desc: 'A galinha corredora', img: '/img/slots/chicky-run.webp' },
+  { abrir: 'butterfly-blossom', name: 'Butterfly Blossom', tag: 'PG Soft', href: '#', desc: 'Borboletas douradas', img: '/img/slots/butterfly-blossom.webp' },
+  { abrir: 'piggy-gold', name: 'Piggy Gold', tag: 'PG Soft', href: '#', desc: 'Porquinho da fortuna', img: '/img/slots/piggy-gold.webp' },
+  { abrir: 'wild-bandito', name: 'Wild Bandito', tag: 'PG Soft', href: '#', desc: 'Fora da lei', img: '/img/slots/wild-bandito.webp' },
+  { abrir: 'zombie-outbreak', name: 'Zombie Outbreak', tag: 'PG Soft', href: '#', desc: 'Zumbis na cidade', img: '/img/slots/zombie-outbreak.webp' },
+  { abrir: 'majestic-ts', name: 'Majestic Treasures', tag: 'PG Soft', href: '#', desc: 'Tesouros majestosos', img: '/img/slots/majestic-ts.webp' },
+  { abrir: 'thai-river', name: 'Thai River Wonders', tag: 'PG Soft', href: '#', desc: 'Rio tailandês', img: '/img/slots/thai-river.webp' },
+  { abrir: 'gdn-ice-fire', name: 'Guardians of Ice & Fire', tag: 'PG Soft', href: '#', desc: 'Gelo e fogo', img: '/img/slots/gdn-ice-fire.webp' },
+  { abrir: 'rise-apollo', name: 'Rise of Apollo', tag: 'PG Soft', href: '#', desc: 'O deus do sol', img: '/img/slots/rise-apollo.webp' },
+  { abrir: 'wild-bounty-sd', name: 'Wild Bounty Showdown', tag: 'PG Soft', href: '#', desc: 'Caça ao tesouro', img: '/img/slots/wild-bounty-sd.webp' },
+  { abrir: 'treasures-aztec', name: 'Treasures of Aztec', tag: 'PG Soft', href: '#', desc: 'Tesouros astecas', img: '/img/slots/treasures-aztec.webp' },
+  { abrir: 'three-cz-pigs', name: 'Three Crazy Piggies', tag: 'PG Soft', href: '#', desc: 'Três porquinhos', img: '/img/slots/three-cz-pigs.webp' },
 ];
 // só os jogos ligados no servidor; os slots dependem do serviço de slots estar ligado
 const casinoGames = () => CASINO_GAMES.filter((g) => (S.games && (g.abrir ? S.games.slots : S.games[g.id])));
-const casinoCard = (g) =>
-  `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
-function homeCasino() {
-  if (!S.casino) return '';
-  const cards = casinoGames().map(casinoCard).join('');
-  // data-key: o bloco só é recriado quando a lista de jogos muda (ver renderMain)
-  return `<div id="homeCasino" data-key="${esc(casinoGames().map((g) => g.abrir || g.id).join(','))}">
-    <div class="section-head"><h2>Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
-    <div class="cg-grid cg-row">${cards}</div></div>`;
-}
+// provisório: só estes jogos podem ser jogados; os restantes aparecem como indisponíveis
+const CASINO_AVAILABLE = new Set(['decola', 'mines', 'fortune-tiger', 'fortune-ox']);
+const isSoon = (g) => !CASINO_AVAILABLE.has(g.abrir || g.id);
+const casinoCard = (g) => isSoon(g)
+  ? `<div class="cg-card soon" title="${esc(g.name)} — indisponível no momento" aria-disabled="true"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"><span class="cg-soon">Indisponível</span></div></div>`
+  : `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
 function renderCasino() {
   if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
   const card = casinoCard;
   return `<div class="cg-hero"><h1>Cassino</h1></div>
-    <div class="section-head"><h2>Jogos</h2><span class="muted">${casinoGames().filter((g) => !g.soon).length} disponíveis</span></div>
+    <div class="section-head"><h2>Jogos</h2><span class="muted">${casinoGames().filter((g) => !isSoon(g)).length} disponíveis</span></div>
     <div class="cg-grid">${casinoGames().map(card).join('')}</div>
     <p class="muted" style="font-size:12px;margin-top:18px">18+ · Jogue com responsabilidade. Os seus limites de perda e a pausa da conta valem também para o cassino.</p>`;
 }
@@ -416,8 +412,7 @@ function renderMain() {
   else {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
-      html += homeBanner();
-      html += homeCasino();
+      html += homeBanner(); // o cassino só aparece na sua própria página (/cassino)
       html += sportTabs();
       const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
@@ -455,15 +450,7 @@ function renderMain() {
   // nada mudou: não mexe na página (evita que as imagens pisquem a cada atualização)
   if (html === S.lastMainHtml && main.firstChild) { S.keepScroll = true; return; }
   S.lastMainHtml = html;
-  // reaproveita o bloco do cassino já carregado (imagens e posição da fila mantêm-se)
-  const oldCasino = main.querySelector('#homeCasino');
-  const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
-  const newCasino = main.querySelector('#homeCasino');
-  if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
-    newCasino.replaceWith(oldCasino);
-    oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
-  }
   if (S.keepScroll) window.scrollTo(0, scrollY);
   S.keepScroll = true;
 }
@@ -689,11 +676,9 @@ function renderSidebar() {
     html += `</div>`;
   }
   if (S.casino) {
-    html += `<div class="side-title side-casino-title">Cassino</div>
-    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Todos os jogos<span class="cnt">${casinoGames().length}</span></button>
-    ${S.games.decola ? `<a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator</a>` : ''}
-    ${S.games.mines ? `<a class="side-item side-sport" href="/mines"><span class="ic">💎</span>Mines<span class="cnt hot">NOVO</span></a>` : ''}
-    ${S.games.slots ? CASINO_GAMES.filter((g) => g.abrir).map((g) => `<a class="side-item side-sport" href="#" data-abrir="${g.abrir}" data-nome="${esc(g.name)}"><span class="ic">🎰</span>${esc(g.name)}</a>`).join('') : ''}`;
+    // só a entrada "Cassino"; os jogos ficam na página do cassino
+    html += `<div class="side-casino-sep"></div>
+    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Cassino</button>`;
   }
   $('#sidebar').innerHTML = html;
   $('#liveCountNav').textContent = liveN;
@@ -1016,16 +1001,49 @@ async function logout() {
 }
 
 /* ---------------- navegação / eventos ---------------- */
-function go(view, extra = {}) {
+/* rotas: cada secção tem o seu endereço (o servidor devolve o index.html para todas) */
+const ROUTES = { home: '/', live: '/ao-vivo', mybets: '/minhas-apostas', casino: '/cassino', all: '/todos', today: '/hoje', tomorrow: '/amanha', results: '/resultados' };
+function pathFor() {
+  if (S.view === 'league' && S.league) return '/liga/' + encodeURIComponent(S.league);
+  if (S.view === 'sport' && S.sport) return '/esporte/' + encodeURIComponent(S.sport);
+  if (S.view === 'event' && S.eventId) return '/evento/' + encodeURIComponent(S.eventId);
+  return ROUTES[S.view] || '/';
+}
+// lê o endereço atual e devolve a secção correspondente (endereço desconhecido → esportes)
+function routeFromPath() {
+  if (location.hash === '#cassino') return { view: 'casino' }; // links antigos
+  const p = location.pathname.replace(/\/+$/, '') || '/';
+  const m = p.match(/^\/(liga|esporte|evento)\/([^/]+)$/);
+  if (m) {
+    let id; try { id = decodeURIComponent(m[2]); } catch { return { view: 'home' }; }
+    if (m[1] === 'liga') return LEAGUE_BY_KEY[id] ? { view: 'league', league: id } : { view: 'home' };
+    if (m[1] === 'esporte') return SPORTS[id] ? { view: 'sport', sport: id } : { view: 'home' };
+    return { view: 'event', eventId: id };
+  }
+  if (p === '/esportes') return { view: 'home' };
+  const view = Object.keys(ROUTES).find((k) => ROUTES[k] === p);
+  return { view: view || 'home' };
+}
+function syncUrl(replace) {
+  const path = pathFor();
+  if (location.pathname + location.hash === path) return;
+  history[replace ? 'replaceState' : 'pushState']({}, '', path);
+}
+function go(view, extra = {}, opts = {}) {
   Object.assign(S, { view, league: null, sport: null }, extra);
   S.keepScroll = false;
+  if (!opts.fromHistory) syncUrl(opts.replace);
   closeDrawers(); render(); window.scrollTo(0, 0);
 }
+// botões voltar/avançar do navegador
+window.addEventListener('popstate', () => { const r = routeFromPath(); go(r.view, r, { fromHistory: true }); });
 function closeDrawers() { $('#sidebar').classList.remove('open'); $('#slip').classList.remove('open'); if (!$('#modal').classList.contains('show')) $('#overlay').classList.remove('show'); }
 
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, .ev-row, .hero-card');
   if (!t) return;
+  // Ctrl/Cmd/Shift + clique num link de secção: deixa o navegador abrir noutra aba
+  if (t.tagName === 'A' && (e.ctrlKey || e.metaKey || e.shiftKey) && /^\/([^/]|$)/.test(t.getAttribute('href') || '')) return;
   const d = t.dataset;
   if (d.abrir) { // slots: abre o jogo (sem conta: pede login e abre o jogo logo a seguir)
     e.preventDefault();
@@ -1141,7 +1159,7 @@ document.addEventListener('input', (e) => {
     t.value = maskCpf(t.value);
   } else if (t.id === 'search') {
     S.query = t.value;
-    if (['event', 'mybets'].includes(S.view)) S.view = 'today';
+    if (['event', 'mybets', 'casino'].includes(S.view)) { S.view = 'today'; syncUrl(true); }
     renderMain();
   }
 });
@@ -1180,7 +1198,9 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
     const parts = [site.company, site.cnpj && 'CNPJ ' + site.cnpj, site.license && 'Autorização SPA/MF: ' + site.license, site.supportEmail].filter(Boolean);
     const el = $('#siteInfo'); if (el) el.textContent = parts.join(' · ');
   }).catch(() => { });
-  if (location.hash === '#cassino' && S.casino) S.view = 'casino';
+  // abre a secção do endereço (ex.: /cassino, /ao-vivo, /liga/bra.1) e corrige endereços antigos/desconhecidos
+  Object.assign(S, routeFromPath());
+  syncUrl(true);
   render();
   setInterval(async () => { if (await loadEvents()) safeRender(); }, EVENTS_MS);
   setInterval(async () => { if (S.user) { await loadAccount(); safeRender(); } }, ACCOUNT_MS);

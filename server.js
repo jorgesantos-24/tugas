@@ -1181,7 +1181,9 @@ const SLOTS_GAMES_MAP = {
   'treasures-aztec': 'Treasures of Aztec',
   'three-cz-pigs': 'Three Crazy Piggies',
 };
-const SLOTS_GAMES = Object.keys(SLOTS_GAMES_MAP);
+// provisório: só estes slots podem ser abertos (os restantes estão indisponíveis)
+const SLOTS_ENABLED = new Set(['fortune-tiger', 'fortune-ox']);
+const SLOTS_GAMES = Object.keys(SLOTS_GAMES_MAP).filter((g) => SLOTS_ENABLED.has(g));
 const slotName = (code) => SLOTS_GAMES_MAP[code] || 'Slot';
 
 // 1) O jogo pergunta o saldo (antes de cada rodada)
@@ -1227,6 +1229,7 @@ routes['POST /api/slots/launch'] = async (ctx) => {
   if (!SLOTS) fail(503, 'Jogos de slots indisponíveis de momento.');
   const game = String((ctx.body && ctx.body.game) || 'fortune-tiger');
   if (!SLOTS_GAMES_MAP[game]) fail(400, 'Jogo desconhecido.');
+  if (!SLOTS_ENABLED.has(game)) fail(403, 'Este jogo está indisponível no momento.');
   const me = await getUser(u.id, true);
   let j = null;
   try {
@@ -1297,6 +1300,8 @@ function serveStatic(req, res) {
   let p;
   try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400); res.end(); return; }
   if (/^\/(decola|mines)(\.html|\.js|\.css)?$/.test(p)) { if (p.startsWith('/mines') ? !MINES : !CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola' || p === '/mines') p += '.html'; }
+  // rotas do site (esportes, cassino, ao vivo...): todas abrem o index.html e o app.js mostra a secção certa
+  if (/^\/(esportes|cassino|ao-vivo|minhas-apostas|todos|hoje|amanha|resultados)\/?$/.test(p) || /^\/(esporte|liga|evento)\/[^/]+\/?$/.test(p)) p = '/';
   p = PAGES[p] || p;
   const file = path.normalize(path.join(PUB, p));
   if (!file.startsWith(PUB + path.sep) || /app\.old\.js$/.test(file)) { res.writeHead(404); res.end('Não encontrado'); return; }
@@ -1327,12 +1332,25 @@ function parseCookies(h) {
   return out;
 }
 
+// domínio principal; quando definido, os endereços antigos redirecionam para ele
+const CANONICAL_HOST = String(process.env.CANONICAL_HOST || '').trim().toLowerCase();
+const OLD_HOSTS = new Set(String(process.env.OLD_HOSTS || 'golaco-ac746.web.app,golaco-ac746.firebaseapp.com,golaco.web.app')
+  .split(',').map((h) => h.trim().toLowerCase()).filter(Boolean));
+
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('Referrer-Policy', 'same-origin');
   if (req.headers['x-forwarded-proto'] === 'https') res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   const url = new URL(req.url, 'http://x');
+  // endereços antigos (golaco-ac746.web.app...) → domínio novo; só páginas, nunca /api/ (webhooks e chamadas continuam a funcionar)
+  if (CANONICAL_HOST && (req.method === 'GET' || req.method === 'HEAD') && !url.pathname.startsWith('/api/')) {
+    const host = String((process.env.TRUST_PROXY && req.headers['x-forwarded-host']) || req.headers.host || '').split(',')[0].trim().toLowerCase();
+    if (OLD_HOSTS.has(host)) {
+      res.writeHead(301, { Location: `https://${CANONICAL_HOST}${req.url}`, 'Cache-Control': 'public, max-age=3600' });
+      return res.end();
+    }
+  }
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (req.method === 'POST' && url.pathname === '/api/webhooks/bravopay') return handleWebhook(req, res);
 

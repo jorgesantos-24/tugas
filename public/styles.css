@@ -429,8 +429,12 @@ a.cg-card:hover .cg-play{opacity:1;transform:none}
 .cg-info span{color:var(--muted);font-size:12px}
 .cg-card.soon{opacity:.55}
 .cg-card.soon .cg-art{background:var(--panel2)}
+.cg-card.soon{cursor:not-allowed}
+.cg-card.soon .cg-cover{filter:grayscale(1)}
+.cg-soon{position:relative;background:rgba(0,0,0,.75);color:#fff;font-weight:800;font-size:12px;letter-spacing:.4px;text-transform:uppercase;padding:6px 12px;border-radius:999px}
 .cg-lock{font-size:28px;opacity:.6}
 @media (max-width:640px){ .cg-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px} .cg-play{opacity:1;transform:none;font-size:12px;padding:6px 12px} }
+.side-casino-sep{margin:10px 0 8px;border-top:1px solid var(--line)}
 .side-casino-title{margin-top:10px;border-top:1px solid var(--line);padding-top:16px;color:var(--yellow)}
 .side-item .cnt.hot{background:var(--red);color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:8px;letter-spacing:.4px}
 .see-all{margin-left:auto;color:var(--yellow);font-weight:700;font-size:13px}
