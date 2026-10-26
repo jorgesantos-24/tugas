@@ -253,6 +253,7 @@ function oddBtn(sel, ev, opts = {}) {
 }
 
 function timeCell(ev) {
+  if (ev.outright) return `<b style="color:#fff">🏆</b><br>até ${ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
   if (ev.state === 'in') return `<span class="lv"><span class="live-dot"></span>${esc(ev.clock || 'Ao vivo')}</span>`;
   const dd = ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   if (ev.state === 'post') return `<span>${esc(ev.clock)}</span><br><span>${dd}</span>`;
@@ -286,7 +287,7 @@ function evRow(ev) {
     main.map((s) => oddBtn(s, ev)).join('') + (custom ? '' : '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join(''));
   return `<div class="ev-row ${goal ? 'goal' : ''} ${ev.state === 'in' ? 'live' : ''}" data-ev="${ev.id}">
     <div class="ev-time">${timeCell(ev)}</div>
-    <div class="ev-teams">${teamLine(ev.home, ev, ev.away)}${teamLine(ev.away, ev, ev.home)}</div>
+    <div class="ev-teams">${ev.outright ? `<div class="team-line"><span class="nm">${esc(ev.home.name)}</span></div><div class="out-close">${isSuspended(ev) ? 'Apostas encerradas' : 'Apostas até ' + dateLabel(ev.date)}</div>` : teamLine(ev.home, ev, ev.away) + teamLine(ev.away, ev, ev.home)}</div>
     <div class="ev-odds">${oddsHtml}</div>
     <div class="ev-more">${ev.state !== 'post' && sels.length ? '+' + sels.length : ''}</div>
   </div>`;
@@ -420,7 +421,10 @@ function renderMain() {
       html += sportTabs();
       const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
-      const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && (e.markets || e.cm));
+      const upcoming = filtered((e) => !e.outright && e.state === 'pre' && (isToday(e) || isTomorrow(e)) && (e.markets || e.cm));
+      // longo prazo (campeão, artilheiro...): enquanto as apostas estiverem abertas
+      const longTerm = filtered((e) => e.outright && e.cm && !isSuspended(e)).sort((a, b) => a.date - b.date);
+      if (longTerm.length) html += `<div class="section-head"><h2>🏆 Longo prazo</h2><span class="muted">${longTerm.length} mercados</span></div>` + leagueBlocks(longTerm);
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
       html += upcoming.length ? leagueBlocks(upcoming) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {
@@ -480,6 +484,25 @@ function linesTable(list, ev) {
     ${[...rows].sort((a, b) => a[0] - b[0]).map(([k, r]) => `<div class="ln-row">${total ? `<span class="ln">${k}</span>` : ''}${cell(r[0], total ? '' : fmtLine(r[0]?.cline ?? k))}${cell(r[1], total ? '' : fmtLine(r[1]?.cline ?? -k))}</div>`).join('')}</div>`;
 }
 
+// evento de longo prazo: título, prazo de fechamento e os mercados (lista de participantes)
+function renderOutright(ev, sels) {
+  const closed = isSuspended(ev);
+  let html = `<a href="#" class="back" data-action="back">← Voltar</a>
+  <div class="ev-detail-head">
+    <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>🏆 Longo prazo</span></div>
+    <div class="out-title">${esc(ev.home.name)}</div>
+    <div class="big-clock" style="color:var(--muted);text-align:center">${closed ? 'Apostas encerradas — à espera do resultado' : 'Apostas até ' + dateLabel(ev.date)}</div>
+  </div>`;
+  const groups = {};
+  for (const s of sels) (groups[s.marketName] ||= []).push(s);
+  if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento.</div>`;
+  for (const [name, list] of Object.entries(groups)) {
+    const c = list[0].cclose;
+    html += `<div class="market"><div class="market-head">${esc(name)}${c ? `<small>${Date.now() >= c ? 'fechado' : 'até ' + dateLabel(new Date(c))}</small>` : ''}</div><div class="market-body many">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div></div>`;
+  }
+  return html;
+}
+
 function renderEvent() {
   const ev = S.events.get(S.eventId);
   if (!ev) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Evento não encontrado.</div>`;
@@ -490,6 +513,7 @@ function renderEvent() {
   const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${esc(ev.clock)}</div>`
     : `<div class="big-clock" style="color:var(--muted)">${ev.state === 'post' ? esc(ev.clock) : dateLabel(ev.date)}</div>`;
   const score = ev.state === 'pre' ? 'vs' : `${ev.home.score ?? 0} : ${ev.away.score ?? 0}`;
+  if (ev.outright) return renderOutright(ev, sels);
   let html = `<a href="#" class="back" data-action="back">← Voltar</a>
   <div class="ev-detail-head">
     <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>${esc(ev.venue)}</span></div>
@@ -523,7 +547,8 @@ function renderEvent() {
       if (g !== lastGroup && multi) html += `<div class="map-head">${esc(g || 'Partida')}</div>`;
       lastGroup = g;
       const name = g && rawName.startsWith(g + ' — ') ? rawName.slice(g.length + 3) : rawName;
-      html += `<div class="market"><div class="market-head">${esc(name)}${ev.state === 'in' ? '<small>Ao vivo · odds reais</small>' : ''}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
+      const cc = list[0].cclose;
+      html += `<div class="market"><div class="market-head">${esc(name)}${cc ? `<small>${Date.now() >= cc ? 'fechado' : 'apostas até ' + dateLabel(new Date(cc))}</small>` : ev.state === 'in' ? '<small>Ao vivo · odds reais</small>' : ''}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
     }
   }
   const tl = ev.details.filter((d) => d.goal || d.red || d.yellow);
@@ -606,7 +631,7 @@ function renderSlip() {
       <button class="x" data-remove="${esc(s.key)}" title="Remover">×</button>
       <div class="si-pick"><span>${esc(sel ? sel.name : 'Seleção indisponível')}</span><span class="si-odds">${changed ? `<span class="old">${fmtOdd(s.odds)}</span>` : ''}${sel ? fmtOdd(sel.odds) : '-'}</span></div>
       <div class="si-market">${esc(sel ? sel.marketName : '')}</div>
-      <div class="si-event">${ev ? `${ev.state === 'in' ? `<span class="live-dot"></span><b style="color:var(--red)">${esc(ev.clock)}</b> ${ev.home.score}-${ev.away.score} · ` : ''}${esc(ev.home.short)} x ${esc(ev.away.short)}` : ''}</div>
+      <div class="si-event">${ev ? `${ev.state === 'in' ? `<span class="live-dot"></span><b style="color:var(--red)">${esc(ev.clock)}</b> ${ev.home.score}-${ev.away.score} · ` : ''}${esc(evLabel(ev))}` : ''}</div>
       ${suspended ? `<div class="si-warn red">🔒 ${!sel && ev && ev.markets ? 'Linha alterada — mercado indisponível' : 'Mercado suspenso'}</div>` : changed ? `<div class="si-warn">A odd mudou de ${fmtOdd(s.odds)} para ${fmtOdd(sel.odds)}</div>` : ''}
       ${!multi ? `<div class="stake-row"><label class="stake"><span>R$</span><input inputmode="decimal" data-stake="${esc(s.key)}" value="${esc(stake)}" placeholder="0,00"></label><div class="ret">Retorno<b>${money(ret)}</b></div></div>` : ''}
     </div>`;

@@ -75,6 +75,9 @@ e diz exatamente o que falta.
   - *Eventos da equipa* — criar um evento num campeonato (da equipa ou da ESPN) e atualizar à mão o estado
     (por começar / ao vivo / encerrado), o placar e o tempo.
   - *Mercados em jogos reais* — acrescentar mercados próprios (escanteios, cartões...) a um jogo do feed da ESPN.
+  - *Longo prazo* (em "+ Novo evento") — evento sem adversário (ex.: "Campeão do SIX Major 2026") com prazo de
+    fechamento e lista de participantes com odds. Depois do prazo as apostas fecham sozinhas; a equipa liquida
+    quando souber o resultado. Qualquer mercado (também num jogo) pode ter o seu próprio prazo ("Fecha em").
   - Em cada evento: criar mercados com seleções e **odds definidas pela equipa**, aposta máxima opcional, mudar odds,
     suspender/abrir (um ou todos), ver as apostas e o valor a pagar por seleção e **liquidar** (Ganhou / Perdeu / Devolvida).
     As apostas desse mercado são pagas logo a seguir. Mercados com apostas em aberto não podem ser apagados.

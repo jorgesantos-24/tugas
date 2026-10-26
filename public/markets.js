@@ -336,9 +336,11 @@ function selections(ev) {
     for (const c of cm.sels) {
       out.push({
         market: 'custom', pick: `${cm.id}.${c.id}`, lbl: c.name, name: c.name, odds: c.odds, marketName: cm.name,
-        locked: cm.status !== 'open' || !!c.locked, maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
+        // fechado à mão, linha bloqueada pelo motor, ou prazo de fechamento do mercado já passou
+        locked: cm.status !== 'open' || !!c.locked || (cm.closesAt != null && Date.now() >= cm.closesAt), maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
         cside: c.side || null, cline: c.line ?? null, // lado/linha (mercados automáticos): o site arruma as linhas em tabela
         cgroup: cm.group || null, // "Mapa 1", "Mapa 2"... (melhor de 3, 5, 7)
+        cclose: cm.closesAt ?? null,
       });
     }
   }
@@ -346,8 +348,11 @@ function selections(ev) {
 }
 
 function isSuspended(ev, now = Date.now()) {
-  return !ev || ev.state === 'post' || (!ev.markets && !ev.cm?.length) || (ev.suspendedUntil || 0) > now;
+  // longo prazo: depois do prazo de fechamento já não se aposta
+  return !ev || ev.state === 'post' || (!ev.markets && !ev.cm?.length) || (ev.suspendedUntil || 0) > now || (ev.closesAt != null && now >= ev.closesAt);
 }
+// nome do evento: "Casa x Fora", ou o título num evento de longo prazo ("Campeão do SIX Major")
+const evLabel = (ev) => (ev.outright ? ev.home.name : `${ev.home.short} x ${ev.away.short}`);
 
 /* ---------- liquidação ---------- */
 function regulationScore(ev) {
@@ -422,6 +427,6 @@ function cashoutFactor(bet, findSel, now = Date.now()) {
 
 const Markets = {
   SPORTS, LEAGUES, LEAGUE_BY_KEY, setCatalog, round2, am2dec, parseOdds, parseEvent, STATUS_PT, translateDetail,
-  fmtLine, MARKET_NAMES, selections, isSuspended, regulationScore, legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, DERIVED_MARKETS, deriveSoccer, scoreMatrix, sumP, fitModel, priceWithMargin, ladder, devig,
+  fmtLine, MARKET_NAMES, selections, isSuspended, evLabel, regulationScore, legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, DERIVED_MARKETS, deriveSoccer, scoreMatrix, sumP, fitModel, priceWithMargin, ladder, devig,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Markets;

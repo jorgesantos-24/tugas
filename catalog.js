@@ -49,7 +49,7 @@ module.exports = function catalogRoutes(routes, D) {
       half: Math.round(n(r.half ?? 0, 0, 40, 'Rounds do 1º tempo')),
     };
   }
-  const rulesFor = (d) => D.catLeagues.get(d.league)?.rules || null;
+  const rulesFor = (d) => (d.outright ? null : D.catLeagues.get(d.league)?.rules || null); // longo prazo: sem placar nem motor
   const liveOf = (d, R) => ({ auto: false, p: null, bestOf: R.bestOf, base: { mh: 0, ma: 0, a: 0, b: 0, history: [] }, rounds: [], ...(d.live || {}) });
   function liveCtx(d) {
     const R = rulesFor(d);
@@ -188,7 +188,7 @@ module.exports = function catalogRoutes(routes, D) {
     const sug = m.status !== 'settled' && ctx ? L.suggest(m, { ...ctx, p: ctx.p ?? 0.5 }) : null;
     return {
       id: m.id, name: m.name, status: m.status, maxStake: fromCents(m.maxStake ?? null), createdAt: m.createdAt, createdBy: m.createdBy || null,
-      settledAt: m.settledAt || null, settledBy: m.settledBy || null, note: m.note || null, auto: m.auto || null, group: m.group || null, generated: !!m.generated,
+      settledAt: m.settledAt || null, settledBy: m.settledBy || null, note: m.note || null, auto: m.auto || null, group: m.group || null, generated: !!m.generated, closesAt: m.closesAt ?? null,
       sels: m.sels.map((s) => {
         const e = exp.get(`${m.id}.${s.id}`);
         return {
@@ -224,7 +224,7 @@ module.exports = function catalogRoutes(routes, D) {
   /* ---------- resumos ---------- */
   const pubEventRow = (d) => ({
     id: d.id, league: d.league, leagueName: leagueName(d.league), home: d.home, away: d.away, startsAt: d.startsAt, state: d.state,
-    score: d.score || null, clock: d.clock || '', archived: !!d.archived, markets: (d.markets || []).length,
+    score: d.score || null, clock: d.clock || '', archived: !!d.archived, outright: !!d.outright, markets: (d.markets || []).length,
     open: (d.markets || []).filter((m) => m.status === 'open').length, toSettle: (d.markets || []).filter((m) => m.status !== 'settled').length, bets: openBetsOn(d.id),
   });
 
@@ -368,10 +368,15 @@ module.exports = function catalogRoutes(routes, D) {
       if (!(startsAt > now() - 60 * 86400000 && startsAt < now() + 400 * 86400000)) fail(400, 'Data/hora inválida.');
       const state = STATES.includes(b.state) ? b.state : 'pre';
       const sc = (v) => (v === '' || v == null ? 0 : Math.max(0, Math.min(999, parseInt(v, 10) || 0)));
-      const data = {
-        league, home: text(b.home, 60, 'a equipa/participante da casa', 1), away: text(b.away, 60, 'a equipa/participante de fora', 1), startsAt, state,
-        score: state === 'pre' ? null : { h: sc(b.scoreH), a: sc(b.scoreA) }, clock: text(b.clock, 30, 'o tempo', 0), updatedAt: now(),
-      };
+      // longo prazo: só um título ("Campeão do SIX Major") e a data em que as apostas fecham (startsAt)
+      const outright = id ? !!D.manualEvents.get(id)?.outright : !!b.outright;
+      if (outright && !id && !(startsAt > now())) fail(400, 'O prazo de fechamento tem de ser no futuro.');
+      const data = outright
+        ? { league, home: text(b.home, 80, 'o título (ex.: Campeão do SIX Major)'), away: '', outright: true, startsAt, state: state === 'in' ? 'pre' : state, score: null, clock: '', updatedAt: now() }
+        : {
+          league, home: text(b.home, 60, 'a equipa/participante da casa', 1), away: text(b.away, 60, 'a equipa/participante de fora', 1), startsAt, state,
+          score: state === 'pre' ? null : { h: sc(b.scoreH), a: sc(b.scoreA) }, clock: text(b.clock, 30, 'o tempo', 0), updatedAt: now(),
+        };
       let ref;
       if (id) {
         if (!D.manualEvents.has(id)) fail(404, 'Evento não encontrado.');
@@ -396,8 +401,18 @@ module.exports = function catalogRoutes(routes, D) {
         ref = col.manualEvents().doc(nid);
         await ref.create({ ...data, id: nid, markets: [], archived: false, createdAt: now(), createdBy: admin.email });
       }
-      await log(null, admin, id ? 'evento:editar' : 'evento:criar', ref.id, { event: `${data.home} x ${data.away}`, league, state, score: data.score, startsAt });
+      await log(null, admin, id ? 'evento:editar' : 'evento:criar', ref.id, { event: outright ? data.home : `${data.home} x ${data.away}`, league, state, score: data.score, startsAt, outright });
       await syncLocal(D.manualEvents, ref);
+      // longo prazo: o primeiro mercado (ex.: "Campeão") vem no mesmo pedido
+      if (!id && outright && b.market) {
+        const mkName = text(b.market.name || 'Vencedor', 80, 'o nome do mercado');
+        const sels = parseSels(b.market.sels);
+        await editMarkets(admin, ref.id, 'mercado:criar', (markets) => {
+          markets.push({ id: newId(new Set()), name: mkName, status: 'open', maxStake: maxStakeOf(b.market.maxStake), auto: null, group: null, closesAt: null, sels, createdAt: now(), createdBy: admin.email, settledAt: null });
+          return { log: { market: mkName, sels: sels.map((s) => `${s.name} @${s.odds}`) } };
+        });
+        return { id: ref.id, made: 1 };
+      }
       // campeonato com regras do jogo: já cria o Vencedor, liga as odds automáticas e abre o pacote padrão
       let made = 0;
       if (!id && b.auto && rulesFor(data)) {
@@ -500,12 +515,14 @@ module.exports = function catalogRoutes(routes, D) {
       const evId = String(b.evId || ''), mId = String(b.id || '');
       const name = text(b.name, 80, 'o nome do mercado');
       const maxStake = maxStakeOf(b.maxStake);
+      const closesAt = b.closesAt ? Number(b.closesAt) : null; // prazo de fechamento deste mercado (opcional)
+      if (closesAt != null && !(closesAt > now() - 86400000 && closesAt < now() + 400 * 86400000)) fail(400, 'Prazo de fechamento inválido.');
       const exp = exposure(evId);
       const r = await editMarkets(admin, evId, mId ? 'mercado:editar' : 'mercado:criar', (markets, doc) => {
         const auto = autoOf(b.auto, { ...doc, id: evId });
         if (!mId) {
           if (markets.length >= 80) fail(400, 'Limite de 80 mercados por evento.');
-          const m = { id: newId(new Set(markets.map((x) => x.id))), name, status: b.open === false ? 'suspended' : 'open', maxStake, auto, group: groupOf(auto, doc), sels: parseSels(b.sels), createdAt: now(), createdBy: admin.email, settledAt: null };
+          const m = { id: newId(new Set(markets.map((x) => x.id))), name, status: b.open === false ? 'suspended' : 'open', maxStake, auto, group: groupOf(auto, doc), closesAt, sels: parseSels(b.sels), createdAt: now(), createdBy: admin.email, settledAt: null };
           inferInto(auto, m.sels, doc);
           markets.push(m);
           return { id: m.id, log: { market: name, sels: m.sels.map((s) => `${s.name} @${s.odds}`) } };
@@ -518,7 +535,7 @@ module.exports = function catalogRoutes(routes, D) {
         }
         const moved = sels.map((n) => [n, m.sels.find((s) => s.id === n.id)]).filter(([n, o]) => o && o.odds !== n.odds).map(([n, o]) => `${n.name} ${o.odds}→${n.odds}`);
         inferInto(auto, sels, doc);
-        Object.assign(m, { name, maxStake, auto, group: m.generated ? m.group : groupOf(auto, doc), sels, updatedAt: now() });
+        Object.assign(m, { name, maxStake, auto, group: m.generated ? m.group : groupOf(auto, doc), closesAt, sels, updatedAt: now() });
         return { id: m.id, log: { market: name, odds: moved, maxStake } };
       });
       return { id: r.id };

@@ -170,6 +170,8 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .market-body{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
 /* totais e handicaps em tabela: uma linha por fila */
 .lines-tbl{padding:8px 12px 12px;display:flex;flex-direction:column;gap:6px}
+.out-close{font-size:11px;color:var(--muted);margin-top:2px}
+.out-title{font-size:24px;font-weight:800;text-align:center;margin:14px 0 6px}
 .map-head{margin:18px 0 8px;font-size:13px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--yellow);border-bottom:1px solid var(--line);padding-bottom:6px}
 .lines-tbl .ln-head,.lines-tbl .ln-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:center}
 .lines-tbl.tot .ln-head,.lines-tbl.tot .ln-row{grid-template-columns:64px 1fr 1fr}

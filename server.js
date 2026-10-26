@@ -361,7 +361,7 @@ let catalogCache = null;
 // o que o site vê de cada mercado: só os abertos e suspensos, sem resultados
 function pubMarkets(list) {
   const out = (list || []).filter((m) => m.status !== 'settled')
-    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, group: m.group || null, sels: m.sels.filter((s) => !s.hidden).map((s) => ({ id: s.id, name: s.name, odds: s.odds, ...(s.locked ? { locked: true } : {}), ...(s.side ? { side: s.side, line: s.line ?? null } : {}) })) }))
+    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, group: m.group || null, closesAt: m.closesAt ?? null, sels: m.sels.filter((s) => !s.hidden).map((s) => ({ id: s.id, name: s.name, odds: s.odds, ...(s.locked ? { locked: true } : {}), ...(s.side ? { side: s.side, line: s.line ?? null } : {}) })) }))
     .filter((m) => m.sels.length); // mercado fechado na reta final: sai do site
   return out.length ? out : null;
 }
@@ -386,6 +386,8 @@ function manualToEvent(d) {
     date: new Date(d.startsAt), state: d.state, completed: d.state === 'post', statusName: '',
     clock: d.clock || (d.state === 'post' ? 'Encerrado' : d.state === 'in' ? 'Ao vivo' : undefined),
     home: side(d.home, d.score?.h, 'h'), away: side(d.away, d.score?.a, 'a'), details: [], venue: '', markets: null, cm: pubMarkets(d.markets),
+    // longo prazo (campeão, artilheiro...): sem adversário; as apostas fecham na data do evento
+    ...(d.outright ? { outright: true, closesAt: d.startsAt } : {}),
   };
 }
 
@@ -990,7 +992,7 @@ const routes = {
           if (sel.maxStake && tk.stake > sel.maxStake) { reason = `aposta máxima no mercado "${sel.marketName}": ${brl(sel.maxStake)}`; break; }
           legs.push({
             key: sel.key, evId: ev.id, league: ev.league, path: ev.path, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null,
-            name: sel.name, marketName: sel.marketName, event: `${ev.home.short} x ${ev.away.short}`, leagueName: ev.leagueName,
+            name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
           });
         }

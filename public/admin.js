@@ -281,7 +281,7 @@ const SPORT_ICONS = ['🎾', '🏐', '🥊', '🥋', '🏎️', '🎮', '🏓', 
 const fmtOddIn = (o) => String(o.toFixed(2));
 const localInput = (t) => { const d = new Date(t); return new Date(t - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
 const evState = (ev) => pill(EV_STATE[ev.state][0], EV_STATE[ev.state][1] + (ev.score ? ` ${ev.score.h}-${ev.score.a}` : '') + (ev.state === 'in' && ev.clock ? ' · ' + ev.clock : ''));
-const evName = (ev) => `${ev.home}${ev.away ? ' x ' + ev.away : ''}`;
+const evName = (ev) => (ev.outright ? `🏆 ${ev.home}` : `${ev.home}${ev.away ? ' x ' + ev.away : ''}`);
 async function catalog(fresh) { if (fresh || !A.cat) A.cat = await api('GET', '/api/admin/catalog'); return A.cat; }
 
 async function viewCatalog() {
@@ -296,7 +296,7 @@ async function viewCatalog() {
 function viewManualEvents(cat) {
   const list = cat.events.filter((ev) => ev.archived === A.catArchived);
   const rows = list.map((ev) => `<tr>
-    <td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${evState(ev)}</td>
+    <td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${ev.outright ? pill(ev.startsAt > Date.now() ? 'ok' : 'REVIEW', ev.startsAt > Date.now() ? 'longo prazo · aberto' : 'prazo terminado') : evState(ev)}</td>
     <td>${ev.markets ? `${ev.open} abertos de ${ev.markets}` : '<span class="sub">nenhum</span>'}${ev.toSettle && ev.state === 'post' ? `<div class="sub" style="color:var(--yellow)">${ev.toSettle} por liquidar</div>` : ''}</td>
     <td class="num">${ev.bets || ''}</td>
     <td><button class="btn btn-green" style="padding:6px 10px;font-size:12px" data-catev="${esc(ev.id)}">Gerir mercados</button></td></tr>`).join('');
@@ -340,7 +340,18 @@ async function viewCatEvent() {
   A.catData = d;
   const ev = d.event;
   let info;
-  if (ev.manual) {
+  if (ev.manual && ev.outright) {
+    const cat = await catalog();
+    info = `<div class="card"><form id="evForm" data-id="${esc(ev.id)}" class="ev-form">
+      <label>Campeonato<select class="mini" name="league">${leagueOptions(cat, ev.league)}</select></label>
+      <label style="grid-column:span 2">Título<input class="mini" name="home" value="${esc(ev.home)}" required maxlength="80"></label>
+      <label>Apostas fecham em<input class="mini" type="datetime-local" name="startsAt" value="${localInput(ev.startsAt)}" required></label>
+      <label>Estado<select class="mini" name="state"><option value="pre" ${ev.state !== 'post' ? 'selected' : ''}>em aberto</option><option value="post" ${ev.state === 'post' ? 'selected' : ''}>terminado</option></select></label>
+      <button class="btn btn-green" type="submit">Guardar evento</button>
+    </form><div class="form-err" id="formErr"></div>
+    <p class="sub" style="margin:8px 0 0">${ev.startsAt > Date.now() ? `Apostas abertas até ${dt(ev.startsAt)}; depois fecham sozinhas.` : 'O prazo terminou: as apostas estão fechadas. Quando souber o resultado, liquide cada mercado (marque o vencedor; os outros ficam "Perdeu").'}</p>
+    <div class="acts" style="margin-top:10px"><button class="btn btn-ghost" data-archive="${esc(ev.id)}" data-val="${ev.archived ? '0' : '1'}">${ev.archived ? 'Reativar no site' : 'Arquivar (tirar do site)'}</button></div></div>`;
+  } else if (ev.manual) {
     const cat = await catalog();
     info = `<div class="card"><form id="evForm" data-id="${esc(ev.id)}" class="ev-form">
       <label>Campeonato<select class="mini" name="league">${leagueOptions(cat, ev.league)}</select></label>
@@ -440,7 +451,9 @@ function marketCard(m) {
   const closed = m.auto && m.sels.length && m.sels.every((s) => s.hidden);
   return `<form class="mk-card mkForm" data-mk="${esc(m.id)}">
     <div class="mk-head"><input class="mini grow" name="name" value="${esc(m.name)}" required maxlength="80" title="Nome do mercado">${closed ? pill('REVIEW', 'fora do site (reta final)') : pill(cls, label)}${A.catData.event.manual ? typeSelect(m.auto) : ''}
-      <label class="sub" style="display:flex;gap:6px;align-items:center">Aposta máx. R$<input class="mini" name="maxStake" style="width:90px" value="${m.maxStake != null ? String(m.maxStake).replace('.', ',') : ''}" placeholder="sem limite"></label></div>
+      <label class="sub" style="display:flex;gap:6px;align-items:center">Aposta máx. R$<input class="mini" name="maxStake" style="width:90px" value="${m.maxStake != null ? String(m.maxStake).replace('.', ',') : ''}" placeholder="sem limite"></label>
+      <label class="sub" style="display:flex;gap:6px;align-items:center" title="Depois desta data o mercado fecha sozinho (opcional)">Fecha em<input class="mini" type="datetime-local" name="mclose" value="${m.closesAt ? localInput(m.closesAt) : ''}"></label>
+      ${m.closesAt && m.closesAt <= Date.now() ? pill('REVIEW', 'prazo terminado') : ''}</div>
     <div class="tbl-wrap" style="border:0"><table><thead><tr><th>Seleção</th><th>Odd</th><th class="num">Apostas</th><th class="num">Apostado</th><th class="num" title="Prêmio a pagar se esta seleção ganhar (apostas simples)">A pagar se ganhar</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>
     <div class="mk-foot"><button type="button" class="btn btn-ghost" data-seladd="${esc(m.id)}">+ Seleção</button>
@@ -468,11 +481,22 @@ async function newEventModal() {
   // de preferência um campeonato com regras do jogo (já vem com os mercados automáticos)
   const pick = (cat.leagues.find((l) => !l.builtin && l.rules && !l.hidden) || cat.leagues.find((l) => !l.builtin))?.key;
   openModal(`<h3>Novo evento</h3><p class="sub">Escolha o campeonato (pode criar um novo em "Modalidades e campeonatos").</p>
-    <form id="newEvForm"><label class="lbl">Campeonato *</label><select class="inp" name="league" id="newEvLeague" required>${leagueOptions(cat, pick)}</select>
-      <label class="lbl">Casa / participante 1 *</label><input class="inp" name="home" required maxlength="60">
-      <label class="lbl">Fora / participante 2 *</label><input class="inp" name="away" required maxlength="60">
-      <label class="lbl">Início *</label><input class="inp" type="datetime-local" name="startsAt" value="${localInput(t.getTime())}" required>
-      <div id="newEvAuto"></div>
+    <form id="newEvForm"><div class="subtabs" style="margin:0 0 6px"><label class="check" style="margin:0 12px 0 0"><input type="radio" name="kind" value="game" checked> Jogo (casa x fora)</label><label class="check" style="margin:0"><input type="radio" name="kind" value="outright"> 🏆 Longo prazo (campeão, artilheiro...)</label></div>
+      <label class="lbl">Campeonato *</label><select class="inp" name="league" id="newEvLeague" required>${leagueOptions(cat, pick)}</select>
+      <fieldset id="evKindGame" style="border:0;padding:0;margin:0">
+        <label class="lbl">Casa / participante 1 *</label><input class="inp" name="home" required maxlength="60">
+        <label class="lbl">Fora / participante 2 *</label><input class="inp" name="away" required maxlength="60">
+        <label class="lbl">Início *</label><input class="inp" type="datetime-local" name="startsAt" value="${localInput(t.getTime())}" required>
+        <div id="newEvAuto"></div>
+      </fieldset>
+      <fieldset id="evKindOut" style="border:0;padding:0;margin:0;display:none" disabled>
+        <label class="lbl">Título *</label><input class="inp" name="title" required maxlength="80" placeholder="Ex.: Campeão do SIX Major 2026">
+        <label class="lbl">Apostas fecham em *</label><input class="inp" type="datetime-local" name="closesAt" value="${localInput(t.getTime() + 7 * 86400000)}" required>
+        <label class="lbl">Mercado *</label><input class="inp" name="mkName" value="Campeão" required maxlength="80">
+        <label class="lbl">Participantes e odds * (um por linha: <b>Nome; odd</b>)</label>
+        <textarea class="inp" name="mkSels" required placeholder="FaZe Clan; 3.50&#10;Team Liquid; 4.00&#10;w7m esports; 5.00&#10;Team Falcons; 6.50"></textarea>
+        <p class="sub" style="margin:6px 0 0">Depois do prazo as apostas fecham sozinhas. Pode juntar mais mercados (ex.: melhor jogador) na página do evento, cada um com o seu prazo.</p>
+      </fieldset>
       <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Criar evento</button></form>`);
   renderNewEvAuto();
 }
@@ -572,6 +596,7 @@ function marketModal() {
       ${ev.manual ? `<label class="lbl">Odds</label><div style="display:flex;gap:8px;align-items:center" id="mkType">${typeSelect(null)}</div>${A.catData.rules ? '' : '<p class="sub">⚡ Odds automáticas: defina as regras do jogo no campeonato.</p>'}` : ''}
       <textarea class="inp" name="sels" id="mkSels" required placeholder="Flamengo; 1.85&#10;Empate; 3.40&#10;Palmeiras; 4.20"></textarea>
       <label class="lbl">Aposta máxima por aposta (R$, opcional)</label><input class="inp" name="maxStake" placeholder="sem limite">
+      <label class="lbl">Apostas fecham em (opcional)</label><input class="inp" type="datetime-local" name="mclose">
       <label class="check"><input type="checkbox" name="open" checked> Abrir já para apostas (senão fica suspenso)</label>
       <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit">Criar mercado</button></form>`);
 }
@@ -710,6 +735,11 @@ document.addEventListener('change', (e) => {
   if (e.target.matches('select[data-res]') && e.target.value === 'won') document.querySelectorAll('select[data-res]').forEach((x) => { if (!x.value) x.value = 'lost'; });
   if (e.target.id === 'catArchived') { A.catArchived = e.target.value === '1'; render(); }
   if (e.target.id === 'newEvLeague') renderNewEvAuto();
+  if (e.target.name === 'kind' && e.target.form?.id === 'newEvForm') {
+    const out = e.target.value === 'outright';
+    $('#evKindGame').disabled = out; $('#evKindGame').style.display = out ? 'none' : '';
+    $('#evKindOut').disabled = !out; $('#evKindOut').style.display = out ? '' : 'none';
+  }
   if (e.target.id === 'rulesOn') $('#rulesBody').style.display = e.target.checked ? '' : 'none';
   if (e.target.id === 'rulesPreset' && A.cat.presets[e.target.value]) {
     const P = A.cat.presets[e.target.value], f = e.target.form;
@@ -740,20 +770,22 @@ document.addEventListener('submit', async (e) => {
       toast(r.made ? `Odds automáticas guardadas · ${r.made} mercados abertos` : 'Odds automáticas guardadas', 'ok');
     }
     if (f.id === 'newEvForm') {
-      const r = await api('POST', '/api/admin/catalog/event', { league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: 'pre', auto: !!fd.auto, oddsHome: fd.oddsHome, oddsAway: fd.oddsAway, bestOf: fd.bestOf });
-      closeModal(); toast(r.made ? `Evento criado com ${r.made} mercados automáticos` : 'Evento criado. Agora adicione os mercados.', 'ok'); return go('mercado-ev', { catEv: r.id });
+      const r = fd.kind === 'outright'
+        ? await api('POST', '/api/admin/catalog/event', { league: fd.league, outright: true, home: fd.title, away: '', startsAt: new Date(fd.closesAt).getTime(), state: 'pre', market: { name: fd.mkName, sels: parseSelLines(fd.mkSels) } })
+        : await api('POST', '/api/admin/catalog/event', { league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: 'pre', auto: !!fd.auto, oddsHome: fd.oddsHome, oddsAway: fd.oddsAway, bestOf: fd.bestOf });
+      closeModal(); toast(fd.kind === 'outright' ? 'Evento de longo prazo criado' : r.made ? `Evento criado com ${r.made} mercados automáticos` : 'Evento criado. Agora adicione os mercados.', 'ok'); return go('mercado-ev', { catEv: r.id });
     }
     if (f.id === 'evForm') {
       await api('POST', '/api/admin/catalog/event', { id: f.dataset.id, league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: fd.state, scoreH: fd.scoreH, scoreA: fd.scoreA, mapsH: fd.mapsH, mapsA: fd.mapsA, clock: fd.clock });
       toast('Evento atualizado', 'ok');
     }
     if (f.id === 'newMkForm') {
-      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, name: fd.name, sels: parseSelLines(fd.sels), maxStake: fd.maxStake, open: !!fd.open, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null });
+      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, name: fd.name, sels: parseSelLines(fd.sels), maxStake: fd.maxStake, open: !!fd.open, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null, closesAt: fd.mclose ? new Date(fd.mclose).getTime() : null });
       closeModal(); toast('Mercado criado', 'ok');
     }
     if (f.classList.contains('mkForm')) {
       const sels = [...f.querySelectorAll('tr[data-sel]')].map((tr) => ({ id: tr.dataset.sel || undefined, name: tr.querySelector('[name=sname]').value, odds: tr.querySelector('[name=sodds]').value }));
-      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, id: f.dataset.mk, name: fd.name, maxStake: fd.maxStake, sels, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null });
+      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, id: f.dataset.mk, name: fd.name, maxStake: fd.maxStake, sels, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null, closesAt: fd.mclose ? new Date(fd.mclose).getTime() : null });
       toast('Mercado guardado', 'ok');
     }
     if (f.id === 'settleMkForm') {
