@@ -1194,14 +1194,25 @@ routes['POST /api/pgsoft/gold_api/user_balance'] = async (ctx) => {
   return { msg: 'SUCCESS', user_balance: fromCents(u.balance), currency: 'BRL' };
 };
 
+// só o serviço dos slots conhece o PGSOFT_SECRET: ele envia-o como agent_secret em cada rodada
+const PGS_SECRET_HASH = crypto.createHash('sha256').update(PGS_SECRET).digest();
+const isSlotsService = (secret) => !!PGS_SECRET && typeof secret === 'string'
+  && crypto.timingSafeEqual(crypto.createHash('sha256').update(secret).digest(), PGS_SECRET_HASH);
+
 // 2) O jogo comunica o resultado da rodada (débito/crédito). Idempotente por txn_id.
 routes['POST /api/pgsoft/gold_api/game_callback'] = async (ctx) => {
   const b = ctx.body || {};
+  // sem a chave do serviço dos slots ninguém mexe no saldo (impede créditos forjados pelo navegador)
+  if (!isSlotsService(b.agent_secret)) {
+    console.warn(`[Slots] Rodada recusada: chave inválida (ip ${ctx.ip}, utilizador ${String(b.user_code || '?').slice(0, 64)})`);
+    fail(403, 'Não autorizado.');
+  }
   const s = b.slot || {};
   const uid = String(b.user_code || '');
   const txnId = String(s.txn_id || '') || payId('T');
   const bet = toCents(s.bet || 0);
   const win = toCents(s.win || 0);
+  if (!(bet >= 0) || !(win >= 0)) fail(400, 'Valores inválidos.');
 
   const txRef = db.collection('pgsoftTxns').doc(txnId);
   if ((await txRef.get()).exists) { // já processámos esta rodada
