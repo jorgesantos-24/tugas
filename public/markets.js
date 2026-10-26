@@ -336,7 +336,9 @@ function selections(ev) {
     for (const c of cm.sels) {
       out.push({
         market: 'custom', pick: `${cm.id}.${c.id}`, lbl: c.name, name: c.name, odds: c.odds, marketName: cm.name,
-        locked: cm.status !== 'open', maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
+        locked: cm.status !== 'open' || !!c.locked, maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
+        cside: c.side || null, cline: c.line ?? null, // lado/linha (mercados automáticos): o site arruma as linhas em tabela
+        cgroup: cm.group || null, // "Mapa 1", "Mapa 2"... (melhor de 3, 5, 7)
       });
     }
   }

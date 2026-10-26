@@ -78,6 +78,24 @@ e diz exatamente o que falta.
   - Em cada evento: criar mercados com seleções e **odds definidas pela equipa**, aposta máxima opcional, mudar odds,
     suspender/abrir (um ou todos), ver as apostas e o valor a pagar por seleção e **liquidar** (Ganhou / Perdeu / Devolvida).
     As apostas desse mercado são pagas logo a seguir. Mercados com apostas em aberto não podem ser apagados.
+  - **Odds automáticas ao vivo** (eSports e outros jogos por rounds, `livemodel.js`): no campeonato definem-se as
+    *regras do jogo* (rounds para ganhar um mapa, prorrogação, melhor de N mapas, margem; modelos prontos para
+    Rainbow Six, CS2 e Valorant). Cada mercado recebe um tipo (Vencedor da partida, Total/Handicap de rounds do mapa,
+    Vencedor do mapa, Total/Handicap de mapas) e o lado/linha de cada seleção é lido do nome ("Mais de 10.5", "FaZe -2.5").
+    A força das equipas é calibrada pelas odds do Vencedor; ao vivo, a equipa marca cada round (+1 / desfazer) e todas
+    as odds automáticas são recalculadas. Handicaps e totais têm **linhas móveis**: a cada round o motor oferece a
+    linha equilibrada e as vizinhas e tira do site as antigas (as apostas feitas nelas continuam valendo); linhas
+    com odd abaixo da *odd mínima* do campeonato (1.15 por defeito) ficam bloqueadas. Na *reta final* do mapa (ex.: 5 rounds no R6)
+    fica só a linha equilibrada e no match point/prorrogação os handicaps e totais do mapa saem do site. No site,
+    totais e handicaps aparecem em tabela (uma linha por fila).
+    Em **melhor de 3, 5 ou 7**, ao ligar as odds automáticas abrem-se os mercados de cada mapa (vencedor, total e
+    handicap de rounds) e os da série (total e handicap de mapas). Mapas terminados saem do site à espera de
+    liquidar; mapas que já não vão ser jogados são anulados (devolvidos). No site, os mercados vêm por blocos: Partida, Mapa 1, Mapa 2...
+    **Pacote padrão** (abre ao ligar as odds automáticas, também em melhor de 1; odds pela força das equipas):
+    ao vivo e antes do jogo — corrida a X rounds, placar exato do 1º tempo (R6: 6 rounds; fecha no intervalo),
+    placar exato da série, ambas ganham um mapa; só antes do jogo —
+    margem de vitória, placar exato do mapa e rounds de cada equipa. "Liquidar tudo pelo placar" fecha de uma vez o que o placar já decidiu. O mapa/partida fecha sozinho e
+    o resultado de cada mercado vem pré-preenchido na liquidação.
 - **Registo**: todas as ações da equipa (quem, quando, o quê).
 
 ## 5. Jogo responsável (área do jogador)

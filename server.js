@@ -361,7 +361,8 @@ let catalogCache = null;
 // o que o site vê de cada mercado: só os abertos e suspensos, sem resultados
 function pubMarkets(list) {
   const out = (list || []).filter((m) => m.status !== 'settled')
-    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, sels: m.sels.map((s) => ({ id: s.id, name: s.name, odds: s.odds })) }));
+    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, group: m.group || null, sels: m.sels.filter((s) => !s.hidden).map((s) => ({ id: s.id, name: s.name, odds: s.odds, ...(s.locked ? { locked: true } : {}), ...(s.side ? { side: s.side, line: s.line ?? null } : {}) })) }))
+    .filter((m) => m.sels.length); // mercado fechado na reta final: sai do site
   return out.length ? out : null;
 }
 const extraMarketsOf = (evId) => pubMarkets(manualMarkets.get(evId)?.markets);

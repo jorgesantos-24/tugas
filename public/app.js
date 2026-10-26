@@ -464,6 +464,22 @@ function renderMain() {
   S.keepScroll = true;
 }
 
+// totais e handicaps dos mercados automáticos: uma linha por fila (Mais | Menos, ou casa | fora)
+function linesTable(list, ev) {
+  if (!list.length || !list.every((s) => s.cside && s.cline != null)) return '';
+  const total = list[0].cside === 'over' || list[0].cside === 'under';
+  const rows = new Map();
+  for (const s of list) {
+    const k = total ? s.cline : (s.cside === 'home' ? s.cline : -s.cline);
+    if (!rows.has(k)) rows.set(k, {});
+    rows.get(k)[total ? (s.cside === 'over' ? 0 : 1) : (s.cside === 'home' ? 0 : 1)] = s;
+  }
+  const head = total ? ['Mais de', 'Menos de'] : [ev.home.short, ev.away.short];
+  const cell = (s, lbl) => (s ? oddBtn({ ...s, name: lbl }, ev, { wide: true, cls: 'wide-odd' }) : '<span class="odd empty wide-odd"><span class="val">-</span></span>');
+  return `<div class="lines-tbl${total ? ' tot' : ''}"><div class="ln-head">${total ? '<span></span>' : ''}<span>${esc(head[0])}</span><span>${esc(head[1])}</span></div>
+    ${[...rows].sort((a, b) => a[0] - b[0]).map(([k, r]) => `<div class="ln-row">${total ? `<span class="ln">${k}</span>` : ''}${cell(r[0], total ? '' : fmtLine(r[0]?.cline ?? k))}${cell(r[1], total ? '' : fmtLine(r[1]?.cline ?? -k))}</div>`).join('')}</div>`;
+}
+
 function renderEvent() {
   const ev = S.events.get(S.eventId);
   if (!ev) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Evento não encontrado.</div>`;
@@ -495,8 +511,19 @@ function renderEvent() {
       entries = entries.filter((e) => !isTot(e));
       entries.splice(firstTot, 0, ...tots);
     }
-    for (const [name, list] of entries) {
-      html += `<div class="market"><div class="market-head">${esc(name)}${ev.state === 'in' ? '<small>Ao vivo · odds reais</small>' : ''}</div><div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div></div>`;
+    // melhor de 3, 5...: mercados da partida primeiro, depois um bloco por mapa
+    const multi = new Set(entries.map(([, l]) => l[0].cgroup).filter(Boolean)).size > 1;
+    if (multi) {
+      const gnum = (g) => (g ? parseInt(g.replace(/\D+/g, ''), 10) || 0 : -1);
+      entries = entries.map((e, i) => [e, i]).sort((a, b) => gnum(a[0][1][0].cgroup) - gnum(b[0][1][0].cgroup) || a[1] - b[1]).map(([e]) => e);
+    }
+    let lastGroup;
+    for (const [rawName, list] of entries) {
+      const g = list[0].cgroup || null;
+      if (g !== lastGroup && multi) html += `<div class="map-head">${esc(g || 'Partida')}</div>`;
+      lastGroup = g;
+      const name = g && rawName.startsWith(g + ' — ') ? rawName.slice(g.length + 3) : rawName;
+      html += `<div class="market"><div class="market-head">${esc(name)}${ev.state === 'in' ? '<small>Ao vivo · odds reais</small>' : ''}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
     }
   }
   const tl = ev.details.filter((d) => d.goal || d.red || d.yellow);
