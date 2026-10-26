@@ -4,7 +4,7 @@
 (() => {
   const $ = (id) => document.getElementById(id);
   const chat = $('chat'), log = $('chatLog'), quick = $('chatQuick'), form = $('chatForm'), input = $('chatInput');
-  const site = { supportEmail: '', withdrawEta: 'até 24 horas' };
+  const site = { supportEmail: 'suporte@tugasbet.com', withdrawEta: 'até 24 horas' };
   const history = []; // conversa, para mandar no e-mail
   let misses = 0;
 
