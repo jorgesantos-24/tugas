@@ -53,7 +53,7 @@ const SITE = {
   company: process.env.COMPANY_NAME || '',
   cnpj: process.env.COMPANY_CNPJ || '',
   license: process.env.SPA_LICENSE || '',
-  supportEmail: process.env.SUPPORT_EMAIL || '',
+  supportEmail: process.env.SUPPORT_EMAIL || 'suporte@tugasbet.com',
   supportPhone: process.env.SUPPORT_PHONE || '',
   withdrawEta: process.env.WITHDRAW_ETA || 'até 24 horas',
 };

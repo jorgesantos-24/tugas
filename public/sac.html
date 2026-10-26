@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atendimento (SAC) — Tugas</title>
+<meta name="description" content="Central de atendimento ao cliente: contactos, prazos, perguntas frequentes e como fazer uma reclamação.">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="legal.css">
+<link rel="stylesheet" href="sac.css">
+</head>
+<body>
+<article class="legal sac">
+<a href="/" class="back">← Voltar ao site</a>
+
+<header class="sac-hero">
+  <h1>Central de atendimento</h1>
+  <p class="muted">Estamos aqui para ajudar com a sua conta, depósitos, saques e apostas. Fale connosco pelo canal que preferir.</p>
+</header>
+
+<section class="sac-channels" aria-label="Canais de atendimento">
+  <button type="button" class="sac-card sac-card-chat" data-chat-open>
+    <span class="sac-ico" aria-hidden="true">💬</span>
+    <span class="sac-card-t">Chat no site</span>
+    <b>Tirar uma dúvida agora</b>
+    <small class="muted">Respostas imediatas às perguntas mais comuns. Se precisar, passamos o seu caso a uma pessoa da equipa.</small>
+  </button>
+  <a class="sac-card" id="sacEmail" href="#">
+    <span class="sac-ico" aria-hidden="true">✉</span>
+    <span class="sac-card-t">E-mail</span>
+    <b data-site="supportEmail"></b>
+    <small class="muted">Para dúvidas, pedidos e reclamações. Indique o e-mail da sua conta.</small>
+  </a>
+</section>
+
+<section class="sac-trust" aria-label="A sua segurança">
+  <div><span aria-hidden="true">⚡</span><p><b>PIX em seu nome</b><br><span class="muted">Depósitos só de uma conta no seu CPF e saques só para uma chave PIX em seu nome.</span></p></div>
+  <div><span aria-hidden="true">⏱</span><p><b>Saques conferidos</b><br><span class="muted">Cada pedido é verificado pela equipa e pago em <span data-site="withdrawEta"></span>.</span></p></div>
+  <div><span aria-hidden="true">🔒</span><p><b>Dados protegidos</b><br><span class="muted">Tratamos os seus dados conforme a LGPD. <a href="/privacidade" class="link">Saiba mais</a>.</span></p></div>
+</section>
+
+<h2>Antes de nos contactar</h2>
+<p>Para resolvermos mais depressa, tenha à mão:</p>
+<ul>
+  <li>o <b>e-mail</b> da sua conta;</li>
+  <li>a <b>data e o valor</b> do depósito, saque ou aposta em causa;</li>
+  <li>o <b>comprovativo do PIX</b> ou uma captura de ecrã, se tiver.</li>
+</ul>
+<p class="sac-warn">⚠ A nossa equipa <b>nunca</b> pede a sua senha, códigos de verificação nem pagamentos para "liberar" saques. Desconfie de quem o fizer em nosso nome.</p>
+
+<h2>Perguntas frequentes</h2>
+<div class="sac-faq">
+  <details>
+    <summary>Fiz um PIX e o saldo ainda não apareceu. O que faço?</summary>
+    <p>O crédito costuma ser automático assim que o banco confirma o pagamento. Confirme no Extrato se o depósito está como "pendente" e se o PIX saiu de uma conta <b>no seu próprio CPF</b> — pagamentos de terceiros não são creditados e são devolvidos à origem. Se continuar sem saldo, envie-nos o comprovativo.</p>
+  </details>
+  <details>
+    <summary>Quanto tempo demora um saque?</summary>
+    <p>Cada pedido é conferido pela nossa equipa e pago em <span data-site="withdrawEta"></span>, por PIX, para uma chave PIX em nome do titular da conta. Enquanto estiver "pendente", pode cancelá-lo no Extrato e o valor volta ao saldo.</p>
+  </details>
+  <details>
+    <summary>Posso sacar para a conta de outra pessoa?</summary>
+    <p>Não. Por segurança e por exigência da lei, os saques vão sempre para uma chave PIX em nome do próprio titular da conta.</p>
+  </details>
+  <details>
+    <summary>A minha aposta foi anulada. Porquê?</summary>
+    <p>Acontece quando um evento é adiado, cancelado ou abandonado, ou quando uma odd foi publicada com erro evidente. Nas apostas simples o valor é devolvido; nas múltiplas, essa seleção passa a contar com odd 1,00. Veja os <a href="/termos" class="link">termos de uso</a>.</p>
+  </details>
+  <details>
+    <summary>Esqueci-me da senha ou não consigo entrar.</summary>
+    <p>Use a opção de recuperar a senha no ecrã de entrada. Se não receber o e-mail, veja a pasta de spam ou contacte-nos a partir do e-mail registado na conta.</p>
+  </details>
+  <details>
+    <summary>Quero fazer uma pausa ou fechar a minha conta.</summary>
+    <p>Pode definir limites de depósito e de perda, ativar uma pausa ou a autoexclusão. Veja a <a href="/jogo-responsavel" class="link">política de jogo responsável</a> ou peça-nos ajuda.</p>
+  </details>
+</div>
+
+<h2>Reclamações</h2>
+<ol class="sac-steps">
+  <li><b>Fale connosco.</b> Envie a sua reclamação para <b data-site="supportEmail"></b> com os detalhes acima. Registamos todos os pedidos e respondemos por escrito.</li>
+  <li><b>Não ficou satisfeito?</b> Responda ao mesmo e-mail a pedir a revisão do caso por um responsável.</li>
+</ol>
+
+<div class="sac-help">
+  <b>Jogo é diversão, não fonte de renda.</b> Se sentir que perdeu o controlo, ligue para o CVV no <b>188</b> (gratuito, 24h) ou procure os Jogadores Anónimos. Proibido para menores de 18 anos.
+</div>
+</article>
+
+<button type="button" class="chat-fab" data-chat-open aria-label="Abrir o chat de atendimento">💬 <span>Precisa de ajuda?</span></button>
+
+<section class="chat" id="chat" role="dialog" aria-label="Chat de atendimento" hidden>
+  <header class="chat-head">
+    <span class="chat-avatar" aria-hidden="true">T</span>
+    <div><b>Atendimento Tugas</b><small>Assistente automático · equipa por e-mail</small></div>
+    <button type="button" class="chat-x" data-chat-close aria-label="Fechar o chat">×</button>
+  </header>
+  <div class="chat-log" id="chatLog" aria-live="polite"></div>
+  <div class="chat-quick" id="chatQuick"></div>
+  <form class="chat-form" id="chatForm" autocomplete="off">
+    <input id="chatInput" maxlength="300" placeholder="Escreva a sua dúvida…" aria-label="Mensagem">
+    <button type="submit" class="btn btn-green" aria-label="Enviar">➤</button>
+  </form>
+</section>
+
+<script src="legal.js"></script>
+<script src="sac-chat.js"></script>
+</body>
+</html>
