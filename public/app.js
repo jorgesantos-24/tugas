@@ -15,7 +15,7 @@ const S = {
   view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null,
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
   acceptAnyLocal: lsGet('gl_acceptAny', true),
-  user: null, bets: [], tx: [], payments: { live: false },
+  user: null, bets: [], tx: [], payments: { live: false }, games: {},
   placing: false, cashoutConfirm: null, cashoutBusy: null,
   loaded: false, failed: false, lastUpdate: null, etag: null, keepScroll: false,
 };
@@ -42,7 +42,9 @@ const initials = (n) => String(n || '?').trim().split(/\s+/).map((p) => p[0]).sl
 function toast(msg, kind = '') {
   const el = document.createElement('div');
   el.className = 'toast ' + kind; el.textContent = msg;
-  $('#toasts').appendChild(el);
+  const box = $('#toasts');
+  if (!box) { console.warn('[toast]', msg); return; } // sem o contentor não rebenta quem chamou
+  box.appendChild(el);
   setTimeout(() => el.remove(), 4500);
 }
 
@@ -120,8 +122,8 @@ const RES_PT = { won: 'Ganhou', halfwon: 'Meio ganho', void: 'Devolvida', halflo
 
 async function loadAccount(silent) {
   try {
-    const { user, payments, liveDelay, liveCashoutDelay, casino } = await api('GET', '/api/me');
-    S.casino = !!casino; document.body.classList.toggle('has-casino', S.casino);
+    const { user, payments, liveDelay, liveCashoutDelay, casino, games } = await api('GET', '/api/me');
+    S.casino = !!casino; S.games = games || {}; document.body.classList.toggle('has-casino', S.casino);
     if (liveDelay) { S.liveDelay = liveDelay; S.liveCashoutDelay = liveCashoutDelay; }
     S.user = user;
     if (payments) { S.payments = payments; document.body.classList.toggle('live-pay', !!payments.live); }
@@ -208,8 +210,7 @@ async function placeBets() {
       if (S.slip.length < 2) S.slipMode = 'single';
     }
   } catch (e) {
-    toast(e.message, 'err');
-    if (e.status === 401) { S.user = null; openLogin(); }
+    if (!sessionExpired(e, 'apostar')) toast(e.message, 'err');
   }
   S.placing = false;
   render();
@@ -222,8 +223,15 @@ async function doCashout(id) {
     setUser(res.user);
     toast(`Cash Out realizado: ${money(res.value)}`, 'ok');
     await loadAccount();
-  } catch (e) { toast(e.message, 'err'); }
+  } catch (e) { if (!sessionExpired(e, 'fazer o Cash Out')) toast(e.message, 'err'); }
   S.cashoutBusy = null; render();
+}
+// sessão terminou no servidor (401): em vez do aviso vermelho, abre o login com uma mensagem clara
+function sessionExpired(e, what) {
+  if (!e || e.status !== 401) return false;
+  S.user = null; S.bets = [];
+  openLogin(`A sua sessão terminou. Entre novamente para ${what}.`);
+  return true;
 }
 const cashoutValue = (bet) => {
   if (bet.status !== 'open') return null;
@@ -340,24 +348,53 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador' },
-  { soon: true }, { soon: true }, { soon: true },
+  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: 'img/decola-capa.webp?v=4' },
+  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: 'img/mines-capa.webp?v=1' },
+  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: 'img/slots/fortune-tiger.webp' },
+  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: 'img/slots/fortune-ox.webp' },
+  { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: 'img/slots/fortune-dragon.webp' },
+  { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: 'img/slots/fortune-rabbit.webp' },
+  { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: 'img/slots/fortune-mouse.webp' },
+  { abrir: 'bikini-paradise', name: 'Bikini Paradise', tag: 'PG Soft', href: '#', desc: 'Praia e prémios', img: 'img/slots/bikini-paradise.webp' },
+  { abrir: 'jungle-delight', name: 'Jungle Delight', tag: 'PG Soft', href: '#', desc: 'Selva selvagem', img: 'img/slots/jungle-delight.webp' },
+  { abrir: 'ganesha-gold', name: 'Ganesha Gold', tag: 'PG Soft', href: '#', desc: 'Deus da prosperidade', img: 'img/slots/ganesha-gold.webp' },
+  { abrir: 'double-fortune', name: 'Double Fortune', tag: 'PG Soft', href: '#', desc: 'Fortuna em dobro', img: 'img/slots/double-fortune.webp' },
+  { abrir: 'dragon-tiger-luck', name: 'Dragon Tiger Luck', tag: 'PG Soft', href: '#', desc: 'Dragão contra tigre', img: 'img/slots/dragon-tiger-luck.webp' },
+  { abrir: 'ninja-raccoon', name: 'Ninja Raccoon Frenzy', tag: 'PG Soft', href: '#', desc: 'Guaxinim ninja', img: 'img/slots/ninja-raccoon.webp' },
+  { abrir: 'lucky-clover', name: 'Lucky Clover Lady', tag: 'PG Soft', href: '#', desc: 'Trevo da sorte', img: 'img/slots/lucky-clover.webp' },
+  { abrir: 'ultimate-striker', name: 'Ultimate Striker', tag: 'PG Soft', href: '#', desc: 'Futebol e prémios', img: 'img/slots/ultimate-striker.webp' },
+  { abrir: 'prosper-ftree', name: 'Prosperity Fortune Tree', tag: 'PG Soft', href: '#', desc: 'Árvore da prosperidade', img: 'img/slots/prosper-ftree.webp' },
+  { abrir: 'chicky-run', name: 'Chicky Run', tag: 'PG Soft', href: '#', desc: 'A galinha corredora', img: 'img/slots/chicky-run.webp' },
+  { abrir: 'butterfly-blossom', name: 'Butterfly Blossom', tag: 'PG Soft', href: '#', desc: 'Borboletas douradas', img: 'img/slots/butterfly-blossom.webp' },
+  { abrir: 'piggy-gold', name: 'Piggy Gold', tag: 'PG Soft', href: '#', desc: 'Porquinho da fortuna', img: 'img/slots/piggy-gold.webp' },
+  { abrir: 'wild-bandito', name: 'Wild Bandito', tag: 'PG Soft', href: '#', desc: 'Fora da lei', img: 'img/slots/wild-bandito.webp' },
+  { abrir: 'zombie-outbreak', name: 'Zombie Outbreak', tag: 'PG Soft', href: '#', desc: 'Zumbis na cidade', img: 'img/slots/zombie-outbreak.webp' },
+  { abrir: 'majestic-ts', name: 'Majestic Treasures', tag: 'PG Soft', href: '#', desc: 'Tesouros majestosos', img: 'img/slots/majestic-ts.webp' },
+  { abrir: 'thai-river', name: 'Thai River Wonders', tag: 'PG Soft', href: '#', desc: 'Rio tailandês', img: 'img/slots/thai-river.webp' },
+  { abrir: 'gdn-ice-fire', name: 'Guardians of Ice & Fire', tag: 'PG Soft', href: '#', desc: 'Gelo e fogo', img: 'img/slots/gdn-ice-fire.webp' },
+  { abrir: 'rise-apollo', name: 'Rise of Apollo', tag: 'PG Soft', href: '#', desc: 'O deus do sol', img: 'img/slots/rise-apollo.webp' },
+  { abrir: 'wild-bounty-sd', name: 'Wild Bounty Showdown', tag: 'PG Soft', href: '#', desc: 'Caça ao tesouro', img: 'img/slots/wild-bounty-sd.webp' },
+  { abrir: 'treasures-aztec', name: 'Treasures of Aztec', tag: 'PG Soft', href: '#', desc: 'Tesouros astecas', img: 'img/slots/treasures-aztec.webp' },
+  { abrir: 'three-cz-pigs', name: 'Three Crazy Piggies', tag: 'PG Soft', href: '#', desc: 'Três porquinhos', img: 'img/slots/three-cz-pigs.webp' },
 ];
-const DECOLA_ART = `<img src="img/decola-capa.webp?v=3" class="cg-cover" alt="" aria-hidden="true">`;
-const casinoCard = (g) => g.soon
-    ? `<div class="cg-card soon"><div class="cg-art"><span class="cg-lock">🔒</span></div><div class="cg-info"><b>Em breve</b><span>Novo jogo</span></div></div>`
-    : `<a class="cg-card" href="${g.href}"><div class="cg-art">${DECOLA_ART}<span class="cg-play">▶ Jogar</span></div><div class="cg-info"><b>${esc(g.name)}</b><span>${esc(g.tag)} · ${esc(g.desc)}</span></div></a>`;
+// só os jogos ligados no servidor; os slots dependem do serviço de slots estar ligado
+const casinoGames = () => CASINO_GAMES.filter((g) => (S.games && (g.abrir ? S.games.slots : S.games[g.id])));
+const casinoCard = (g) =>
+  `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
 function homeCasino() {
   if (!S.casino) return '';
-  return `<div class="section-head"><h2>🎰 Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
-    <div class="cg-grid cg-row">${CASINO_GAMES.map(casinoCard).join('')}</div>`;
+  const cards = casinoGames().map(casinoCard).join('');
+  // data-key: o bloco só é recriado quando a lista de jogos muda (ver renderMain)
+  return `<div id="homeCasino" data-key="${esc(casinoGames().map((g) => g.abrir || g.id).join(','))}">
+    <div class="section-head"><h2>Cassino</h2><a href="#cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
+    <div class="cg-grid cg-row">${cards}</div></div>`;
 }
 function renderCasino() {
   if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
   const card = casinoCard;
   return `<div class="cg-hero"><h1>Cassino</h1></div>
-    <div class="section-head"><h2>Jogos</h2><span class="muted">${CASINO_GAMES.filter((g) => !g.soon).length} disponível</span></div>
-    <div class="cg-grid">${CASINO_GAMES.map(card).join('')}</div>
+    <div class="section-head"><h2>Jogos</h2><span class="muted">${casinoGames().filter((g) => !g.soon).length} disponíveis</span></div>
+    <div class="cg-grid">${casinoGames().map(card).join('')}</div>
     <p class="muted" style="font-size:12px;margin-top:18px">18+ · Jogue com responsabilidade. Os seus limites de perda e a pausa da conta valem também para o cassino.</p>`;
 }
 
@@ -365,6 +402,7 @@ function renderMain() {
   const main = $('#main');
   if (!S.loaded) return;
   if (S.failed && !S.events.size) {
+    S.lastMainHtml = null;
     main.innerHTML = `<div class="empty-state">Não foi possível conectar ao servidor.<br>Verifique se o servidor está rodando (iniciar.bat) — tentaremos de novo automaticamente.</div>`;
     return;
   }
@@ -410,7 +448,18 @@ function renderMain() {
       }
     }
   }
+  // nada mudou: não mexe na página (evita que as imagens pisquem a cada atualização)
+  if (html === S.lastMainHtml && main.firstChild) { S.keepScroll = true; return; }
+  S.lastMainHtml = html;
+  // reaproveita o bloco do cassino já carregado (imagens e posição da fila mantêm-se)
+  const oldCasino = main.querySelector('#homeCasino');
+  const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
+  const newCasino = main.querySelector('#homeCasino');
+  if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
+    newCasino.replaceWith(oldCasino);
+    oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
+  }
   if (S.keepScroll) window.scrollTo(0, scrollY);
   S.keepScroll = true;
 }
@@ -588,9 +637,11 @@ function renderSidebar() {
     html += `</div>`;
   }
   if (S.casino) {
-    html += `<div class="side-title side-casino-title">🎰 Cassino</div>
-    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Todos os jogos<span class="cnt">${CASINO_GAMES.filter((g) => !g.soon).length}</span></button>
-    <a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator<span class="cnt hot">NOVO</span></a>`;
+    html += `<div class="side-title side-casino-title">Cassino</div>
+    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Todos os jogos<span class="cnt">${casinoGames().length}</span></button>
+    ${S.games.decola ? `<a class="side-item side-sport" href="/decola"><span class="ic">✈️</span>Aviator</a>` : ''}
+    ${S.games.mines ? `<a class="side-item side-sport" href="/mines"><span class="ic">💎</span>Mines<span class="cnt hot">NOVO</span></a>` : ''}
+    ${S.games.slots ? CASINO_GAMES.filter((g) => g.abrir).map((g) => `<a class="side-item side-sport" href="#" data-abrir="${g.abrir}" data-nome="${esc(g.name)}"><span class="ic">🎰</span>${esc(g.name)}</a>`).join('') : ''}`;
   }
   $('#sidebar').innerHTML = html;
   $('#liveCountNav').textContent = liveN;
@@ -821,7 +872,7 @@ async function doWithdraw() {
   }
 }
 
-const WD_LABEL = { PENDING: 'pendente', PROCESSING: 'em processamento', PAID: 'pago', REJECTED: 'recusado', CANCELED: 'cancelado', CREATING: 'pendente', FAILED: 'falhou', REVIEW: 'em análise' };
+const WD_LABEL = { PENDING: 'pendente', PROCESSING: 'em processamento', PAID: 'pago', REJECTED: 'recusado', CANCELED: 'cancelado', CREATING: 'pendente', FAILED: 'falhou', REVIEW: 'em análise', DUPLICATE: 'cancelado' };
 const LIMITS = [
   ['depositLimit', 'Limite de depósito (24 horas)'],
   ['lossLimitDay', 'Limite de perda por dia'],
@@ -924,6 +975,12 @@ document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, .ev-row, .hero-card');
   if (!t) return;
   const d = t.dataset;
+  if (d.abrir) { // slots: abre o jogo (sem conta: pede login e abre o jogo logo a seguir)
+    e.preventDefault();
+    const abrir = () => window.abrirFortuneTiger && window.abrirFortuneTiger(d.abrir, d.nome);
+    if (!S.user) { afterAuth = abrir; openLogin(`Entre na sua conta para jogar ${d.nome || 'este jogo'}.`); return; }
+    abrir(); return;
+  }
   if (d.key) { e.stopPropagation(); toggleSel(d.key); return; }
   if (d.cashout) {
     if (S.cashoutConfirm === d.cashout) doCashout(d.cashout);
@@ -973,7 +1030,7 @@ document.addEventListener('click', async (e) => {
     case 'clear': S.slip = []; S.stakes = {}; S.comboStake = ''; S.slipMode = 'single'; render(); break;
     case 'accept': S.slip.forEach((s) => { const { sel } = findSel(s.key); if (sel) s.odds = sel.odds; }); renderSlip(); break;
     case 'back': { const p = S.prevView || { view: 'home' }; go(p.view, { league: p.league, sport: p.sport }); } break;
-    case 'login': openLogin(); break;
+    case 'login': afterAuth = null; openLogin(); break; // login pedido pelo próprio jogador: não reabre nada pendente
     case 'register': openRegister(); break;
     case 'account': openAccount('profile'); break;
     case 'logout': logout(); break;
@@ -981,7 +1038,7 @@ document.addEventListener('click', async (e) => {
     case 'do-deposit': doDeposit(); break;
     case 'withdraw': openWithdraw(); break;
     case 'do-withdraw': doWithdraw(); break;
-    case 'close-modal': closeModal(); break;
+    case 'close-modal': afterAuth = null; closeModal(); break;
     case 'forgot': openForgot(); break;
     case 'verify-resend': try { await api('POST', '/api/account/verify-email'); toast('E-mail enviado. Veja a caixa de entrada e o spam.', 'ok'); } catch (err) { toast(err.message, 'err'); } break;
     case 'verify-check': try { const { user } = await api('POST', '/api/account/verify-check'); setUser(user); if (user.emailVerified) { toast('E-mail confirmado ✓', 'ok'); closeModal(); } else toast('Ainda não confirmado. Abra o link do e-mail que enviámos.', 'err'); } catch (err) { toast(err.message, 'err'); } break;
@@ -1055,9 +1112,13 @@ document.addEventListener('keydown', (e) => {
 });
 
 $('#logoLink').onclick = (e) => { e.preventDefault(); go('home'); };
-$('#overlay').onclick = closeModal;
+$('#overlay').onclick = () => { afterAuth = null; closeModal(); }; // fechou sem entrar: esquece a ação pendente
 $('#menuBtn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); };
 $('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').classList.add('show'); };
+
+/* ---------------- slots (Fortune Tiger) ---------------- */
+// o modal vive no index.html; aqui só expomos uma função para o site refrescar o saldo ao fechar
+window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } catch { /* ignora */ } };
 
 /* ---------------- início ---------------- */
 (async function start() {
@@ -1066,7 +1127,7 @@ $('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').
   api('GET', '/api/site').then(({ site }) => {
     const parts = [site.company, site.cnpj && 'CNPJ ' + site.cnpj, site.license && 'Autorização SPA/MF: ' + site.license, site.supportEmail].filter(Boolean);
     const el = $('#siteInfo'); if (el) el.textContent = parts.join(' · ');
-  }).catch(() => {});
+  }).catch(() => { });
   if (location.hash === '#cassino' && S.casino) S.view = 'casino';
   render();
   setInterval(async () => { if (await loadEvents()) safeRender(); }, EVENTS_MS);

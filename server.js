@@ -17,6 +17,7 @@
      sessions/{sha256(token)}          sessões de login
      webhookEvents/{id}                webhooks da BravoPay já processados
      adminLogs/{id}                    tudo o que a equipa faz no painel
+     pgsoftTxns/{txn_id}               rodadas dos slots já processadas (idempotência)
      catalogSports/{key}, catalogLeagues/{key}   modalidades e campeonatos criados pela equipa
      manualEvents/{id}                 eventos criados pela equipa (com os seus mercados)
      manualMarkets/{evId}              mercados extra da equipa em jogos reais da ESPN */
@@ -36,7 +37,7 @@ const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailV
 const PORT = Number(process.env.PORT) || 3000;
 const PUB = path.join(__dirname, 'public');
 const API = 'https://site.api.espn.com/apis/site/v2/sports/';
-const FAST_MS = 15000, SLOW_MS = 120000;
+const FAST_MS = 5000, SLOW_MS = 120000; // ao vivo: 5 s (só as ligas com jogos a decorrer); completo: 2 min
 // tempo de aprovação: ao vivo 25s (configurável) para dar tempo de o feed apanhar o que acontece no campo
 const LIVE_DELAY_MS = Number(process.env.LIVE_BET_DELAY || 25) * 1000, PRE_DELAY_MS = 800, CASHOUT_DELAY_MS = 2000;
 const LIVE_CASHOUT_DELAY_MS = Number(process.env.LIVE_CASHOUT_DELAY || process.env.LIVE_BET_DELAY || 25) * 1000;
@@ -55,7 +56,7 @@ const SITE = {
   company: process.env.COMPANY_NAME || '',
   cnpj: process.env.COMPANY_CNPJ || '',
   license: process.env.SPA_LICENSE || '',
-  supportEmail: process.env.SUPPORT_EMAIL || '',
+  supportEmail: process.env.SUPPORT_EMAIL || 'suporte@tugasbet.com',
   supportPhone: process.env.SUPPORT_PHONE || '',
   withdrawEta: process.env.WITHDRAW_ETA || 'até 24 horas',
 };
@@ -225,7 +226,7 @@ const openWithdrawals = new Map(); // pedidos de saque à espera da equipa
 
 /* ---------------- feed ESPN ---------------- */
 const events = new Map();
-let feedVersion = 0, feedCache = null, lastFeedOk = 0;
+let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 
 async function fetchJSON(url) {
   const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(12000) });
@@ -244,24 +245,34 @@ async function fetchLeague(lg, date) {
 const ET_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
 const etDay = (t) => ET_FMT.format(new Date(t)).replace(/-/g, '');
 
-function mergeEvents(list) {
+// fetchedAt = quando o pedido à ESPN começou. Uma resposta mais antiga (ex.: a atualização completa,
+// que demora alguns segundos) nunca substitui um placar mais recente já recebido.
+function mergeEvents(list, fetchedAt) {
   const t = now();
+  let changed = false;
+  const same = (a, b) => { const { fetchedAt: x, ...ra } = a; const { fetchedAt: y, ...rb } = b; return JSON.stringify(ra) === JSON.stringify(rb); };
   for (const ev of list) {
     const old = events.get(ev.id);
+    if (old && old.fetchedAt > fetchedAt) continue;
+    ev.fetchedAt = fetchedAt;
     if (old) {
       const scored = old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score);
       if (scored) { ev.suspendedUntil = t + 20000; ev.goalAt = t; }
       else { ev.suspendedUntil = old.suspendedUntil; ev.goalAt = old.goalAt; }
     }
     ev.cm = extraMarketsOf(ev.id);
+    if (!old || !same(old, ev)) changed = true;
     events.set(ev.id, ev);
   }
+  return changed;
 }
 
-let refreshing = false;
+// atualização completa e atualização ao vivo correm em separado: a completa não bloqueia a ao vivo
+const refreshing = { full: false, live: false };
 async function refresh(full) {
-  if (refreshing) return;
-  refreshing = true;
+  const kind = full ? 'full' : 'live';
+  if (refreshing[kind]) return;
+  refreshing[kind] = true;
   try {
     const t = now();
     const jobs = [];
@@ -281,16 +292,19 @@ async function refresh(full) {
       for (const [lg, days] of want) for (const d of days) jobs.push(fetchLeague(M.LEAGUE_BY_KEY[lg], d));
     }
     const res = (await Promise.all(jobs)).filter(Boolean);
+    let changed = false;
     if (res.length || !full) {
-      mergeEvents(res.flat());
+      changed = mergeEvents(res.flat(), t);
       if (res.length) lastFeedOk = now();
     }
-    if (full) for (const [id, ev] of events) if (!ev.manual && t - ev.date > 36 * 3600000) events.delete(id);
-    feedVersion++; feedCache = null;
+    if (full) for (const [id, ev] of events) if (!ev.manual && t - ev.date > 36 * 3600000) { events.delete(id); changed = true; }
+    // só muda a versão (e os navegadores só voltam a descarregar tudo) quando há novidades,
+    // ou a cada 30 s para o "Última atualização" do site continuar a andar
+    if (changed || now() - lastBump > 30000) { feedVersion++; feedCache = null; lastBump = now(); }
     await settleQueued();
   } catch (e) {
     console.error('Erro ao atualizar feed:', e.message);
-  } finally { refreshing = false; }
+  } finally { refreshing[kind] = false; }
 }
 
 /* Proteção das apostas e cash out ao vivo: guarda o estado dos jogos no pedido, espera,
@@ -304,10 +318,11 @@ function liveSnapshot(evIds) {
   return snap;
 }
 async function refreshEvents(evIds) {
+  const t = now();
   const pairs = new Set([...evIds].map((id) => events.get(id)).filter((ev) => ev && !ev.manual).map((ev) => `${ev.league}|${etDay(+ev.date)}`));
   const res = await Promise.all([...pairs].map((p) => { const [lg, d] = p.split('|'); return M.LEAGUE_BY_KEY[lg] ? fetchLeague(M.LEAGUE_BY_KEY[lg], d) : null; }));
   const list = res.filter(Boolean).flat();
-  if (list.length) { mergeEvents(list); feedVersion++; feedCache = null; }
+  if (list.length) { mergeEvents(list, t); feedVersion++; feedCache = null; }
 }
 // devolve o motivo da recusa, ou null se nada mudou desde o pedido
 function liveChanged(snap, t0) {
@@ -328,7 +343,7 @@ function findSel(key) {
 
 function feedPayload() {
   if (!feedCache) {
-    const list = [...events.values()].map(({ goalAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
+    const list = [...events.values()].map(({ goalAt, fetchedAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
     feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, catalog: catalogCache, events: list }) };
   }
   return feedCache;
@@ -425,7 +440,14 @@ async function closeBet(bet, status, payout, legs, txType) {
   return ok;
 }
 
+// as duas atualizações chamam isto: se já estiver a correr, a próxima (daqui a 5 s) apanha o que faltar
+let settling = false;
 async function settleBets() {
+  if (settling) return;
+  settling = true;
+  try { await settleAll(); } finally { settling = false; }
+}
+async function settleAll() {
   for (const row of [...openBets.values()]) {
     try {
       const legs = structuredClone(row.legs);
@@ -496,6 +518,18 @@ async function applyDepositStatus(depId, bt) {
     const us = await t.get(userRef);
     const log = depositWindow(us.exists ? us.data().depositLog : []);
     if (st === 'PAID' && dep.status === 'PENDING') {
+      /* A BravoPay pode devolver a MESMA cobrança para vários pedidos de PIX (ex.: o jogador clica
+         "gerar PIX" várias vezes). Um pagamento só pode creditar UM depósito: se outro depósito com
+         a mesma cobrança já foi pago (ou está em revisão), este fica DUPLICATE e não credita.
+         A consulta é feita dentro da transação, por isso duas confirmações em simultâneo não passam as duas. */
+      if (dep.bpId) {
+        const sib = await t.get(col.deposits().where('bpId', '==', dep.bpId));
+        if (sib.docs.some((d) => d.id !== depId && ['PAID', 'REVIEW', 'REFUNDED', 'CHARGEBACK'].includes(d.data().status))) {
+          t.update(depRef, { status: 'DUPLICATE', note: 'mesma cobrança BravoPay de outro depósito já pago' });
+          t.update(userRef, { depositLog: log.filter((e) => e.id !== dep.id) });
+          res = { dep, kind: 'duplicate' }; return;
+        }
+      }
       if (bt.amount_cents != null && Number(bt.amount_cents) !== dep.amount) {
         t.update(depRef, { status: 'REVIEW', paidAmount: Number(bt.amount_cents), reviewReason: `valor pago ${brl(Number(bt.amount_cents))} diferente de ${brl(dep.amount)}` });
         res = { dep, kind: 'review' }; return;
@@ -521,6 +555,7 @@ async function applyDepositStatus(depId, bt) {
   pendingDeposits.delete(depId); // já não está PENDING (o listener confirma logo a seguir)
   if (res.kind === 'paid') console.log(`[BravoPay] Depósito ${depId} pago: ${brl(res.dep.amount)} (user ${res.dep.userId})`);
   if (res.kind === 'review') console.error(`[BravoPay] Depósito ${depId}: valor pago ${bt.amount_cents} difere do esperado ${res.dep.amount}. Ficou em REVIEW (ver painel).`);
+  if (res.kind === 'duplicate') console.warn(`[BravoPay] Depósito ${depId} ignorado: cobrança ${res.dep.bpId} já creditada noutro depósito (user ${res.dep.userId})`);
   if (res.kind === 'reversed') console.warn(`[BravoPay] Depósito ${depId} ${st}: ${brl(res.dep.amount)} retirado do saldo do user ${res.dep.userId}`);
 }
 
@@ -570,14 +605,14 @@ async function handleWebhook(req, res) {
   try {
     if ((await evtRef.get()).exists) return reply(200, 'duplicate');
     if (evt.type.startsWith('transaction.')) {
-      let depId = null;
+      // a mesma cobrança pode estar ligada a vários depósitos: o estado aplica-se a todos
+      // (só um é creditado; os outros ficam DUPLICATE — ver applyDepositStatus)
+      const depIds = new Set();
       const ext = String(data.external_reference || '');
-      if (/^D[0-9A-F]{12}$/.test(ext) && (await col.deposits().doc(ext).get()).exists) depId = ext;
-      else if (data.id) { const qs = await col.deposits().where('bpId', '==', String(data.id)).limit(1).get(); if (!qs.empty) depId = qs.docs[0].id; }
-      if (depId) {
-        const st = data.status || { 'transaction.paid': 'PAID', 'transaction.expired': 'EXPIRED', 'transaction.failed': 'FAILED', 'transaction.refunded': 'REFUNDED', 'transaction.chargeback': 'CHARGEBACK' }[evt.type];
-        await applyDepositStatus(depId, { ...data, status: st });
-      }
+      if (/^D[0-9A-F]{12}$/.test(ext) && (await col.deposits().doc(ext).get()).exists) depIds.add(ext);
+      if (data.id) for (const d of (await col.deposits().where('bpId', '==', String(data.id)).get()).docs) depIds.add(d.id);
+      const st = data.status || { 'transaction.paid': 'PAID', 'transaction.expired': 'EXPIRED', 'transaction.failed': 'FAILED', 'transaction.refunded': 'REFUNDED', 'transaction.chargeback': 'CHARGEBACK' }[evt.type];
+      for (const depId of depIds) await applyDepositStatus(depId, { ...data, status: st });
     } // os saques são manuais: eventos withdrawal.* são ignorados
     await evtRef.set({ type: evt.type, at: now() });
     reply(200, 'ok');
@@ -736,7 +771,9 @@ const routes = {
     user: ctx.user ? publicUser(ctx.user) : null,
     liveDelay: LIVE_DELAY_MS / 1000, liveCashoutDelay: LIVE_CASHOUT_DELAY_MS / 1000,
     payments: BP.enabled ? { live: true, depositMin: DEP_MIN / 100, depositMax: DEP_MAX / 100, withdrawMin: WD_MIN / 100, withdrawEta: SITE.withdrawEta } : { live: false },
-    casino: CASINO, casinoCert: CASINO ? CASINO_CERT || null : null, testMode: EMULATOR,
+    casino: CASINO || MINES || SLOTS, games: { decola: CASINO, mines: MINES, slots: SLOTS },
+    slotsGames: SLOTS ? SLOTS_GAMES : [],
+    casinoCert: CASINO ? CASINO_CERT || null : null, minesCert: MINES ? MINES_CERT || null : null, testMode: EMULATOR,
   }),
 
   'POST /api/account/verify-email': async (ctx) => {
@@ -817,10 +854,27 @@ const routes = {
       fail(502, 'Não foi possível gerar o PIX agora. Tente de novo em instantes.');
     }
     const dep = {
-      id, userId: u.id, amount: amt, status: 'PENDING', bpId: bt.id, pixCode: bt.pix.copy_paste, pixQr: bt.pix.qr_code || null,
+      id, userId: u.id, amount: amt, status: 'PENDING', bpId: String(bt.id), pixCode: bt.pix.copy_paste, pixQr: bt.pix.qr_code || null,
       expiresAt: isoMs(bt.pix.expires_at) || now() + PIX_EXPIRES * 1000, createdAt: now(),
     };
-    await col.deposits().doc(id).update({ status: dep.status, bpId: dep.bpId, pixCode: dep.pixCode, pixQr: dep.pixQr, expiresAt: dep.expiresAt, fee: bt.fee_cents ?? null });
+    /* A BravoPay pode devolver uma cobrança que já existe (mesmo CPF e valor, ainda por pagar).
+       Nesse caso não se cria outro depósito ligado à mesma cobrança: mostra-se o PIX que já existe. */
+    const existing = await runTx([u.id], async (t) => {
+      const sib = (await t.get(col.deposits().where('bpId', '==', dep.bpId))).docs.map((d) => d.data()).filter((d) => d.id !== id);
+      if (!sib.length) {
+        t.update(col.deposits().doc(id), { status: dep.status, bpId: dep.bpId, pixCode: dep.pixCode, pixQr: dep.pixQr, expiresAt: dep.expiresAt, fee: bt.fee_cents ?? null });
+        return null;
+      }
+      const fu = (await t.get(userRef)).data();
+      t.update(userRef, { depositLog: depositWindow(fu.depositLog).filter((x) => x.id !== id) });
+      t.update(col.deposits().doc(id), { status: 'DUPLICATE', bpId: dep.bpId, note: `mesma cobrança BravoPay do depósito ${sib[0].id}` });
+      return sib.find((d) => d.status === 'PENDING' && d.userId === u.id) || sib[0];
+    });
+    if (existing) {
+      console.warn(`[BravoPay] PIX ${id}: a BravoPay devolveu a cobrança ${dep.bpId}, já usada pelo depósito ${existing.id}. Ficou DUPLICATE.`);
+      if (existing.status === 'PENDING' && existing.userId === u.id) return { deposit: publicDeposit(existing), user: await meUser(u.id) };
+      fail(502, 'Não foi possível gerar o PIX agora. Tente de novo em instantes.');
+    }
     pendingDeposits.set(id, dep); depChecked.set(id, now());
     console.log(`[BravoPay] PIX gerado ${id}: ${brl(amt)} (user ${u.id})`);
     return { deposit: publicDeposit(dep), user: await meUser(u.id) };
@@ -1086,6 +1140,109 @@ const routes = {
   },
 };
 
+/* ---------------- Slots PG Soft — carteira seamless ----------------
+   O jogo corre num serviço à parte (api-pgsoft-node). Este bloco é a "carteira":
+   o jogo pergunta o saldo e comunica cada rodada; o Firestore é a única fonte de verdade.
+   Vale para TODOS os jogos da lista: o saldo e as apostas são comuns a todos. */
+const PGS_BASE = String(process.env.PGSOFT_API_URL || '').replace(/\/$/, '');
+const PGS_AGENT = String(process.env.PGSOFT_AGENT_TOKEN || '');
+const PGS_SECRET = String(process.env.PGSOFT_SECRET || '');
+const SLOTS = !!(PGS_BASE && PGS_AGENT && PGS_SECRET);
+
+// jogos disponíveis (o código tem de existir no serviço dos jogos)
+const SLOTS_GAMES_MAP = {
+  'fortune-tiger': 'Fortune Tiger',
+  'fortune-ox': 'Fortune Ox',
+  'fortune-dragon': 'Fortune Dragon',
+  'fortune-rabbit': 'Fortune Rabbit',
+  'fortune-mouse': 'Fortune Mouse',
+  'bikini-paradise': 'Bikini Paradise',
+  'jungle-delight': 'Jungle Delight',
+  'ganesha-gold': 'Ganesha Gold',
+  'double-fortune': 'Double Fortune',
+  'dragon-tiger-luck': 'Dragon Tiger Luck',
+  'ninja-raccoon': 'Ninja Raccoon Frenzy',
+  'lucky-clover': 'Lucky Clover Lady',
+  'ultimate-striker': 'Ultimate Striker',
+  'prosper-ftree': 'Prosperity Fortune Tree',
+  'chicky-run': 'Chicky Run',
+  'butterfly-blossom': 'Butterfly Blossom',
+  'piggy-gold': 'Piggy Gold',
+  'wild-bandito': 'Wild Bandito',
+  'zombie-outbreak': 'Zombie Outbreak',
+  'majestic-ts': 'Majestic Treasures',
+  'thai-river': 'Thai River Wonders',
+  'gdn-ice-fire': 'Guardians of Ice & Fire',
+  'rise-apollo': 'Rise of Apollo',
+  'wild-bounty-sd': 'Wild Bounty Showdown',
+  'treasures-aztec': 'Treasures of Aztec',
+  'three-cz-pigs': 'Three Crazy Piggies',
+};
+const SLOTS_GAMES = Object.keys(SLOTS_GAMES_MAP);
+const slotName = (code) => SLOTS_GAMES_MAP[code] || 'Slot';
+
+// 1) O jogo pergunta o saldo (antes de cada rodada)
+routes['POST /api/pgsoft/gold_api/user_balance'] = async (ctx) => {
+  const code = String(ctx.body.user_code || '');
+  const u = await getUser(code, true);
+  if (!u || u.blocked) return { msg: 'INVALID_USER' };
+  return { msg: 'SUCCESS', user_balance: fromCents(u.balance), currency: 'BRL' };
+};
+
+// 2) O jogo comunica o resultado da rodada (débito/crédito). Idempotente por txn_id.
+routes['POST /api/pgsoft/gold_api/game_callback'] = async (ctx) => {
+  const b = ctx.body || {};
+  const s = b.slot || {};
+  const uid = String(b.user_code || '');
+  const txnId = String(s.txn_id || '') || payId('T');
+  const bet = toCents(s.bet || 0);
+  const win = toCents(s.win || 0);
+
+  const txRef = db.collection('pgsoftTxns').doc(txnId);
+  if ((await txRef.get()).exists) { // já processámos esta rodada
+    const cur = await getUser(uid, true);
+    return { status: 1, msg: 'SUCCESS', user_balance: cur ? fromCents(cur.balance) : 0 };
+  }
+
+  let novo = 0;
+  await runTx([uid], async (t) => {
+    const ref = col.user(uid);
+    const fu = (await t.get(ref)).data();
+    if (!fu) fail(400, 'Utilizador inexistente.');
+    novo = Math.max(0, fu.balance + win - bet);
+    t.set(txRef, { uid, bet, win, delta: win - bet, game: s.game_code || null, at: now() });
+    t.update(ref, { balance: novo });
+    if (bet) addTx(t, uid, `${slotName(s.game_code)}: aposta`, -bet, txnId);
+    if (win) addTx(t, uid, `${slotName(s.game_code)}: prémio`, win, txnId);
+  });
+  return { status: 1, msg: 'SUCCESS', user_balance: fromCents(novo) };
+};
+
+// 3) O site chama isto para abrir o jogo escolhido
+routes['POST /api/slots/launch'] = async (ctx) => {
+  const u = requireUser(ctx);
+  if (!SLOTS) fail(503, 'Jogos de slots indisponíveis de momento.');
+  const game = String((ctx.body && ctx.body.game) || 'fortune-tiger');
+  if (!SLOTS_GAMES_MAP[game]) fail(400, 'Jogo desconhecido.');
+  const me = await getUser(u.id, true);
+  let j = null;
+  try {
+    const r = await fetch(`${PGS_BASE}/api/v1/game_launch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agentToken: PGS_AGENT, secretKey: PGS_SECRET,
+        user_code: u.id, game_type: 'slot', provider_code: 'PGSOFT',
+        game_code: game, user_balance: fromCents(me.balance),
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    j = await r.json();
+  } catch { fail(502, 'Servidor dos jogos não respondeu.'); }
+  if (!j || j.status !== 1) fail(502, (j && j.message) || 'Não foi possível abrir o jogo.');
+  return { url: j.launch_url };
+};
+
 // painel da equipa (/admin)
 const ADM = require('./admin.js')(routes, {
   db, col, auth, FieldValue, runTx, addTx, getUser, dirty, fail, now, brl, fromCents, toCents, dayStart, dayKey, DAY,
@@ -1098,7 +1255,7 @@ require('./catalog.js')(routes, {
   events, openBets, catSports, catLeagues, manualEvents, manualMarkets, applyCatalog, settle: settleQueued,
 });
 
-/* Cassino (Decola)
+/* Cassino (Decola e Mines)
    - Teste local: emuladores do Firebase + CASINO_TEST=1 (saldo de teste).
    - Produção (saldo real): CASINO_LIVE=1 e CASINO_CERT=<n.º do certificado do laboratório para esta versão do jogo>. */
 const CASINO_CERT = String(process.env.CASINO_CERT || '').trim().slice(0, 80);
@@ -1107,6 +1264,15 @@ const CASINO = EMULATOR ? (!!process.env.FIREBASE_AUTH_EMULATOR_HOST && process.
 const crashGame = CASINO ? require('./crash.js')(routes, {
   db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
   lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT,
+}) : null;
+/* Mines tem chave própria (o certificado do Decola não cobre outro jogo):
+   - Teste: igual ao cassino (emuladores + CASINO_TEST=1).
+   - Produção: MINES_LIVE=1 e MINES_CERT=<n.º do certificado do Mines>. */
+const MINES_CERT = String(process.env.MINES_CERT || '').trim().slice(0, 80);
+const MINES = EMULATOR ? CASINO : (process.env.MINES_LIVE === '1' && MINES_CERT.length >= 3);
+const minesGame = MINES ? require('./mines.js')(routes, {
+  db, runTx, addTx, col, inc, fail, now, brl, fromCents, toCents, requireUser, isExcluded, pausedMsg,
+  lossStats, effLimit, dayKey, DAY, meUser, HttpError, EMULATOR, CASINO_CERT: MINES_CERT,
 }) : null;
 if (EMULATOR) {
   // saldo de teste (só existe nos emuladores)
@@ -1121,13 +1287,13 @@ if (EMULATOR) {
 }
 
 /* ---------------- servidor HTTP ---------------- */
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
 const PAGES = { '/': '/index.html', '/admin': '/admin.html', '/termos': '/termos.html', '/privacidade': '/privacidade.html', '/jogo-responsavel': '/jogo-responsavel.html' };
 
 function serveStatic(req, res) {
   let p;
   try { p = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { res.writeHead(400); res.end(); return; }
-  if (p === '/decola' || p === '/decola.html' || p === '/decola.js' || p === '/decola.css') { if (!CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola') p = '/decola.html'; }
+  if (/^\/(decola|mines)(\.html|\.js|\.css)?$/.test(p)) { if (p.startsWith('/mines') ? !MINES : !CASINO) { res.writeHead(404); res.end('Não encontrado'); return; } if (p === '/decola' || p === '/mines') p += '.html'; }
   p = PAGES[p] || p;
   const file = path.normalize(path.join(PUB, p));
   if (!file.startsWith(PUB + path.sep) || /app\.old\.js$/.test(file)) { res.writeHead(404); res.end('Não encontrado'); return; }
@@ -1248,6 +1414,9 @@ const server = http.createServer(async (req, res) => {
     reconcileDeposits();
     setInterval(reconcileDeposits, 30000);
   } else console.warn('Pagamentos: DESLIGADOS — defina BRAVOPAY_API_KEY no .env. Depósitos e saques ficam indisponíveis.');
+  if (SLOTS) console.log(`Slots PG Soft: LIGADOS (${SLOTS_GAMES.length} jogos).`);
+  else console.log('Slots PG Soft: desligados — defina PGSOFT_API_URL, PGSOFT_AGENT_TOKEN e PGSOFT_SECRET no .env.');
   if (crashGame) await crashGame.start();
+  if (minesGame) await minesGame.start();
   server.listen(PORT, () => console.log(`\n${SITE.name} a correr em http://localhost:${PORT}   ·   painel da equipa: http://localhost:${PORT}/admin\n`));
 })();

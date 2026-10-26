@@ -19,7 +19,7 @@
     <a href="#" data-view="home" class="active">Esportes</a>
     <a href="#" data-view="live"><span class="live-dot"></span>Ao Vivo <b id="liveCountNav">0</b></a>
     <a href="#" data-view="mybets">Minhas Apostas</a>
-    <a href="#cassino" data-view="casino" class="casino-only">🎰 Cassino</a>
+    <a href="#cassino" data-view="casino" class="casino-only">Cassino</a>
   </nav>
   <div class="search"><input id="search" placeholder="Buscar time ou liga..." autocomplete="off"></div>
   <div class="wallet" id="wallet"></div>
@@ -48,7 +48,7 @@
 <footer class="footer">
   <div class="footer-in">
     <div><span class="age">18+</span> Jogue com responsabilidade. Proibido para menores de 18 anos.</div>
-    <div class="footer-links"><a href="/termos">Termos de uso</a><a href="/privacidade">Privacidade</a><a href="/jogo-responsavel">Jogo responsável</a><span id="siteInfo"></span></div>
+    <div class="footer-links"><a href="/termos">Termos de uso</a><a href="/privacidade">Privacidade</a><a href="/jogo-responsavel">Jogo responsável</a><a href="/sac.html">Atendimento (SAC)</a><span id="siteInfo"></span></div>
     <div class="muted">Placares e odds ao vivo: feed público ESPN (odds DraftKings). Atualização automática a cada 15s. <span id="lastUpdate"></span></div>
   </div>
 </footer>
@@ -56,6 +56,115 @@
 <div class="overlay" id="overlay"></div>
 <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
 <div class="toasts" id="toasts"></div>
+
+<!-- ============ Slots PG Soft — modal com iframe (serve para todos os jogos) ============ -->
+<style>
+  /* jogo em ecrã inteiro (telemóvel e computador), sem barra de título */
+  #ftOverlay { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; background: #000; display: none; z-index: 500; }
+  #ftOverlay.show { display: block; }
+  #ftBox { position: absolute; inset: 0; }
+  #ftFrame { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000; }
+  #ftClose { position: absolute; top: calc(8px + env(safe-area-inset-top)); right: calc(8px + env(safe-area-inset-right)); z-index: 2; width: 34px; height: 34px; border: 0; border-radius: 50%; background: rgba(0,0,0,.55); color: #fff; font: 700 16px/1 Inter, system-ui, sans-serif; cursor: pointer; display: grid; place-items: center; }
+  #ftClose:hover { background: rgba(0,0,0,.8); }
+  #ftLoading { position: absolute; color: #cfd5e0; font: 600 13px Inter, sans-serif; pointer-events: none; }
+  body.ft-open { overflow: hidden; }
+</style>
+
+<div id="ftOverlay" aria-hidden="true">
+  <div id="ftBox">
+    <button id="ftClose" type="button" aria-label="Fechar o jogo">✕</button>
+    <iframe id="ftFrame" title="Slot" allow="autoplay; clipboard-write" referrerpolicy="no-referrer"></iframe>
+  </div>
+</div>
+
+<script>
+(function () {
+  const overlay = document.getElementById('ftOverlay');
+  const frame = document.getElementById('ftFrame');
+  let aberto = false, carregando = false, sessao = 0;
+  // só no telemóvel/tablet o jogo vai para ecrã inteiro; no computador ocupa a janela do site e o X fica sempre visível
+  const ecraInteiroNoAbrir = () => window.matchMedia('(pointer: coarse)').matches;
+
+  // chamada pelo app.js quando se clica num elemento com data-abrir="<jogo>"
+  window.abrirFortuneTiger = async function (game, nome) {
+    if (aberto || carregando) return;
+    game = game || 'fortune-tiger';
+    frame.title = nome || 'Slot';
+    carregando = true;
+    const minha = ++sessao; // se o jogador fechar antes de o jogo carregar, a resposta é ignorada
+    // ecrã inteiro tem de ser pedido logo no clique; onde não houver suporte, o CSS já ocupa o ecrã todo
+    if (ecraInteiroNoAbrir()) {
+      try { const fs = overlay.requestFullscreen || overlay.webkitRequestFullscreen; if (fs) Promise.resolve(fs.call(overlay)).catch(() => {}); } catch (_) {}
+    }
+    overlay.classList.add('show');
+    overlay.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('ft-open');
+    frame.src = 'about:blank';
+    try {
+      const r = await fetch('/api/slots/launch', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ game: game }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (minha !== sessao) return; // já foi fechado
+      if (!r.ok) throw new Error(j.error || j.message || 'Não foi possível abrir o jogo.');
+      frame.src = j.url;
+      aberto = true;
+    } catch (e) {
+      if (minha !== sessao) return;
+      sairEcraInteiro();
+      overlay.classList.remove('show');
+      overlay.setAttribute('aria-hidden', 'true');
+      document.body.classList.remove('ft-open');
+      // sessão expirada: abre o login; outros erros: aviso discreto do site (em vez do alert do navegador)
+      try {
+        if (/entre na sua conta/i.test(e.message) && window.openLogin) window.openLogin('Entre na sua conta para jogar ' + (nome || 'este jogo') + '.');
+        else if (window.toast) window.toast(e.message, 'err');
+        else console.warn(e.message);
+      } catch (_) { console.warn(e.message); } // o aviso nunca pode deixar o jogo bloqueado
+    } finally {
+      if (minha === sessao) carregando = false;
+    }
+  };
+
+  function sairEcraInteiro() {
+    try {
+      if (document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(() => {});
+      else if (document.webkitFullscreenElement && document.webkitExitFullscreen) document.webkitExitFullscreen();
+    } catch (_) {}
+  }
+
+  function fechar() {
+    if (!overlay.classList.contains('show')) return;
+    sessao++; aberto = false; carregando = false;
+    sairEcraInteiro();
+    overlay.classList.remove('show');
+    overlay.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('ft-open');
+    frame.src = 'about:blank';
+    // o jogador pode ter ganho ou perdido: atualiza o saldo mostrado no site
+    if (window.tugasRefreshSaldo) window.tugasRefreshSaldo();
+  }
+
+  // se o próprio jogo se puser em ecrã inteiro, tapa o X e o jogador fica preso: desfaz logo
+  const fsMudou = () => {
+    const el = document.fullscreenElement || document.webkitFullscreenElement;
+    if (el && el !== overlay) sairEcraInteiro();
+  };
+  document.addEventListener('fullscreenchange', fsMudou);
+  document.addEventListener('webkitfullscreenchange', fsMudou);
+
+  document.getElementById('ftClose').addEventListener('click', fechar);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) fechar(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fechar(); });
+
+  // se os slots estiverem desligados no servidor, esconde os atalhos dos jogos
+  fetch('/api/me', { credentials: 'same-origin' }).then((r) => r.json()).then((d) => {
+    if (d && d.games && !d.games.slots) document.querySelectorAll('[data-abrir]').forEach((el) => { el.style.display = 'none'; });
+  }).catch(() => {});
+})();
+</script>
 
 <script src="markets.js"></script>
 <script src="app.js"></script>
