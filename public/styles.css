@@ -62,7 +62,8 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .side-sport.open{background:var(--panel2)}
 .side-sport.open .chev{transform:rotate(90deg);color:var(--yellow)}
 .side-sport.cur{color:var(--yellow)}
-.side-leagues{margin:2px 0 6px 18px;padding-left:8px;border-left:2px solid var(--line);animation:sideIn .18s ease-out}
+.side-leagues{margin:2px 0 6px 18px;padding-left:8px;border-left:2px solid var(--line)}
+.side-leagues.anim{animation:sideIn .18s ease-out}
 .side-leagues .side-item{padding:7px 10px}
 .side-sub{padding:8px 10px 2px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 @keyframes sideIn{from{opacity:0;transform:translateY(-4px)}}
@@ -147,11 +148,11 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .odd.lock{cursor:not-allowed;opacity:.6}
 .odd.lock .val{font-size:13px}
 .odd.empty{background:transparent;border:1px dashed var(--line);cursor:default}
-.odd.up{animation:oddup 6s}
-.odd.down{animation:odddown 6s}
-.odd.up::after,.odd.down::after{position:absolute;top:3px;right:5px;font-size:9px;animation:fade 6s forwards}
-.odd.up::after{content:"â–²";color:var(--green)}
-.odd.down::after{content:"â–¼";color:var(--red)}
+.odd.up{animation:oddup 6s var(--d,0s) both}
+.odd.down{animation:odddown 6s var(--d,0s) both}
+.odd.up::after,.odd.down::after{position:absolute;top:3px;right:5px;font-size:9px;animation:fade 6s var(--d,0s) forwards}
+.odd.up::after{content:"\25B2";color:var(--green)}
+.odd.down::after{content:"\25BC";color:var(--red)}
 @keyframes oddup{0%,30%{box-shadow:inset 0 0 0 2px var(--green)}100%{box-shadow:none}}
 @keyframes odddown{0%,30%{box-shadow:inset 0 0 0 2px var(--red)}100%{box-shadow:none}}
 @keyframes fade{0%,80%{opacity:1}100%{opacity:0}}
@@ -396,7 +397,7 @@ form .btn-block{margin-top:14px}
 .tx-st.st-paid{color:var(--green)}
 .tx-st.st-failed,.tx-st.st-rejected{color:#ff6b6b}
 
-/* ---- conta: confirmaÃ§Ã£o de e-mail, jogo responsÃ¡vel ---- */
+/* ---- conta: confirmação de e-mail, jogo responsável ---- */
 .verify-box{background:#3a2f0b;border:1px solid #5a4710;border-radius:10px;padding:12px;margin:12px 0;font-size:13px}
 .verify-box p{margin:0 0 10px;color:#ffe9a8}
 .verify-box .acc-actions{margin:0}

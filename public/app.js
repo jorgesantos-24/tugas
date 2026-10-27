@@ -175,13 +175,27 @@ function mergeLight(full, light) {
     return { ...mk, sels: mk.sels.map((x) => byPick.get(`${x.pick}|${x.line ?? ''}|${x.base ?? ''}`) || x) };
   });
 }
+// redesenho pelo tempo real: junta as atualizações (no máximo 1x/s) e espera que a pessoa pare de deslizar o ecrã
+let paintT = 0, lastPaint = 0, lastScroll = 0;
+addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
+addEventListener('touchmove', () => { lastScroll = Date.now(); }, { passive: true });
+function schedulePaint() {
+  if (paintT) return;
+  const wait = Math.max(0, 1000 - (Date.now() - lastPaint), 700 - (Date.now() - lastScroll));
+  paintT = setTimeout(() => {
+    paintT = 0;
+    if (Date.now() - lastScroll < 700) { schedulePaint(); return; } // ainda a deslizar
+    lastPaint = Date.now();
+    requestAnimationFrame(() => { S.keepScroll = true; safeRender(); });
+  }, wait);
+}
 async function startStream() {
   if (!window.EventSource) return;
   // no domínio do site (Firebase Hosting) o fluxo ficava retido: liga-se direto ao servidor (S.site.streamUrl)
   try { await S.sitePromise; } catch { /* sem dados do site: fica no próprio endereço */ }
   const base = S.site?.streamUrl && new URL(S.site.streamUrl).origin !== location.origin ? S.site.streamUrl : '';
   let es = null, raf = 0;
-  const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; S.keepScroll = true; safeRender(); }); };
+  const paint = () => schedulePaint();
   const connect = () => {
     es = new EventSource(base + '/api/stream?watch=' + encodeURIComponent(fullIds().join(',')));
     es.addEventListener('hello', (msg) => {
@@ -368,9 +382,11 @@ function oddBtn(sel, ev, opts = {}) {
   const inSlip = S.slip.some((s) => s.key === sel.key);
   const mv = S.moves.get(sel.key);
   const move = mv && mv.until > Date.now() ? mv.dir : '';
+  // a seta continua a animação de onde ia (não recomeça a cada redesenho)
+  const mvStyle = move ? ` style="--d:-${((6000 - (mv.until - Date.now())) / 1000).toFixed(2)}s"` : '';
   const label = esc(opts.wide ? sel.name : sel.lbl);
   if (isSuspended(ev) || sel.locked) return `<span class="odd lock ${opts.cls || ''}" title="Suspenso"><span class="lbl">${label}</span><span class="val">🔒</span></span>`;
-  return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}" data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(sel.odds)}</span></button>`;
+  return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}"${mvStyle} data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(sel.odds)}</span></button>`;
 }
 
 function timeCell(ev) {
@@ -662,7 +678,7 @@ function renderMain() {
     oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
   }
   heroShow(S.heroIdx || 0, true);
-  if (S.keepScroll) window.scrollTo(0, scrollY);
+  // a posição mantém-se sozinha; repô-la com scrollTo interrompia o deslize do dedo no telemóvel
   S.keepScroll = true;
 }
 
@@ -924,7 +940,7 @@ function renderSidebar() {
     const sCnt = evs.filter((e) => e.sport === sk && e.state !== 'post').length;
     html += `<button class="side-item side-sport ${open ? 'open' : ''} ${curSport === sk ? 'cur' : ''}" data-togglesport="${sk}"><span class="ic">${sp.icon}</span>${esc(sp.name)}<span class="cnt ${sLive ? 'live' : ''}">${sLive ? '● ' + sLive : sCnt}</span><span class="chev">›</span></button>`;
     if (!open) continue;
-    html += `<div class="side-leagues">`;
+    html += `<div class="side-leagues${S.sideAnim === sk ? ' anim' : ''}">`;
     if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
     let circuit = null;
     if (sk === 'soccer' && lgs.some((l) => l.dyn) && !lgs[0].dyn) html += `<div class="side-sub">Principais</div>`;
@@ -942,7 +958,10 @@ function renderSidebar() {
     html += `<div class="side-casino-sep"></div>
     <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Cassino</button>`;
   }
-  $('#sidebar').innerHTML = html;
+  S.sideAnim = null;
+  // só mexe no menu se mudou (redesenhar a cada atualização fazia-o piscar e perder a posição)
+  const sb = $('#sidebar');
+  if (sb.dataset.html !== html) { const top = sb.scrollTop; sb.innerHTML = html; sb.dataset.html = html; sb.scrollTop = top; }
   $('#liveCountNav').textContent = liveN;
   $('#liveCountBn').textContent = liveN > 99 ? '99+' : liveN || '';
   document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.view === S.view || (a.dataset.view === 'home' && !['live', 'mybets', 'casino'].includes(S.view))));
@@ -971,6 +990,8 @@ function render() {
 }
 // não redesenha campos com foco (para não perder o que está a ser escrito)
 function safeRender() {
+  // a pessoa está a deslizar o ecrã: redesenha quando parar (não trava o deslize)
+  if (Date.now() - lastScroll < 700) { schedulePaint(); return; }
   const a = document.activeElement;
   if (a && a.tagName === 'INPUT') { renderHeader(); renderSidebar(); if (!a.closest('#main')) renderMain(); if (!a.closest('#slip')) renderSlip(); return; }
   render();
@@ -1364,7 +1385,7 @@ document.addEventListener('click', async (e) => {
   }
   if (d.league) { e.preventDefault(); go('league', { league: d.league }); return; }
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
-  if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; renderSidebar(); return; }
+  if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; S.sideAnim = S.openSport; renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
