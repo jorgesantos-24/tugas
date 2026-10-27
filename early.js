@@ -32,8 +32,19 @@ const PARTS = require('./feeds/parts.js');
 const PLAYERS = require('./feeds/players.js');
 const SCOPE_PT = (s) => ({ ft: 'jogo', h1: '1º tempo', h2: '2º tempo', corners: 'escanteios' }[s]
   || (/^q(\d)$/.exec(s) ? `${s.slice(1)}º quarto` : /^p(\d)$/.exec(s) ? `${s.slice(1)}º período` : /^map(\d+)$/.exec(s) ? `mapa ${s.slice(3)}` : s));
-// futebol: só antes dos 90' (um gol no prolongamento não conta; "90'+" pode já ser prolongamento)
-const inRegulation = (ev) => { const mm = /^(\d+)'$/.exec(ev.clock || ''); return ev.clock === 'Intervalo' || !!(mm && Number(mm[1]) < 90); };
+/* futebol: só no tempo regulamentar (um gol no prolongamento não conta para os mercados).
+   A fonte mostra "90'+" tanto nos descontos como no prolongamento, por isso os descontos do 2º tempo só contam nas
+   competições sem prolongamento: campeonatos. Taças, eliminatórias, play-offs e provas internacionais ficam de fora
+   (na dúvida, fica de fora). Os descontos do 1º tempo ("45'+") contam sempre. */
+const MAY_HAVE_EXTRA_TIME = /cup|copa|ta[cç]a|pokal|coupe|coppa|beker|kupa|puchar|cupa|\bkup|trophy|trof[eé]u|shield|play.?off|playout|final|knockout|qualif|friendl|amist|champions\b|campe[õo]es|\bmls\b|liguilla|europa|conference|libertadores|sul.?americana|sudamericana|nations|world|mundial|\beuro\b|internacional|international/i;
+const noExtraTime = (ev) => !MAY_HAVE_EXTRA_TIME.test(`${ev.leagueName || ''} ${ev.league || ''} ${ev.country || ''}`);
+const inRegulation = (ev) => {
+  const c = ev.clock || '';
+  if (c === 'Intervalo' || c === "45'+") return true;
+  if (c === "90'+") return noExtraTime(ev);
+  const mm = /^(\d+)'$/.exec(c);
+  return !!(mm && Number(mm[1]) < 90);
+};
 const MONO_PART = new Set(['ptot', 'pteam', 'pbtts', 'pcln', 'pot']);
 // combinações em que mais gols nunca desfazem: só ambas marcam e "mais/menos de" (sem resultado, faixas ou "exatamente")
 const monoCond = (pick) => String(pick).replace(/^!/, '').split(';').every((c) => /^(btts=(yes|no)|(tot|th|ta)=(gt|lt):[\d.]+)$/.test(c));
@@ -58,7 +69,7 @@ module.exports = function early({ M, TEN, events, liveStats, now }) {
   // ---- placar que só sobe ----
   function mono(leg, ev) {
     if (!(MONO[ev.sport] || []).includes(leg.market) || (leg.per != null && leg.market !== 'e1m')) return null; // e1m: "per" = de que equipa
-    // futebol: só no tempo regulamentar (um gol no prolongamento não conta para o resultado; "90'+" pode já ser prolongamento)
+    // futebol: só no tempo regulamentar (ver inRegulation: descontos do 2º tempo só nos campeonatos)
     if (ev.sport === 'soccer' && !inRegulation(ev)) return null;
     const h = ev.home.score, a = ev.away.score;
     if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
