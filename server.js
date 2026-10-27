@@ -248,8 +248,8 @@ const LW = require('./livewatch.js')({ col, inc, M, events, findSel, now }); // 
 // liquidação antecipada: seleções já decididas pagas 2,5 min depois (sem esperar pelo fim do jogo)
 const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now });
 let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
-// resultado só conta depois de lido igual duas vezes, com pelo menos 5 min de intervalo
-const RESULT_CONFIRM_MS = 5 * 60000;
+// resultado final: vale logo à primeira leitura (RESULT_CONFIRM_S > 0 obriga a lê-lo igual outra vez depois desse tempo)
+const RESULT_CONFIRM_MS = Number(process.env.RESULT_CONFIRM_S || 0) * 1000;
 
 // jogos com apostas em aberto (não podem sair da memória)
 const openEvIds = () => new Set([...openBets.values()].flatMap((b) => b.legs.filter((l) => !l.result).map((l) => l.evId)));
@@ -426,7 +426,7 @@ function stubFromLeg(l) {
   };
 }
 
-// procura o resultado dos jogos terminados (cada jogo no máximo 1x/min; depois de 6h, 1x a cada 10 min)
+// procura o resultado dos jogos terminados (até 40 por minuto; cada jogo no máximo 1x/min; depois de 6h, 1x a cada 10 min)
 const resultTried = new Map();
 async function checkResults() {
   const t = now();
@@ -436,12 +436,16 @@ async function checkResults() {
   for (const b of openBets.values()) for (const l of b.legs) {
     if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.') || l.league?.startsWith('fut.'))) want.set(l.evId, l);
   }
+  // primeiro os jogos com apostas em aberto, depois os que foram perguntados há mais tempo
+  // (senão os primeiros 20 da lista, que às vezes nunca recebem resultado, ocupavam sempre a vez)
+  const withBets = openEvIds();
+  const order = [...want].sort(([a], [b]) => (withBets.has(b) - withBets.has(a)) || ((resultTried.get(a) || 0) - (resultTried.get(b) || 0)));
   let asked = 0;
-  for (const [id, leg] of want) {
+  for (const [id, leg] of order) {
     const ev0 = events.get(id);
     const startsAt = ev0 ? +ev0.date : leg.startsAt;
     if (t - (resultTried.get(id) || 0) < (t - startsAt > 6 * 3600000 ? 600000 : 60000)) continue;
-    if (++asked > 20) break;
+    if (++asked > 40) break;
     resultTried.set(id, t);
     let r;
     try { r = await FEED.fetchResult(id, ev0 ? ev0.sport : leg.sport || 'soccer'); } catch (e) { console.error(`[Resultados] ${id}: ${e.message}`); continue; }
@@ -455,8 +459,10 @@ async function checkResults() {
     const { done, finishedAt, note, ...R } = r;
     const sig = JSON.stringify(R);
     const p = ev.pendingResult;
-    if (!p || p.sig !== sig) { ev.pendingResult = { sig, at: t }; continue; }
-    if (t - p.at < RESULT_CONFIRM_MS) continue;
+    if (RESULT_CONFIRM_MS > 0) {
+      if (!p || p.sig !== sig) { ev.pendingResult = { sig, at: t }; continue; }
+      if (t - p.at < RESULT_CONFIRM_MS) continue;
+    }
     Object.assign(ev, {
       state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado' + (R.alts ? ' (pênaltis)' : ''), pendingResult: null,
       result: R, resultNote: note || (R.alts ? 'decidido nos pênaltis: a fonte não diz quem ganhou; mercados do vencedor ficam para a equipa' : null),

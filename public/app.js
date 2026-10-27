@@ -450,14 +450,17 @@ function leagueBlocks(list) {
   }).join('');
 }
 
+// jogos que acabaram e esperam o resultado não aparecem no site (o cliente vê o resultado nas apostas)
+const listed = () => [...S.events.values()].filter((e) => !e.awaiting);
+
 function filtered(pred) {
   const q = S.query.trim().toLowerCase();
   const tab = ['home', 'live', 'all'].includes(S.view) && S.sportTab !== 'all' ? S.sportTab : null;
-  return [...S.events.values()].filter((ev) => pred(ev) && (!tab || ev.sport === tab) && (!q || `${ev.home.name} ${ev.away.name} ${ev.leagueName}`.toLowerCase().includes(q)));
+  return listed().filter((ev) => pred(ev) && (!tab || ev.sport === tab) && (!q || `${ev.home.name} ${ev.away.name} ${ev.leagueName}`.toLowerCase().includes(q)));
 }
 
 function sportTabs() {
-  const evs = [...S.events.values()].filter((e) => e.state !== 'post' && (S.view !== 'live' || e.state === 'in'));
+  const evs = listed().filter((e) => e.state !== 'post' && (S.view !== 'live' || e.state === 'in'));
   const sports = Object.entries(SPORTS).filter(([k]) => evs.some((e) => e.sport === k));
   if (S.sportTab !== 'all' && !sports.some(([k]) => k === S.sportTab)) S.sportTab = 'all';
   const btn = (k, label, n) => `<button class="${S.sportTab === k ? 'active' : ''}" data-sporttab="${k}">${label}<span class="tab-cnt">${n}</span></button>`;
@@ -759,6 +762,7 @@ const manualNote = (list) => (list[0]?.manual ? '<small title="Resultado confirm
 function renderEvent() {
   const ev = S.events.get(S.eventId);
   if (!ev) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Evento não encontrado.</div>`;
+  if (ev.awaiting) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Este jogo terminou. O resultado das suas apostas aparece em <a href="/minhas-apostas" data-view="mybets">Minhas apostas</a>.</div>`;
   const sels = selections(ev);
   const groups = {};
   for (const s of sels) (groups[s.marketName] ||= []).push(s);
@@ -825,7 +829,7 @@ function betCard(bet) {
   const legs = bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
     let live = '';
-    if (!l.result && ev) live = ev.state === 'in' ? `<span class="ls">● ${esc(ev.clock)} · ${ev.home.score}-${ev.away.score}</span>` : ev.state === 'pre' ? `<span class="lm">${dateLabel(ev.date)}</span>` : '';
+    if (!l.result && ev) live = ev.awaiting ? `<span class="lm">Jogo terminado · aguardando resultado</span>` : ev.state === 'in' ? `<span class="ls">● ${esc(ev.clock)} · ${ev.home.score}-${ev.away.score}</span>` : ev.state === 'pre' ? `<span class="lm">${dateLabel(ev.date)}</span>` : '';
     const cls = !l.result ? '' : l.result.includes('won') ? 'won' : l.result.includes('lost') ? 'lost' : 'void';
     return `<div class="leg ${cls}">
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
@@ -923,7 +927,7 @@ function renderSlip() {
 
 /* ---------------- render: sidebar / header ---------------- */
 function renderSidebar() {
-  const evs = [...S.events.values()];
+  const evs = listed();
   const liveN = evs.filter((e) => e.state === 'in').length;
   const item = (view, label, cnt) => `<button class="side-item ${S.view === view ? 'active' : ''}" data-view="${view}">${label}<span class="cnt ${view === 'live' && cnt ? 'live' : ''}">${cnt ?? ''}</span></button>`;
   let html = `<div class="side-title">Esportes</div>
