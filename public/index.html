@@ -43,6 +43,20 @@
   </aside>
 </div>
 
+<!-- barra de baixo (telemóvel): Esportes · Ao vivo · Depósito (destaque) · Cassino · Perfil (o SAC fica no Perfil) -->
+<nav class="bottomnav" id="bottomNav" aria-label="Menu principal">
+  <a href="/" class="bn-item" data-view="home" data-bn="home">
+    <span class="bn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5l4.3 3.1-1.6 5H9.3l-1.6-5z"/><path d="M12 3v4.5M20.6 9.2l-4.3 1.4M17.3 19.4l-2.6-3.8M6.7 19.4l2.6-3.8M3.4 9.2l4.3 1.4"/></svg></span>Esportes</a>
+  <a href="/ao-vivo" class="bn-item" data-view="live" data-bn="live">
+    <span class="bn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2"/></svg><b class="bn-badge" id="liveCountBn"></b></span>Ao Vivo</a>
+  <button type="button" class="bn-item bn-main" data-action="deposit">
+    <span class="bn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span>Depósito</button>
+  <a href="/cassino" class="bn-item casino-only" data-view="casino" data-bn="casino">
+    <span class="bn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><circle cx="8.5" cy="8.5" r="1.2"/><circle cx="15.5" cy="15.5" r="1.2"/><circle cx="15.5" cy="8.5" r="1.2"/><circle cx="8.5" cy="15.5" r="1.2"/><circle cx="12" cy="12" r="1.2"/></svg></span>Cassino</a>
+  <button type="button" class="bn-item" data-action="account" data-bn="account">
+    <span class="bn-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg></span>Perfil</button>
+</nav>
+
 <button class="slip-fab only-mobile" id="slipFab">Boletim <span class="badge" id="slipFabCount">0</span> <span id="slipFabOdds"></span></button>
 
 <footer class="footer">

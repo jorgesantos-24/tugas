@@ -8,3 +8,6 @@ data/
 node_modules/
 .firebase/
 *.log
+
+# conta de teste do servidor local
+*.local.txt

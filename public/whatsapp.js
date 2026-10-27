@@ -1,5 +1,6 @@
 'use strict';
-/* Botão flutuante do WhatsApp do suporte, no canto inferior esquerdo de todas as páginas do cliente.
+/* Botão flutuante do WhatsApp do suporte, no canto inferior esquerdo de todas as páginas do cliente
+   (no telemóvel, na página principal, fica por cima da barra de baixo).
    O canto direito fica livre para o boletim (mobile) e para o chat do SAC.
    Para trocar o número, altere WHATSAPP abaixo (só dígitos, com o 55 do Brasil). */
 (() => {
@@ -23,7 +24,17 @@
 @keyframes waPulse{0%{transform:scale(1);opacity:.7}80%,100%{transform:scale(1.5);opacity:0}}
 @media (max-width:760px){.wa-fab{left:12px;bottom:14px}.wa-btn{width:50px;height:50px}.wa-btn svg{width:27px;height:27px}}
 @media (prefers-reduced-motion:reduce){.wa-btn::before{animation:none;display:none}.wa-btn,.wa-tip{transition:none}}
-@media print{.wa-fab{display:none}}`;
+@media print{.wa-fab{display:none}}
+/* página com a barra de baixo (telemóvel): o botão fica por cima dela, do lado esquerdo, à altura do Boletim */
+@media (max-width:900px){
+  .wa-above-nav .wa-fab{left:12px;bottom:calc(76px + env(safe-area-inset-bottom))}
+  .wa-above-nav .wa-btn{width:46px;height:46px}
+  .wa-above-nav .wa-btn svg{width:25px;height:25px}
+  .wa-above-nav .wa-shield{width:19px;height:19px;font-size:9px}
+}
+/* computador: o menu lateral acaba acima do botão, para não ficar tapado */
+@media (min-width:901px){ .has-wa .sidebar{max-height:calc(100vh - 170px)} }
+body.ft-open .wa-fab{display:none}`;
   const style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
@@ -42,6 +53,8 @@
 </span>
 <span class="wa-tip"><b>Precisa de ajuda?</b><small>Suporte pelo WhatsApp</small></span>`;
   document.body.appendChild(a);
+  document.body.classList.add('has-wa');
+  if (document.getElementById('bottomNav')) document.body.classList.add('wa-above-nav');
 
   // Na primeira visita da sessão, mostra o balão "Precisa de ajuda?" por alguns segundos (só em ecrãs largos).
   try {

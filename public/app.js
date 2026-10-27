@@ -11,6 +11,7 @@ const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v ? JS
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sem storage */ } };
 
 const S = {
+  site: {}, // dados da empresa (/api/site): e-mail de suporte, CNPJ...
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
   view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null,
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
@@ -122,7 +123,8 @@ const RES_PT = { won: 'Ganhou', halfwon: 'Meio ganho', void: 'Devolvida', halflo
 
 async function loadAccount(silent) {
   try {
-    const { user, payments, liveDelay, liveCashoutDelay, casino, games } = await api('GET', '/api/me');
+    const { user, payments, liveDelay, liveCashoutDelay, casino, games, testMode } = await api('GET', '/api/me');
+    S.testMode = !!testMode; // servidor de teste (emuladores): sem BravoPay, com saldo de teste
     S.casino = !!casino; S.games = games || {}; document.body.classList.toggle('has-casino', S.casino);
     if (liveDelay) { S.liveDelay = liveDelay; S.liveCashoutDelay = liveCashoutDelay; }
     S.user = user;
@@ -327,6 +329,66 @@ function sportTabs() {
 const isToday = (ev) => sameDay(ev.date, new Date());
 const isTomorrow = (ev) => { const t = new Date(); t.setDate(t.getDate() + 1); return sameDay(ev.date, t); };
 
+/* ---------------- carrossel de destaques (topo da página inicial) ---------------- */
+// slides: conta (criar / 1.º depósito), jogo ao vivo em destaque, cassino
+function homeHero(live) {
+  if (S.user && isPaused()) return homeBanner(); // conta em pausa: só o aviso, sem promover jogos
+  const slides = [];
+  // marca: cores de Portugal e o mascote Galo Tuga
+  slides.push(`<div class="hb-slide hb-brand">
+      <div class="hb-txt"><small><span class="hb-flag" aria-hidden="true"></span>TugasBet</small><b>Futebol com sotaque <span class="hb-pt">português</span></b><p>Odds ao vivo, cassino e PIX na hora. Bora com o Galo Tuga!</p>
+      <span class="hb-cta">${S.user ? '<button class="hb-btn" data-view="live">Apostar ao vivo</button>' : '<button class="hb-btn" data-action="register">Entrar no time</button>'}</span></div>
+      <img class="hb-galo" src="/img/galo-tuga.svg" alt="Galo Tuga, o mascote da TugasBet"></div>`);
+  if (!S.user) slides.push(`<div class="hb-slide hb-acc">
+      <div class="hb-txt"><small>Bem-vindo à TugasBet</small><b>Crie sua conta em 1 minuto</b><p>Deposite via PIX e aposte nos jogos que estão rolando agora.</p>
+      <span class="hb-cta"><button class="hb-btn" data-action="register">Cadastrar</button><button class="hb-btn hb-btn-ghost" data-action="login">Entrar</button></span></div>
+      <img class="hb-art hb-logo" src="/img/logo.png" alt=""></div>`);
+  else if (S.user.balance <= 0 && !S.bets.length) slides.push(`<div class="hb-slide hb-acc">
+      <div class="hb-txt"><small>Olá, ${esc(S.user.name.split(' ')[0])}</small><b>Faça seu primeiro depósito</b><p>Via PIX: o saldo é creditado em segundos.</p>
+      <span class="hb-cta"><button class="hb-btn" data-action="deposit">Depositar</button></span></div>
+      <img class="hb-art hb-logo" src="/img/logo.png" alt=""></div>`);
+  // jogo ao vivo em destaque: de preferência um com odds abertas, pela ordem das ligas
+  const withOdds = live.filter((e) => e.markets || e.cm);
+  const ev = (withOdds.length ? withOdds : live).slice().sort((a, b) => (LEAGUE_BY_KEY[a.league]?.order ?? 999) - (LEAGUE_BY_KEY[b.league]?.order ?? 999))[0];
+  if (ev) {
+    const team = (t) => `<span class="hb-team">${t.logo ? `<img src="${esc(t.logo)}" alt="">` : `<i>${esc((t.short || '?').slice(0, 3))}</i>`}<em>${esc(t.short)}</em></span>`;
+    slides.push(`<div class="hb-slide hb-live">
+      <div class="hb-txt"><small><span class="live-dot"></span>Ao vivo · ${esc(ev.clock || '')}</small><b>${esc(ev.home.short)} x ${esc(ev.away.short)}</b><p>${esc(ev.leagueName)} · ${live.length} jogos ao vivo agora</p>
+      <span class="hb-cta"><button class="hb-btn" data-ev="${ev.id}">Apostar</button><button class="hb-btn hb-btn-ghost" data-view="live">Ver todos</button></span></div>
+      <div class="hb-art hb-match">${team(ev.home)}<span class="hb-score">${ev.home.score ?? 0}<small>:</small>${ev.away.score ?? 0}</span>${team(ev.away)}</div></div>`);
+  }
+  const g = S.casino && casinoGames().find((x) => !isSoon(x));
+  if (g) slides.push(`<div class="hb-slide hb-casino">
+      <img class="hb-bg" src="${g.img}" alt="" onerror="this.onerror=null;this.style.display='none'">
+      <div class="hb-txt"><small>Cassino</small><b>${esc(g.name)}</b><p>Com o mesmo saldo das suas apostas.</p>
+      <span class="hb-cta">${gameLink(g, 'hb-btn', 'Jogar agora <span aria-hidden="true">▶</span>')}</span></div></div>`);
+  if (!slides.length) return '';
+  const dots = slides.length > 1 ? `<div class="hb-dots">${slides.map((_, i) => `<button type="button" data-hb="${i}" aria-label="Destaque ${i + 1}"></button>`).join('')}</div>` : '';
+  return `<div class="hb" id="homeHero" data-n="${slides.length}"><div class="hb-track">${slides.join('')}</div>${dots}</div>`;
+}
+// mostra o slide atual (chamado depois de desenhar a página e a cada troca)
+function heroShow(i, instant) {
+  const hb = document.getElementById('homeHero'); if (!hb) return;
+  const n = +hb.dataset.n || 1;
+  S.heroIdx = ((i % n) + n) % n;
+  const tr = hb.querySelector('.hb-track');
+  if (instant) tr.style.transition = 'none';
+  tr.style.transform = `translateX(-${S.heroIdx * 100}%)`;
+  if (instant) { void tr.offsetWidth; tr.style.transition = ''; }
+  hb.querySelectorAll('.hb-dots button').forEach((b, k) => b.classList.toggle('on', k === S.heroIdx));
+}
+// troca sozinho a cada 6 s (para enquanto o rato/dedo está em cima ou a aba está escondida)
+let heroHold = false;
+setInterval(() => { if (!heroHold && !document.hidden) heroShow((S.heroIdx || 0) + 1); }, 6000);
+document.addEventListener('mouseover', (e) => { heroHold = !!e.target.closest('#homeHero'); });
+let heroTouchX = null;
+document.addEventListener('touchstart', (e) => { if (e.target.closest('#homeHero')) { heroHold = true; heroTouchX = e.touches[0].clientX; } }, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (heroTouchX == null) return;
+  const dx = e.changedTouches[0].clientX - heroTouchX; heroTouchX = null; heroHold = false;
+  if (Math.abs(dx) > 40) heroShow((S.heroIdx || 0) + (dx < 0 ? 1 : -1));
+}, { passive: true });
+
 function heroCard(ev) {
   const sels = mainSels(ev, selections(ev)).filter(Boolean);
   return `<div class="hero-card" data-ev="${ev.id}">
@@ -349,10 +411,10 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: '/img/decola-capa.webp?v=4' },
-  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: '/img/mines-capa.webp?v=1' },
   { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: '/img/slots/fortune-tiger.webp' },
   { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: '/img/slots/fortune-ox.webp' },
+  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: '/img/decola-capa.webp?v=4' },
+  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: '/img/mines-capa.webp?v=1' },
   { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: '/img/slots/fortune-dragon.webp' },
   { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: '/img/slots/fortune-rabbit.webp' },
   { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: '/img/slots/fortune-mouse.webp' },
@@ -386,10 +448,31 @@ const isSoon = (g) => !CASINO_AVAILABLE.has(g.abrir || g.id);
 const casinoCard = (g) => isSoon(g)
   ? `<div class="cg-card soon" title="${esc(g.name)} — indisponível no momento" aria-disabled="true"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"><span class="cg-soon">Indisponível</span></div></div>`
   : `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
+// página inicial: uma fila só com os jogos disponíveis (Fortune Tiger e Fortune Ox primeiro)
+function homeCasino() {
+  if (!S.casino) return '';
+  const games = casinoGames().filter((g) => !isSoon(g));
+  if (!games.length) return '';
+  // data-key: o bloco só é recriado quando a lista de jogos muda (ver renderMain)
+  return `<div id="homeCasino" data-key="${esc(games.map((g) => g.abrir || g.id).join(','))}">
+    <div class="section-head"><h2>Cassino</h2><a href="/cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
+    <div class="cg-grid cg-row">${games.map(casinoCard).join('')}</div></div>`;
+}
+// abre um jogo: os slots usam data-abrir, o Aviator e o Mines têm página própria
+const gameLink = (g, cls, inner) =>
+  `<a class="${cls}" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}">${inner}</a>`;
+// faixa do topo do cassino: um só destaque (o primeiro jogo disponível, o Fortune Tiger)
+function casinoHero() {
+  const g = casinoGames().find((x) => !isSoon(x));
+  if (!g) return '';
+  return gameLink(g, 'cg-hero', `<img class="cg-hero-bg" src="${g.img}" alt="" onerror="this.onerror=null;this.style.display='none'">
+    <span class="cg-hero-txt"><small>Em destaque</small><b>${esc(g.name)}</b>
+    <span class="cg-hero-play">Jogar agora <span aria-hidden="true">▶</span></span></span>`);
+}
 function renderCasino() {
   if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
   const card = casinoCard;
-  return `<div class="cg-hero"><h1>Cassino</h1></div>
+  return `${casinoHero()}
     <div class="section-head"><h2>Jogos</h2><span class="muted">${casinoGames().filter((g) => !isSoon(g)).length} disponíveis</span></div>
     <div class="cg-grid">${casinoGames().map(card).join('')}</div>
     <p class="muted" style="font-size:12px;margin-top:18px">18+ · Jogue com responsabilidade. Os seus limites de perda e a pausa da conta valem também para o cassino.</p>`;
@@ -412,7 +495,8 @@ function renderMain() {
   else {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
-      html += homeBanner(); // o cassino só aparece na sua própria página (/cassino)
+      html += homeHero(live);
+      html += homeCasino();
       html += sportTabs();
       const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
@@ -450,7 +534,16 @@ function renderMain() {
   // nada mudou: não mexe na página (evita que as imagens pisquem a cada atualização)
   if (html === S.lastMainHtml && main.firstChild) { S.keepScroll = true; return; }
   S.lastMainHtml = html;
+  // reaproveita o bloco do cassino já carregado (as imagens não piscam e a posição da fila mantém-se)
+  const oldCasino = main.querySelector('#homeCasino');
+  const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
+  const newCasino = main.querySelector('#homeCasino');
+  if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
+    newCasino.replaceWith(oldCasino);
+    oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
+  }
+  heroShow(S.heroIdx || 0, true);
   if (S.keepScroll) window.scrollTo(0, scrollY);
   S.keepScroll = true;
 }
@@ -682,6 +775,7 @@ function renderSidebar() {
   }
   $('#sidebar').innerHTML = html;
   $('#liveCountNav').textContent = liveN;
+  $('#liveCountBn').textContent = liveN > 99 ? '99+' : liveN || '';
   document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.view === S.view || (a.dataset.view === 'home' && !['live', 'mybets', 'casino'].includes(S.view))));
 }
 
@@ -694,6 +788,10 @@ function renderHeader() {
   } else {
     w.innerHTML = `<button class="btn btn-ghost" data-action="login">Entrar</button><button class="btn btn-green" data-action="register">Cadastrar</button>`;
   }
+  // no cassino não há apostas esportivas: esconde o botão do Boletim
+  document.body.classList.toggle('view-casino', S.view === 'casino');
+  // barra de baixo: marca a secção atual
+  document.querySelectorAll('#bottomNav [data-bn]').forEach((b) => b.classList.toggle('active', b.dataset.bn === S.view));
   if (S.lastUpdate) $('#lastUpdate').textContent = '· Última atualização ' + new Date(S.lastUpdate).toLocaleTimeString('pt-BR');
 }
 
@@ -728,7 +826,8 @@ function openLogin(msg) {
       <div class="form-err" id="formErr"></div>
       <button class="btn btn-green btn-block" type="submit">Entrar</button>
     </form>
-    <div class="note">Não tem conta? <a href="#" data-action="register" class="link">Cadastre-se grátis</a></div>`);
+    <div class="note">Não tem conta? <a href="#" data-action="register" class="link">Cadastre-se grátis</a></div>
+    <div class="note" style="margin-top:6px">Precisa de ajuda? <a href="/sac.html" class="link">Atendimento (SAC)</a></div>`);
 }
 function openForgot() {
   openModal(`<h3>Recuperar senha</h3><p class="sub">Informe o e-mail da sua conta. Vamos enviar um link para criar uma nova senha.</p>
@@ -777,6 +876,8 @@ let depState = { amount: 1000, method: 'pix' };
 function openDeposit() {
   if (!S.user) { afterAuth = openDeposit; openLogin('Entre para depositar.'); return; }
   if (isPaused()) return pausedNotice();
+  // servidor de teste: não há PIX real, oferece saldo fictício
+  if (!S.payments.live && S.testMode) return openModal(`<h3>Depósito (modo de teste)</h3><p class="sub">Este é o servidor de teste: não há PIX nem dinheiro real. Adicione saldo fictício para testar apostas e jogos.</p><button class="btn btn-green btn-block" data-action="dev-credit">+ R$ 1.000 de saldo de teste</button>`);
   if (!S.payments.live) return openModal(`<h3>Pagamentos indisponíveis</h3><p class="sub">Os pagamentos estão temporariamente indisponíveis. Tente de novo em instantes.</p><button class="btn btn-green btn-block" data-action="close-modal">OK</button>`);
   return openPixDeposit();
 }
@@ -935,6 +1036,8 @@ async function openAccount(tab) {
       <div class="kv"><span>Nascimento</span><b>${new Date(u.birthdate + 'T00:00:00').toLocaleDateString('pt-BR')}</b></div>
       ${u.cpf ? `<div class="kv"><span>CPF</span><b>${esc(u.cpf)}</b></div>` : ''}
       <div class="kv"><span>Membro desde</span><b>${new Date(u.createdAt).toLocaleDateString('pt-BR')}</b></div>
+      <a class="acc-sac" href="/sac.html"><span class="acc-sac-ic">🎧</span><span><b>Atendimento (SAC)</b><small>Dúvidas sobre depósitos, saques e apostas</small></span><span class="acc-sac-go">›</span></a>
+      <a class="acc-sac acc-sac-mail" href="mailto:${esc(S.site.supportEmail || 'suporte@tugasbet.com')}"><span class="acc-sac-ic">✉️</span><span><b>E-mail do suporte</b><small>${esc(S.site.supportEmail || 'suporte@tugasbet.com')}</small></span><span class="acc-sac-go">›</span></a>
       ${u.isAdmin ? '<a class="btn btn-ghost btn-block" style="margin-top:16px" href="/admin">Abrir o painel da equipa</a>' : ''}
       <button class="btn btn-ghost btn-block" style="margin-top:10px" data-action="logout">Sair da conta</button>`;
   } else if (accTab === 'tx') {
@@ -1091,6 +1194,7 @@ document.addEventListener('click', async (e) => {
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
   if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
+  if (d.hb != null) { heroShow(+d.hb); return; }
   if (d.view) { e.preventDefault(); go(d.view); return; }
   if (d.ev) { S.prevView = S.view === 'event' ? S.prevView : { view: S.view, league: S.league, sport: S.sport }; go('event', { eventId: d.ev }); return; }
   if (!d.action) return;
@@ -1105,6 +1209,7 @@ document.addEventListener('click', async (e) => {
     case 'account': openAccount('profile'); break;
     case 'logout': logout(); break;
     case 'deposit': openDeposit(); break;
+    case 'dev-credit': try { const { user } = await api('POST', '/api/dev/credit', {}); setUser(user); closeModal(); render(); toast('+ R$ 1.000 de saldo de teste', 'ok'); } catch (err) { toast(err.message, 'err'); } break;
     case 'do-deposit': doDeposit(); break;
     case 'withdraw': openWithdraw(); break;
     case 'do-withdraw': doWithdraw(); break;
@@ -1195,6 +1300,7 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
   renderHeader();
   await Promise.all([loadEvents(), loadAccount('first')]);
   api('GET', '/api/site').then(({ site }) => {
+    S.site = site || {};
     const parts = [site.company, site.cnpj && 'CNPJ ' + site.cnpj, site.license && 'Autorização SPA/MF: ' + site.license, site.supportEmail].filter(Boolean);
     const el = $('#siteInfo'); if (el) el.textContent = parts.join(' · ');
   }).catch(() => { });

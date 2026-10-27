@@ -411,10 +411,22 @@ form .btn-block{margin-top:14px}
 /* ---- cassino (lobby) ---- */
 .casino-only{display:none!important}
 .has-casino .casino-only{display:flex!important}
-.cg-hero{border-radius:16px;padding:26px 22px;margin-bottom:18px;background:radial-gradient(120% 140% at 100% 0%,#7a1020 0%,#0a4426 50%,#03240f 100%);border:1px solid rgba(255,204,31,.25)}
-.cg-hero h1{color:var(--yellow)}
-.cg-hero h1{margin:0 0 4px;font-size:26px}
-.cg-hero p{margin:0;color:var(--muted)}
+/* faixa do topo do cassino: nome + botão à esquerda, capa do jogo à direita a desvanecer */
+.cg-hero{position:relative;display:flex;align-items:center;height:150px;padding:0 26px;margin-bottom:22px;border-radius:16px;overflow:hidden;isolation:isolate;text-decoration:none;color:#fff;background:radial-gradient(60% 120% at 80% 50%,rgba(255,170,0,.18),transparent 70%),#0b0f0d;border:1px solid rgba(255,204,31,.35);box-shadow:0 10px 30px rgba(255,170,0,.1)}
+.cg-hero-bg{position:absolute;top:0;right:0;bottom:0;z-index:-1;width:58%;height:100%;object-fit:cover;object-position:center 30%;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 45%);mask-image:linear-gradient(90deg,transparent 0%,#000 45%);transition:transform .5s}
+.cg-hero:hover .cg-hero-bg{transform:scale(1.05)}
+.cg-hero-txt{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;max-width:60%}
+.cg-hero-txt small{color:var(--yellow);font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+.cg-hero-txt b{font-size:32px;font-weight:800;line-height:1.05;letter-spacing:-.6px}
+.cg-hero-play{margin-top:10px;display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:999px;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font-weight:800;font-size:14px;box-shadow:0 6px 20px rgba(255,204,31,.35);transition:transform .15s}
+.cg-hero-play span{font-size:10px}
+.cg-hero:hover .cg-hero-play{transform:scale(1.05)}
+@media (max-width:640px){
+  .cg-hero{height:132px;padding:0 16px;margin-bottom:16px}
+  .cg-hero-bg{width:68%}
+  .cg-hero-txt b{font-size:23px}
+  .cg-hero-play{margin-top:8px;padding:9px 16px;font-size:13px}
+}
 .cg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
 .cg-card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:transform .15s,border-color .15s}
 a.cg-card:hover{transform:translateY(-3px);border-color:var(--yellow);box-shadow:0 8px 24px rgba(255,204,31,.15)}
@@ -465,4 +477,102 @@ a.cg-card:hover .cg-play{opacity:1;transform:none}
 @media (min-width:901px) and (max-width:1100px){
   .layout{grid-template-columns:190px minmax(0,1fr) 270px;gap:12px;padding:12px}
   .slip-tabs button{padding:13px 4px;font-size:12px;white-space:nowrap}
+}
+
+/* ---- barra de baixo (telemóvel) ---- */
+.bottomnav{display:none}
+@media (max-width:900px){
+  .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(62px + env(safe-area-inset-bottom));padding:0 4px env(safe-area-inset-bottom);background:linear-gradient(180deg,#0e1712,#090d0b);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.45)}
+  .bn-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;border:0;color:var(--muted);font:600 10.5px/1.1 Inter,system-ui,sans-serif;text-align:center;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .bn-item.casino-only{display:none!important}
+  .has-casino .bn-item.casino-only{display:flex!important}
+  .bn-ic{position:relative;display:grid;place-items:center;width:26px;height:26px}
+  .bn-ic svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .bn-item.active{color:var(--yellow)}
+  .bn-item:active .bn-ic{transform:scale(.92)}
+  .bn-badge{position:absolute;top:-5px;right:-11px;min-width:17px;height:17px;padding:0 4px;border-radius:9px;background:var(--red);color:#fff;font-size:10px;font-weight:800;line-height:17px}
+  .bn-badge:empty{display:none}
+  /* botão do meio em destaque */
+  .bn-main{color:var(--yellow);font-weight:800}
+  .bn-main .bn-ic{width:56px;height:56px;margin-top:-28px;margin-bottom:1px;border-radius:50%;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;box-shadow:0 0 0 4px #0b110e,0 6px 18px rgba(255,204,31,.35)}
+  .bn-main .bn-ic svg{width:28px;height:28px;stroke-width:2.3}
+  /* o resto da página fica acima da barra */
+  .slip-fab{bottom:calc(76px + env(safe-area-inset-bottom))}
+  .toasts{bottom:calc(84px + env(safe-area-inset-bottom))}
+  .footer-in{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
+}
+.view-casino .slip-fab{display:none!important}
+.acc-sac{display:flex;align-items:center;gap:12px;margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);text-decoration:none}
+.acc-sac:hover{border-color:var(--yellow)}
+.acc-sac-ic{font-size:22px;line-height:1}
+.acc-sac b{display:block;font-size:14px}
+.acc-sac small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.acc-sac-go{margin-left:auto;color:var(--yellow);font-size:22px;font-weight:700}
+.acc-sac-mail{margin-top:8px}
+/* ---- carrossel de destaques (topo da página inicial) ---- */
+.hb{position:relative;margin-bottom:18px;border-radius:16px;overflow:hidden;border:1px solid rgba(255,204,31,.35);box-shadow:0 10px 30px rgba(0,0,0,.35);background:#0b0f0d}
+.hb-track{display:flex;transition:transform .55s cubic-bezier(.4,0,.2,1)}
+.hb-slide{position:relative;isolation:isolate;flex:0 0 100%;min-width:0;height:180px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 30px;overflow:hidden}
+.hb-txt{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;max-width:58%}
+.hb-txt small{display:flex;align-items:center;gap:6px;color:var(--yellow);font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+.hb-txt b{font-size:30px;font-weight:800;line-height:1.08;letter-spacing:-.5px;color:#fff}
+.hb-txt p{margin:2px 0 0;color:#c9d6cf;font-size:13.5px}
+.hb-cta{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.hb-btn{display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border:0;border-radius:999px;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font:800 14px Inter,system-ui,sans-serif;cursor:pointer;text-decoration:none;box-shadow:0 6px 20px rgba(255,204,31,.3);transition:transform .15s}
+.hb-btn:hover{transform:scale(1.05)}
+.hb-btn span{font-size:10px}
+.hb-btn-ghost{background:rgba(255,255,255,.08);color:#fff;box-shadow:inset 0 0 0 1px rgba(255,255,255,.18)}
+/* slide da conta */
+.hb-acc{background:radial-gradient(60% 140% at 85% 50%,rgba(31,211,111,.28),transparent 70%),radial-gradient(50% 120% at 100% 100%,rgba(238,43,63,.25),transparent 70%),#0b0f0d}
+.hb-logo{width:min(34%,300px);height:auto;filter:drop-shadow(0 8px 24px rgba(0,0,0,.6))}
+/* slide ao vivo */
+.hb-live{background:radial-gradient(55% 140% at 82% 50%,rgba(238,43,63,.3),transparent 70%),radial-gradient(60% 120% at 60% 120%,rgba(31,211,111,.18),transparent 70%),#0b0f0d}
+.hb-match{display:flex;align-items:center;gap:18px;flex:none}
+.hb-team{display:flex;flex-direction:column;align-items:center;gap:6px;width:84px}
+.hb-team img,.hb-team i{width:64px;height:64px;object-fit:contain;filter:drop-shadow(0 6px 14px rgba(0,0,0,.6))}
+.hb-team i{display:grid;place-items:center;border-radius:50%;background:var(--panel3);font-style:normal;font-weight:800;color:#fff}
+.hb-team em{font-style:normal;font-size:12px;font-weight:700;color:#dfe8e3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hb-score{font-size:40px;font-weight:800;color:#fff;letter-spacing:1px;text-shadow:0 4px 18px rgba(238,43,63,.5)}
+.hb-score small{margin:0 4px;color:var(--yellow);font-size:32px}
+/* slide do cassino */
+.hb-casino{background:radial-gradient(60% 120% at 80% 50%,rgba(255,170,0,.2),transparent 70%),#0b0f0d}
+.hb-bg{position:absolute;top:0;right:0;bottom:0;z-index:-1;width:60%;height:100%;object-fit:cover;object-position:center 30%;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 45%);mask-image:linear-gradient(90deg,transparent 0%,#000 45%)}
+/* pontinhos */
+.hb-dots{position:absolute;left:30px;bottom:12px;display:flex;gap:6px}
+.hb-dots button{width:7px;height:7px;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.3);cursor:pointer;transition:width .3s,background .3s}
+.hb-dots button.on{width:22px;background:var(--yellow)}
+@media (max-width:640px){
+  .hb{margin-bottom:14px}
+  .hb-slide{height:168px;padding:0 16px 10px}
+  .hb-txt{max-width:64%}
+  .hb-txt b{font-size:21px}
+  .hb-txt p{font-size:12px}
+  .hb-cta{margin-top:10px;gap:6px}
+  .hb-btn{padding:8px 14px;font-size:13px}
+  .hb-logo{width:34%}
+  /* ao vivo: emblemas e placar numa coluna estreita à direita */
+  .hb-match{position:absolute;right:16px;top:50%;transform:translateY(-55%);flex-direction:column;gap:4px;width:72px}
+  .hb-team{width:auto}
+  .hb-team img,.hb-team i{width:36px;height:36px}
+  .hb-team em{display:none}
+  .hb-score{font-size:22px;line-height:1}
+  .hb-score small{font-size:18px;margin:0 2px}
+  .hb-bg{width:70%}
+  .hb-dots{left:16px;bottom:9px}
+}
+/* slide da marca: cores de Portugal + Galo Tuga */
+.hb-brand{background:linear-gradient(90deg,rgba(6,12,9,.92) 0%,rgba(6,12,9,.55) 45%,rgba(6,12,9,0) 70%),linear-gradient(112deg,#0a6b33 0 58%,#ffcc1f 58% 58.8%,#b5132a 58.8% 100%)}
+.hb-brand::before{content:"";position:absolute;right:52px;top:50%;width:190px;height:190px;transform:translateY(-50%);border-radius:50%;border:3px solid rgba(255,204,31,.55);box-shadow:0 0 0 14px rgba(255,204,31,.12),0 0 60px rgba(255,204,31,.35);z-index:-1}
+.hb-brand::after{content:"";position:absolute;right:112px;top:50%;width:70px;height:190px;transform:translateY(-50%);border-radius:50%;border:2px solid rgba(255,204,31,.35);z-index:-1}
+.hb-flag{display:inline-block;width:18px;height:12px;border-radius:2px;background:linear-gradient(90deg,#0a6b33 0 40%,#d4122e 40% 100%);box-shadow:0 0 0 1px rgba(255,255,255,.25)}
+.hb-pt{background:linear-gradient(90deg,#3ee07f,#ffdc4f 50%,#ff4d5e);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hb-galo{position:absolute;right:46px;bottom:-14px;height:200px;width:auto;filter:drop-shadow(0 10px 18px rgba(0,0,0,.5));transform-origin:50% 90%;animation:galoBob 3.2s ease-in-out infinite}
+@keyframes galoBob{0%,100%{transform:rotate(-2deg) translateY(0)}50%{transform:rotate(2deg) translateY(-5px)}}
+@media (prefers-reduced-motion:reduce){.hb-galo{animation:none}}
+@media (max-width:640px){
+  .hb-brand{background:linear-gradient(90deg,rgba(6,12,9,.92) 0%,rgba(6,12,9,.6) 55%,rgba(6,12,9,0) 80%),linear-gradient(112deg,#0a6b33 0 62%,#ffcc1f 62% 63%,#b5132a 63% 100%)}
+  .hb-brand .hb-txt{max-width:66%}
+  .hb-brand::before{right:-6px;width:130px;height:130px}
+  .hb-brand::after{right:24px;width:50px;height:130px}
+  .hb-galo{right:-4px;bottom:-8px;height:138px}
 }
