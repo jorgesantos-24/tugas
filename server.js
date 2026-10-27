@@ -612,11 +612,18 @@ function feedInfo() {
     browsers: streams.size, ws: FEED.ws.info(),
   };
 }
+/* A lista completa (~1,2 MB) só se volta a montar no máximo a cada FEED_REBUILD_MS: com o WebSocket as odds mudam
+   várias vezes por segundo e montar + comprimir a cada pedido travava o servidor. Quem está ligado em tempo real
+   recebe as mudanças pelo fluxo; a lista é só para a primeira carga e de reserva. */
+const FEED_REBUILD_MS = 3000;
+let feedBuiltAt = 0, lastFeed = null;
 function feedPayload() {
+  if (!feedCache && lastFeed && now() - feedBuiltAt < FEED_REBUILD_MS) return lastFeed;
   if (!feedCache) {
+    feedBuiltAt = now();
     const list = [...events.values()].map(lightEvent);
     // leagues: campeonatos criados na hora (torneios de ténis), para o navegador os conhecer
-    feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, leagues: M.dynLeagues(), events: list }) };
+    feedCache = lastFeed = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, leagues: M.dynLeagues(), events: list }) };
   }
   return feedCache;
 }
@@ -1560,14 +1567,28 @@ function serveStatic(req, res) {
   p = PAGES[p] || p;
   const file = path.normalize(path.join(PUB, p));
   if (!file.startsWith(PUB + path.sep) || /app\.old\.js$/.test(file)) { res.writeHead(404); res.end('Não encontrado'); return; }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404); res.end('Não encontrado'); return; }
-    const h = { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' };
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) { res.writeHead(404); res.end('Não encontrado'); return; }
+    // ficheiro guardado em memória (já comprimido) enquanto não mudar no disco
+    let c = staticCache.get(file);
+    if (!c || c.mtime !== st.mtimeMs) {
+      let data;
+      try { data = fs.readFileSync(file); } catch { res.writeHead(404); res.end('Não encontrado'); return; }
+      const type = MIME[path.extname(file)] || 'application/octet-stream';
+      const text = /^(text\/|application\/json|image\/svg)/.test(type);
+      c = { data, type, mtime: st.mtimeMs, etag: `"${crypto.createHash('sha1').update(data).digest('base64url').slice(0, 16)}"`, gz: text && data.length > 1024 ? zlib.gzipSync(data, { level: 9 }) : null };
+      staticCache.set(file, c);
+    }
+    // imagens: 1 dia no navegador; páginas, JS e CSS: o navegador confirma sempre (304 se não mudou)
+    const h = { 'Content-Type': c.type, 'Cache-Control': c.type.startsWith('image/') && !c.type.includes('svg') ? 'public, max-age=86400' : 'no-cache', ETag: c.etag, Vary: 'Accept-Encoding' };
     if (p === '/admin.html') h['X-Robots-Tag'] = 'noindex, nofollow';
+    if (req.headers['if-none-match'] === c.etag) { res.writeHead(304, h); res.end(); return; }
+    if (c.gz && acceptsGzip(req)) { res.writeHead(200, { ...h, 'Content-Encoding': 'gzip' }); res.end(c.gz); return; }
     res.writeHead(200, h);
-    res.end(data);
+    res.end(c.data);
   });
 }
+const staticCache = new Map();
 
 function readBody(req) {
   return new Promise((resolve, reject) => {

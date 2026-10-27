@@ -365,9 +365,19 @@ function toEvent(m0, serverNow, sport, full = true) {
 }
 const quoteCache = new WeakMap(); // cotação → leitura (k, pick, linha...)
 
-function parseList(d, sport, full) {
+/* Converte os jogos aos bocados: a lista completa do futebol tem ~1200 jogos e ~275 mil cotações e, de uma vez,
+   deixava o servidor parado 2-4 s (ninguém era atendido). A cada ~15 ms dá a vez aos outros pedidos. */
+const YIELD_MS = 15;
+async function parseList(d, sport, full) {
   const serverNow = Date.parse(d.server_time || d.generated_at) || Date.now();
-  return (d.matches || []).map((m) => toEvent(m, serverNow, sport, full)).filter(Boolean);
+  const out = [];
+  let t = Date.now();
+  for (const m of d.matches || []) {
+    const ev = toEvent(m, serverNow, sport, full);
+    if (ev) out.push(ev);
+    if (Date.now() - t > YIELD_MS) { await new Promise((r) => setImmediate(r)); t = Date.now(); }
+  }
+  return out;
 }
 /* Futebol: o pedido com todos os grupos de mercados tem ~118 MB (todas as ligas do mundo), por isso só se faz
    a cada 5 min (antes do jogo) e a cada 20 s (ao vivo); entre esses, vão só os mercados principais. */
@@ -400,7 +410,7 @@ async function fetchSport(s, live) {
   }
   if (live) livePolls.heavy++;
   const { q, full } = qs(s, live);
-  try { return parseList(await get(q), s, full); } catch (e) {
+  try { return await parseList(await get(q), s, full); } catch (e) {
     if (!(s === 'soccer' && full)) throw e;
     // o pedido completo do futebol (~118 MB) falhou: tenta de novo no ciclo seguinte e, já agora, vai buscar os
     // mercados principais (pedido pequeno) para o futebol não desaparecer do site entretanto

@@ -451,13 +451,20 @@ function evRow(ev) {
   </div>`;
 }
 
-function leagueBlocks(list) {
+/* Listas grandes ("Todos", "Hoje"... chegam a ~1800 jogos e 50 mil elementos): desenhar tudo a cada mudança de odd
+   congelava a página 1-2 s por segundo. Mostra-se só os primeiros "max" jogos; ao chegar ao fim entram mais. */
+const LIST_STEP = 100;
+S.listLimit = LIST_STEP;
+function leagueBlocks(list, max = Infinity) {
   const groups = new Map();
   for (const ev of list) { if (!groups.has(ev.league)) groups.set(ev.league, []); groups.get(ev.league).push(ev); }
   const keys = [...groups.keys()].sort((a, b) => LEAGUE_BY_KEY[a].order - LEAGUE_BY_KEY[b].order || LEAGUE_BY_KEY[a].name.localeCompare(LEAGUE_BY_KEY[b].name));
-  return keys.map((k) => {
+  let left = max;
+  const html = keys.map((k) => {
+    if (left <= 0) return '';
     const lg = LEAGUE_BY_KEY[k];
-    const evs = groups.get(k).sort((a, b) => (b.state === 'in') - (a.state === 'in') || a.date - b.date);
+    const evs = groups.get(k).sort((a, b) => (b.state === 'in') - (a.state === 'in') || a.date - b.date).slice(0, left);
+    left -= evs.length;
     const soc = lg.sport === 'soccer';
     const allPost = evs.every((e) => e.state === 'post');
     return `<section class="league">
@@ -467,7 +474,13 @@ function leagueBlocks(list) {
       ${evs.map(evRow).join('')}
     </section>`;
   }).join('');
+  const rest = list.length - Math.min(list.length, max);
+  return rest > 0 ? html + `<button class="btn btn-ghost btn-block more-games" data-action="more" style="margin:12px 0">Mostrar mais jogos (${rest})</button>` : html;
 }
+// ao aparecer o botão "Mostrar mais jogos" no ecrã, carrega os seguintes sozinho
+const moreObs = 'IntersectionObserver' in window ? new IntersectionObserver((list) => {
+  if (list.some((e) => e.isIntersecting)) { moreObs.disconnect(); S.listLimit += LIST_STEP; S.keepScroll = true; renderMain(); }
+}, { rootMargin: '600px' }) : null;
 
 // jogos que acabaram e esperam o resultado não aparecem no site (o cliente vê o resultado nas apostas)
 const listed = () => [...S.events.values()].filter((e) => !e.awaiting);
@@ -661,7 +674,7 @@ function renderMain() {
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
       const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && e.markets && !isSuspended(e));
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
-      html += upcoming.length ? leagueBlocks(upcoming) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
+      html += upcoming.length ? leagueBlocks(upcoming, S.listLimit) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {
       const titles = { all: 'Todos os jogos', live: 'Ao vivo', today: 'Hoje', tomorrow: 'Amanhã', results: 'Resultados', league: LEAGUE_BY_KEY[S.league]?.name, sport: SPORTS[S.sport]?.name };
       const preds = {
@@ -683,7 +696,7 @@ function renderMain() {
         if (post.length) html += `<div class="section-head"><h2 style="font-size:16px">Resultados</h2></div>` + leagueBlocks(post);
         if (!list.length) html += `<div class="empty-state">Sem jogos desta liga hoje ou amanhã.</div>`;
       } else {
-        html += list.length ? leagueBlocks(list) : `<div class="empty-state">${v === 'live' ? 'Nenhum jogo ao vivo neste momento. Veja os próximos jogos em "Hoje".' : 'Nenhum evento encontrado.'}</div>`;
+        html += list.length ? leagueBlocks(list, S.listLimit) : `<div class="empty-state">${v === 'live' ? 'Nenhum jogo ao vivo neste momento. Veja os próximos jogos em "Hoje".' : 'Nenhum evento encontrado.'}</div>`;
       }
     }
   }
@@ -695,6 +708,7 @@ function renderMain() {
   const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
   tickClocks();
+  if (moreObs) { moreObs.disconnect(); const mb = main.querySelector('.more-games'); if (mb) moreObs.observe(mb); }
   const newCasino = main.querySelector('#homeCasino');
   if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
     newCasino.replaceWith(oldCasino);
@@ -1365,7 +1379,7 @@ function syncUrl(replace) {
 }
 function go(view, extra = {}, opts = {}) {
   Object.assign(S, { view, league: null, sport: null }, extra);
-  S.keepScroll = false;
+  S.keepScroll = false; S.listLimit = LIST_STEP;
   if (!opts.fromHistory) syncUrl(opts.replace);
   closeDrawers(); render(); window.scrollTo(0, 0);
   // página do jogo: mostra logo o que há e completa com todos os mercados
@@ -1427,7 +1441,7 @@ document.addEventListener('click', async (e) => {
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
   if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; S.sideAnim = S.openSport; renderSidebar(); return; }
   if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
-  if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
+  if (d.sporttab) { S.sportTab = d.sporttab; S.listLimit = LIST_STEP; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
   if (d.view) { e.preventDefault(); go(d.view); return; }
@@ -1436,6 +1450,7 @@ document.addEventListener('click', async (e) => {
   if (t.tagName === 'A') e.preventDefault();
   switch (d.action) {
     case 'place': placeBets(); break;
+    case 'more': S.listLimit += LIST_STEP; S.keepScroll = true; renderMain(); break;
     case 'clear': S.slip = []; S.stakes = {}; S.comboStake = ''; S.slipMode = 'single'; render(); break;
     case 'accept': S.slip.forEach((s) => { const { sel } = findSel(s.key); if (sel) s.odds = sel.odds; }); renderSlip(); break;
     case 'back': { const p = S.prevView || { view: 'home' }; go(p.view, { league: p.league, sport: p.sport }); } break;

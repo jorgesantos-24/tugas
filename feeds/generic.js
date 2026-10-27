@@ -50,7 +50,19 @@ const WORDS = [['Over or Exactly', 'Mais ou exatamente'], ['Over', 'Mais de'], [
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const PH_RE = PHRASES.map(([en, pt]) => [new RegExp(`\\b${esc(en)}\\b`, 'g'), pt]);
 const WD_RE = WORDS.map(([en, pt]) => [new RegExp(`\\b${esc(en)}\\b`, 'g'), pt]);
-function tr(s, words) { let x = String(s ?? ''); for (const [re, pt] of words ? WD_RE : PH_RE) x = x.replace(re, pt); return x.replace(/\s+/g, ' ').trim(); }
+// os nomes repetem-se em milhares de cotações: cada tradução é feita uma vez e guardada (era o que mais gastava CPU)
+const trCache = new Map();
+function tr(s, words) {
+  const key = (words ? 'w|' : 'p|') + String(s ?? '');
+  let x = trCache.get(key);
+  if (x !== undefined) return x;
+  x = String(s ?? '');
+  for (const [re, pt] of words ? WD_RE : PH_RE) x = x.replace(re, pt);
+  x = x.replace(/\s+/g, ' ').trim();
+  if (trCache.size > 200000) trCache.clear();
+  trCache.set(key, x);
+  return x;
+}
 
 // secção do site para cada mercado (pelo nome do grupo)
 function catOf(sport, g) {
