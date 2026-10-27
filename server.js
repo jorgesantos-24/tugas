@@ -276,6 +276,8 @@ function mergeEvents(list, fetchedAt, fromWs = false) {
         if (ev.home.score > old.home.score || ev.away.score > old.away.score) LW.goal(ev.id, ev.home.score > old.home.score ? 'home' : 'away', t);
       }
       else { ev.suspendedUntil = old.suspendedUntil; ev.goalAt = old.goalAt; }
+      // relógio ao segundo: diferenças de 1-2 s entre leituras são ruído (não reenvia o jogo por isso)
+      if (ev.clockT0 && old.clockT0 && Math.abs(ev.clockT0 - old.clockT0) <= 2000) ev.clockT0 = old.clockT0;
     }
     if (!old || !same(old, ev)) { changed = true; touch(ev.id); }
     events.set(ev.id, ev);

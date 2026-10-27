@@ -163,6 +163,15 @@ function clockLabel(c, serverNow, sport = 'soccer') {
   const cap = Number(c.min) < 45 ? 45 : 90;
   return min >= cap ? `${cap}'+` : `${Math.max(1, min)}'`;
 }
+/* Futebol: relógio ao segundo para o site (os minutos e os descontos, ex.: 47:12, 93:05).
+   A correr: t0 = hora (deste servidor) em que o relógio marcaria 0:00 — o navegador conta os segundos sozinho.
+   Parado: secs = segundos no relógio. No intervalo (ou sem relógio) não há. */
+function soccerClock(c, serverNow) {
+  if (!c || c.min == null || (!c.ticking && Number(c.min) === 45 && !Number(c.sec))) return null;
+  const secs = Number(c.min) * 60 + (Number(c.sec) || 0) + (c.ticking && c.ref ? (serverNow - Date.parse(c.ref)) / 1000 : 0);
+  if (!Number.isFinite(secs) || secs < 0) return null;
+  return c.ticking && c.ref ? { clockT0: Math.round((Date.now() - secs * 1000) / 1000) * 1000 } : { clockSecs: Math.floor(secs) };
+}
 
 // ténis ao vivo: "7-5,1-6,4-3" → sets terminados + set a decorrer
 function tennisLive(score) {
@@ -339,6 +348,7 @@ function toEvent(m0, serverNow, sport, full = true) {
   const ev = {
     id: String(m.id), league: lg.key, leagueName: lg.name, country: lg.country, sport,
     date: new Date(kick), state: live ? 'in' : 'pre', completed: false, statusName: '', clock,
+    ...(live && sport === 'soccer' ? soccerClock(m.clock, serverNow) : null),
     home: team(m.home, 'h', score ? score[0] : null, xs?.form?.home), away: team(m.away, 'a', score ? score[1] : null, xs?.form?.away), details: xs?.details || [],
     venue: '',
     markets: markets.length ? markets : null,

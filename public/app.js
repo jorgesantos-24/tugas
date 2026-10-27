@@ -150,6 +150,7 @@ function applyEvents(d, partial) {
     ...ev, date: new Date(ev.date),
     suspendedUntil: ev.suspendedUntil ? ev.suspendedUntil + offset : 0,
     goalAt: ev.goalAt ? ev.goalAt + offset : 0,
+    clockT0: ev.clockT0 ? ev.clockT0 + offset : 0,
   });
   const list = (d.events || []).filter((e) => !e.removed && LEAGUE_BY_KEY[e.league]).map(fix);
   // os mercados completos que já tínhamos não se perdem com a versão leve (só os principais)
@@ -389,8 +390,26 @@ function oddBtn(sel, ev, opts = {}) {
   return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}"${mvStyle} data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(sel.odds)}</span></button>`;
 }
 
+/* Futebol ao vivo: relógio ao segundo (22:30, 47:12, 93:05). O HTML leva o minuto (muda pouco, não obriga a redesenhar)
+   e o contador abaixo troca-o pelos segundos, uma vez por segundo, sem redesenhar a página. */
+const SOCCER_CLOCK = (ev) => ev.sport === 'soccer' && ev.state === 'in' && !ev.awaiting && ev.clock !== 'Intervalo' && (ev.clockT0 || ev.clockSecs != null);
+const mmss = (secs) => { secs = Math.max(0, Math.floor(secs)); return `${String(Math.floor(secs / 60)).padStart(2, '0')}:${String(secs % 60).padStart(2, '0')}`; };
+function clockHtml(ev, fallback = '') {
+  const txt = esc(ev.clock || fallback);
+  if (!SOCCER_CLOCK(ev)) return txt;
+  return ev.clockT0 ? `<span class="kclk" data-t0="${ev.clockT0}">${txt}</span>` : `<span class="kclk" data-s="${ev.clockSecs}">${txt}</span>`;
+}
+function tickClocks() {
+  const t = Date.now();
+  for (const el of document.querySelectorAll('.kclk')) {
+    const v = el.dataset.t0 ? mmss((t - Number(el.dataset.t0)) / 1000) : mmss(Number(el.dataset.s));
+    if (el.textContent !== v) el.textContent = v;
+  }
+}
+setInterval(() => { if (!document.hidden) tickClocks(); }, 1000);
+
 function timeCell(ev) {
-  if (ev.state === 'in') return `<span class="lv"><span class="live-dot"></span>${esc(ev.clock || 'Ao vivo')}</span>`;
+  if (ev.state === 'in') return `<span class="lv"><span class="live-dot"></span>${clockHtml(ev, 'Ao vivo')}</span>`;
   const dd = ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   if (ev.state === 'post') return `<span>${esc(ev.clock)}</span><br><span>${dd}</span>`;
   return `<b style="color:#fff">${hhmm(ev.date)}</b><br>${sameDay(ev.date, new Date()) ? 'Hoje' : dd}`;
@@ -493,7 +512,7 @@ function homeHero(live) {
   if (ev) {
     const team = (t) => `<span class="hb-team">${crest(t)}<em>${esc(t.short)}</em></span>`;
     slides.push(`<div class="hb-slide hb-live">
-      <div class="hb-txt"><small><span class="live-dot"></span>Ao vivo · ${esc(ev.clock || '')}</small><b>${esc(ev.home.short)} x ${esc(ev.away.short)}</b><p>${esc(ev.leagueName)} · ${live.length} jogos ao vivo agora</p>
+      <div class="hb-txt"><small><span class="live-dot"></span>Ao vivo · ${clockHtml(ev)}</small><b>${esc(ev.home.short)} x ${esc(ev.away.short)}</b><p>${esc(ev.leagueName)} · ${live.length} jogos ao vivo agora</p>
       <span class="hb-cta"><button class="hb-btn" data-ev="${ev.id}">Apostar</button><button class="hb-btn hb-btn-ghost" data-view="live">Ver todos</button></span></div>
       <div class="hb-art hb-match">${team(ev.home)}<span class="hb-score">${ev.home.score ?? 0}<small>:</small>${ev.away.score ?? 0}</span>${team(ev.away)}</div></div>`);
   }
@@ -532,7 +551,7 @@ document.addEventListener('touchend', (e) => {
 function heroCard(ev) {
   const sels = mainSels(ev, selections(ev)).filter(Boolean);
   return `<div class="hero-card" data-ev="${ev.id}">
-    <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center"><span class="live-dot"></span>${esc(ev.clock || '')}</span></div>
+    <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center"><span class="live-dot"></span>${clockHtml(ev)}</span></div>
     <div class="hero-teams">
       <div class="hero-team">${crest(ev.home)}${esc(ev.home.short)}</div>
       <div class="hero-score">${ev.home.score ?? 0}:${ev.away.score ?? 0}</div>
@@ -675,6 +694,7 @@ function renderMain() {
   const oldCasino = main.querySelector('#homeCasino');
   const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
   main.innerHTML = html;
+  tickClocks();
   const newCasino = main.querySelector('#homeCasino');
   if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
     newCasino.replaceWith(oldCasino);
@@ -767,7 +787,7 @@ function renderEvent() {
   const groups = {};
   for (const s of sels) (groups[s.marketName] ||= []).push(s);
   const form = (f) => (f ? `<div class="form">${f.split('').slice(-5).map((c) => `<i class="${c}">${c === 'W' ? 'V' : c === 'L' ? 'D' : 'E'}</i>`).join('')}</div>` : '');
-  const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${esc(ev.clock)}</div>`
+  const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${clockHtml(ev)}</div>`
     : `<div class="big-clock" style="color:var(--muted)">${ev.state === 'post' ? esc(ev.clock) : dateLabel(ev.date)}</div>`;
   const score = ev.state === 'pre' ? 'vs' : `${ev.home.score ?? 0} : ${ev.away.score ?? 0}`;
   let html = `<a href="#" class="back" data-action="back">← Voltar</a>
@@ -829,7 +849,7 @@ function betCard(bet) {
   const legs = bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
     let live = '';
-    if (!l.result && ev) live = ev.awaiting ? `<span class="lm">Jogo terminado · aguardando resultado</span>` : ev.state === 'in' ? `<span class="ls">● ${esc(ev.clock)} · ${ev.home.score}-${ev.away.score}</span>` : ev.state === 'pre' ? `<span class="lm">${dateLabel(ev.date)}</span>` : '';
+    if (!l.result && ev) live = ev.awaiting ? `<span class="lm">Jogo terminado · aguardando resultado</span>` : ev.state === 'in' ? `<span class="ls">● ${clockHtml(ev)} · ${ev.home.score}-${ev.away.score}</span>` : ev.state === 'pre' ? `<span class="lm">${dateLabel(ev.date)}</span>` : '';
     const cls = !l.result ? '' : l.result.includes('won') ? 'won' : l.result.includes('lost') ? 'lost' : 'void';
     return `<div class="leg ${cls}">
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
@@ -896,7 +916,7 @@ function renderSlip() {
       <button class="x" data-remove="${esc(s.key)}" title="Remover">×</button>
       <div class="si-pick"><span>${esc(sel ? sel.name : 'Seleção indisponível')}</span><span class="si-odds">${changed ? `<span class="old">${fmtOdd(s.odds)}</span>` : ''}${sel ? fmtOdd(sel.odds) : '-'}</span></div>
       <div class="si-market">${esc(sel ? sel.marketName : '')}</div>
-      <div class="si-event">${ev ? `${ev.state === 'in' ? `<span class="live-dot"></span><b style="color:var(--red)">${esc(ev.clock)}</b> ${ev.home.score}-${ev.away.score} · ` : ''}${esc(evLabel(ev))}` : ''}</div>
+      <div class="si-event">${ev ? `${ev.state === 'in' ? `<span class="live-dot"></span><b style="color:var(--red)">${clockHtml(ev)}</b> ${ev.home.score}-${ev.away.score} · ` : ''}${esc(evLabel(ev))}` : ''}</div>
       ${suspended ? `<div class="si-warn red">🔒 ${!sel && ev && ev.markets ? 'Linha alterada — mercado indisponível' : 'Mercado suspenso'}</div>` : changed ? `<div class="si-warn">A odd mudou de ${fmtOdd(s.odds)} para ${fmtOdd(sel.odds)}</div>` : ''}
       ${!multi ? `<div class="stake-row"><label class="stake"><span>R$</span><input inputmode="decimal" data-stake="${esc(s.key)}" value="${esc(stake)}" placeholder="0,00"></label><div class="ret">Retorno<b>${money(ret)}</b></div></div>` : ''}
     </div>`;
@@ -923,6 +943,7 @@ function renderSlip() {
   html += `<button class="btn btn-green btn-block" data-action="place" ${S.placing ? 'disabled' : ''}>${label}</button>
     <button class="clear-link" data-action="clear">Limpar boletim</button>`;
   body.innerHTML = html;
+  tickClocks();
 }
 
 /* ---------------- render: sidebar / header ---------------- */
