@@ -2,7 +2,7 @@
 /* Arranca o TUGAS em modo de TESTE no próprio computador — não precisa de chave do Firebase.
    Uso: npm run dev   (abre http://localhost:3100)
    - Usa os emuladores do Firebase: base de dados e contas de teste, apagadas ao fechar.
-   - Nunca toca no Firestore de produção, na BravoPay nem na API-Football. Nada aqui é dinheiro real.
+   - Nunca toca no Firestore de produção, nem na BravoPay. Os jogos e odds vêm da MoviOdds (só leitura). Nada aqui é dinheiro real.
    - Precisa de: Node.js 22.13+, Firebase CLI (npm install -g firebase-tools) e Java 11+ (para os emuladores). */
 
 const { spawn, spawnSync } = require('node:child_process');

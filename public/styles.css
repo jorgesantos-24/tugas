@@ -64,6 +64,7 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .side-sport.cur{color:var(--yellow)}
 .side-leagues{margin:2px 0 6px 18px;padding-left:8px;border-left:2px solid var(--line);animation:sideIn .18s ease-out}
 .side-leagues .side-item{padding:7px 10px}
+.side-sub{padding:8px 10px 2px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 @keyframes sideIn{from{opacity:0;transform:translateY(-4px)}}
 
 .main{min-width:0}
@@ -79,6 +80,12 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .sport-tabs button.active{border-color:transparent}
 .tab-cnt{font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;background:var(--panel3);color:var(--muted)}
 .sport-tabs button.active .tab-cnt{background:rgba(0,0,0,.2);color:#03200f}
+/* secções da página do jogo (Todos, Principais, 1º set, Games...): uma fila que desliza no telemóvel */
+.ev-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:12px 0 14px;padding:2px 0}
+.ev-tabs::-webkit-scrollbar{display:none}
+.ev-tabs button{flex:none;display:flex;align-items:center;gap:7px;white-space:nowrap;border:1px solid var(--line)}
+.ev-tabs button.active{border-color:transparent}
+.ev-tabs button.active .tab-cnt{background:rgba(0,0,0,.2);color:#03200f}
 
 .hero{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(290px,1fr);gap:12px;overflow-x:auto;padding-bottom:6px;margin-bottom:16px;scrollbar-width:thin}
 .hero-card{transition:transform .15s,border-color .15s,box-shadow .15s;background:linear-gradient(160deg,#0f5a31 0%,#083019 60%,#2a0d14 100%);border:1px solid var(--line);border-radius:14px;padding:14px;cursor:pointer}
@@ -118,6 +125,10 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .ev-teams{min-width:0}
 .team-line{display:flex;align-items:center;gap:8px;height:22px}
 .team-line img{width:18px;height:18px;object-fit:contain;flex:none}
+/* sem emblema: iniciais num círculo, do mesmo tamanho da imagem */
+.crest{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--panel3,#2a3340);color:#cfd8e3;font-style:normal;font-weight:800;font-size:8px;letter-spacing:-.3px;line-height:1}
+.hero-team .crest{width:42px;height:42px;font-size:14px}
+.ev-detail-teams .hero-team .crest{width:64px;height:64px;font-size:20px}
 .team-line .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;font-size:14px;color:#fff}
 .team-line .sc{margin-left:auto;font-weight:800;color:var(--yellow);min-width:16px;text-align:right}
 .team-line.won .nm{font-weight:700}
@@ -161,7 +172,7 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .big-clock{text-align:center;font-size:13px;color:var(--red);font-weight:700;margin-top:4px}
 .form{display:flex;flex-wrap:wrap;gap:3px;justify-content:center}
 .hero-team{min-width:0;overflow-wrap:anywhere}
-@media (max-width:340px){.ev-detail-teams .hero-team img{width:44px;height:44px}.ev-detail-teams .hero-team{font-size:14px}}
+@media (max-width:340px){.ev-detail-teams .hero-team img,.ev-detail-teams .hero-team .crest{width:44px;height:44px}.ev-detail-teams .hero-team{font-size:14px}}
 .form i{font-style:normal;font-size:10px;width:16px;height:16px;border-radius:3px;display:grid;place-items:center;font-weight:700}
 .form .W{background:var(--green);color:#03200f}.form .L{background:var(--red)}.form .D{background:#5b6b7a}
 .market{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
@@ -181,6 +192,26 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .timeline{background:var(--panel);border-radius:12px;padding:6px 14px}
 .tl-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
 .tl-item:first-child{border-top:0}
+/* ténis ao vivo: quem serve e pontos do game */
+.team-line .serve{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--yellow);margin-left:6px;vertical-align:middle;box-shadow:0 0 0 2px rgba(255,204,31,.18)}
+.team-line .pt{margin-left:auto;min-width:22px;padding:0 4px;border-radius:4px;background:var(--panel3);color:var(--text);font-size:12px;font-weight:700;text-align:center}
+.team-line .pt + .sc{margin-left:8px}
+/* estatísticas ao vivo (página do jogo) */
+.live-stats{background:var(--panel);border-radius:12px;padding:10px 14px}
+.ls-table{overflow-x:auto;margin-bottom:6px}
+.ls-table table{width:100%;border-collapse:collapse;font-size:13px}
+.ls-table th{color:var(--muted);font-weight:600;padding:4px 6px;text-align:center;white-space:nowrap}
+.ls-table td{padding:5px 6px;text-align:center;border-top:1px solid var(--line);font-weight:700}
+.ls-table td.ls-team{text-align:left;font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ls-row{padding:7px 0;border-top:1px solid var(--line)}
+.ls-table + .ls-row,.ls-row:first-child{border-top:0}
+.ls-vals{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px}
+.ls-vals span{color:var(--muted);text-align:center;flex:1}
+.ls-vals b{min-width:36px}
+.ls-vals b:last-child{text-align:right}
+.ls-bar{display:flex;gap:3px;height:4px;margin-top:5px}
+.ls-bar i{display:block;height:100%;border-radius:2px;background:var(--green);min-width:2px}
+.ls-bar i + i{background:var(--yellow)}
 .tl-item .min{width:46px;color:var(--muted);font-weight:700}
 .tl-item.away{flex-direction:row-reverse;text-align:right}
 .tl-item.away .min{text-align:right}
@@ -529,7 +560,7 @@ a.cg-card:hover .cg-play{opacity:1;transform:none}
 .hb-live{background:radial-gradient(55% 140% at 82% 50%,rgba(238,43,63,.3),transparent 70%),radial-gradient(60% 120% at 60% 120%,rgba(31,211,111,.18),transparent 70%),#0b0f0d}
 .hb-match{display:flex;align-items:center;gap:18px;flex:none}
 .hb-team{display:flex;flex-direction:column;align-items:center;gap:6px;width:84px}
-.hb-team img,.hb-team i{width:64px;height:64px;object-fit:contain;filter:drop-shadow(0 6px 14px rgba(0,0,0,.6))}
+.hb-team img,.hb-team i{width:64px;height:64px;font-size:20px;object-fit:contain;filter:drop-shadow(0 6px 14px rgba(0,0,0,.6))}
 .hb-team i{display:grid;place-items:center;border-radius:50%;background:var(--panel3);font-style:normal;font-weight:800;color:#fff}
 .hb-team em{font-style:normal;font-size:12px;font-weight:700;color:#dfe8e3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hb-score{font-size:40px;font-weight:800;color:#fff;letter-spacing:1px;text-shadow:0 4px 18px rgba(238,43,63,.5)}

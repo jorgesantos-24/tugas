@@ -1,6 +1,6 @@
 # TUGAS — casa de apostas
 
-Jogos e odds ao vivo (feed ESPN), contas no **Firebase**, depósitos por **PIX (BravoPay)**
+Jogos e odds ao vivo (MoviOdds, odds da bet365), contas no **Firebase**, depósitos por **PIX (BravoPay)**
 e saques **pagos à mão pela equipa** no painel `/admin`.
 Sem chave da BravoPay, depósitos e saques ficam indisponíveis.
 
@@ -70,35 +70,6 @@ e diz exatamente o que falta.
 - **Depósitos**: todos os PIX e os que ficaram *em revisão* (valor pago diferente do pedido) para creditar ou descartar.
 - **Jogadores**: procurar por e-mail, CPF, nome ou ID; ver saldo, extrato, apostas, depósitos e saques;
   **ajustar saldo** (com motivo) e **bloquear/desbloquear** a conta.
-- **Esportes e mercados**:
-  - *Modalidades e campeonatos* — criar modalidades novas (Tênis, MMA, eSports...) e campeonatos; ocultar/mostrar no site.
-  - *Eventos da equipa* — criar um evento num campeonato (da equipa ou da ESPN) e atualizar à mão o estado
-    (por começar / ao vivo / encerrado), o placar e o tempo.
-  - *Mercados em jogos reais* — acrescentar mercados próprios (escanteios, cartões...) a um jogo do feed da ESPN.
-  - *Longo prazo* (em "+ Novo evento") — evento sem adversário (ex.: "Campeão do SIX Major 2026") com prazo de
-    fechamento e lista de participantes com odds. Depois do prazo as apostas fecham sozinhas; a equipa liquida
-    quando souber o resultado. Qualquer mercado (também num jogo) pode ter o seu próprio prazo ("Fecha em").
-  - Em cada evento: criar mercados com seleções e **odds definidas pela equipa**, aposta máxima opcional, mudar odds,
-    suspender/abrir (um ou todos), ver as apostas e o valor a pagar por seleção e **liquidar** (Ganhou / Perdeu / Devolvida).
-    As apostas desse mercado são pagas logo a seguir. Mercados com apostas em aberto não podem ser apagados.
-  - **Odds automáticas ao vivo** (eSports e outros jogos por rounds, `livemodel.js`): no campeonato definem-se as
-    *regras do jogo* (rounds para ganhar um mapa, prorrogação, melhor de N mapas, margem; modelos prontos para
-    Rainbow Six, CS2 e Valorant). Cada mercado recebe um tipo (Vencedor da partida, Total/Handicap de rounds do mapa,
-    Vencedor do mapa, Total/Handicap de mapas) e o lado/linha de cada seleção é lido do nome ("Mais de 10.5", "FaZe -2.5").
-    A força das equipas é calibrada pelas odds do Vencedor; ao vivo, a equipa marca cada round (+1 / desfazer) e todas
-    as odds automáticas são recalculadas. Handicaps e totais têm **linhas móveis**: a cada round o motor oferece a
-    linha equilibrada e as vizinhas e tira do site as antigas (as apostas feitas nelas continuam valendo); linhas
-    com odd abaixo da *odd mínima* do campeonato (1.15 por defeito) ficam bloqueadas. Na *reta final* do mapa (ex.: 5 rounds no R6)
-    fica só a linha equilibrada e no match point/prorrogação os handicaps e totais do mapa saem do site. No site,
-    totais e handicaps aparecem em tabela (uma linha por fila).
-    Em **melhor de 3, 5 ou 7**, ao ligar as odds automáticas abrem-se os mercados de cada mapa (vencedor, total e
-    handicap de rounds) e os da série (total e handicap de mapas). Mapas terminados saem do site à espera de
-    liquidar; mapas que já não vão ser jogados são anulados (devolvidos). No site, os mercados vêm por blocos: Partida, Mapa 1, Mapa 2...
-    **Pacote padrão** (abre ao ligar as odds automáticas, também em melhor de 1; odds pela força das equipas):
-    ao vivo e antes do jogo — corrida a X rounds, placar exato do 1º tempo (R6: 6 rounds; fecha no intervalo),
-    placar exato da série, ambas ganham um mapa; só antes do jogo —
-    margem de vitória, placar exato do mapa e rounds de cada equipa. "Liquidar tudo pelo placar" fecha de uma vez o que o placar já decidiu. O mapa/partida fecha sozinho e
-    o resultado de cada mercado vem pré-preenchido na liquidação.
 - **Registo**: todas as ações da equipa (quem, quando, o quê).
 
 ## 5. Jogo responsável (área do jogador)
@@ -129,9 +100,6 @@ Saem do ar quando o jogo começa. Ao contratar um fornecedor de odds, estes merc
 | `sessions` | Sessões de login |
 | `webhookEvents` | Webhooks da BravoPay já processados |
 | `adminLogs` | Ações da equipa |
-| `catalogSports`, `catalogLeagues` | Modalidades e campeonatos criados pela equipa |
-| `manualEvents` | Eventos criados pela equipa, com os seus mercados (`markets`) |
-| `manualMarkets/{id do jogo}` | Mercados da equipa em jogos reais da ESPN |
 
 Valores em **centavos** (`11895` = R$ 118,95). As contas (e-mail/senha) ficam em *Authentication*.
 
@@ -173,6 +141,13 @@ Valores em **centavos** (`11895` = R$ 118,95). As contas (e-mail/senha) ficam em
 
 ## Notas
 
-- Placares e odds: feed público e não oficial da ESPN. Para operar em escala, contrate um fornecedor oficial de odds/dados.
+- Jogos, placares, odds e resultados: MoviOdds (grátis, não oficial, odds da bet365), em `feeds/moviodds.js`. Para trocar de fornecedor muda-se só esse ficheiro. Para operar em escala, contrate um fornecedor oficial de odds/dados.
+- Tempo real: o servidor fica ligado ao WebSocket da MoviOdds (`feeds/moviows.js`) e segue os jogos ao vivo e os que começam nos próximos 15 min — odds, placar e estatísticas chegam em ~1 s. Com a ligação ativa, o pedido ao vivo de 5 em 5 s traz só placar e relógio (sem odds). Se a ligação cair, tudo volta sozinho aos pedidos normais. O navegador recebe as mudanças por `GET /api/stream` (Server-Sent Events, comprimido); os jogos abertos (página do jogo, boletim, apostas) recebem os mercados completos no mesmo fluxo. O estado aparece no painel (cartão "Odds ao vivo").
+- Liquidação antecipada (`early.js`): seleções que já não podem mudar são pagas ~2,5 min depois de ficarem decididas, sem esperar pelo fim do jogo — totais/ambas marcam/placar exato (futebol só antes dos 90'), total de pontos (basquete), sets e games terminados (ténis), mapas (e-Sports CS2/Valorant), e os mercados por parte do jogo e combinações (`feeds/auto.js`: 1º/2º tempo, quartos, períodos, escanteios, rondas, resultado + ambas marcam, faixas de gols...). Futebol e hóquei esperam ainda que a bet365 reabra os mercados depois do gol (VAR). Vencedor do jogo e handicaps continuam no fim.
+- Placar de cada parte (`feeds/parts.js`): vem das ESTATÍSTICAS da MoviOdds, não dos "periods" do resultado — estes põem os gols do acréscimo e os pontos do fim de cada quarto na parte seguinte (comparado com a ESPN em 24-26/10/2026: errados em 6/6 e 14/14 casos; as estatísticas certas em todos). Basquete e hóquei: os pontos por período têm de bater com as linhas acumuladas "Score After...".
+- Futebol — jogadores (`feeds/players.js`): remates, remates à baliza, marcadores (a qualquer momento, 2+/3+), gols/assistências, faltas cometidas/sofridas, desarmes, defesas, passes e cartão de jogador, liquidados com as estatísticas por jogador da MoviOdds (conferidas com a ESPN: 100% iguais). Só abrem nas ligas em que a fonte trouxe essas estatísticas nos últimos 7 dias (≥3 jogos, ≥90%), ou ao vivo quando o jogo já as traz. Jogador que não jogou → devolvida; nome não encontrado → equipa. Não abrem: 1º/último marcador, "um dos dois", cabeceamentos, remates de fora da área, "expulso" (a fonte falha vermelhos).
+- Futebol — prolongamento e penáltis (`feeds/extratime.js`, `feeds/espn.js`): abrem sempre que a bet365 os oferece. A MoviOdds só regista os 90 minutos, por isso o resultado (prolongamento, penáltis, quem passa) vem da ESPN; sem resultado na ESPN em 6 h, ou sem regra (cada penálti, morte súbita...), ficam para a equipa. `ESPN_RESULTS=0` desliga.
+- Apostas ao vivo: espera por modalidade (`LIVE_DELAY_*`) e vigilância (`livewatch.js`, separador "Ao vivo suspeitas" no painel).
+- Saúde da fonte: se a MoviOdds avisar que o ao vivo de uma modalidade está degradado ou parado, as odds ao vivo dessa modalidade ficam bloqueadas até voltar ao normal.
 - As páginas legais (`/termos`, `/privacidade`, `/jogo-responsavel`) são modelos: devem ser revistas pelo seu jurídico.
 - A pasta `data/` é da versão antiga (SQLite) e já não é usada.

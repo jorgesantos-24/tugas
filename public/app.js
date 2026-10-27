@@ -68,7 +68,8 @@ const findSel = (key) => {
   return { ev, sel: selections(ev).find((s) => s.key === key) || null };
 };
 
-function mergeEvents(list) {
+// partial = só alguns jogos (tempo real): os outros ficam como estão
+function mergeEvents(list, partial = false) {
   const now = Date.now();
   const watched = new Set([...S.slip.map((s) => s.evId), ...S.bets.filter((b) => b.status === 'open').flatMap((b) => b.legs.map((l) => l.evId))]);
   const seen = new Set();
@@ -76,7 +77,7 @@ function mergeEvents(list) {
     seen.add(ev.id);
     const old = S.events.get(ev.id);
     if (old) {
-      if (old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score) && watched.has(ev.id))
+      if (GOAL_SPORTS.has(ev.sport) && old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score) && watched.has(ev.id))
         toast(`${SPORTS[ev.sport].icon} ${ev.home.short} ${ev.home.score} x ${ev.away.score} ${ev.away.short}`, 'ok');
       if (old.state === 'pre' && ev.state === 'in' && watched.has(ev.id)) toast(`Começou: ${ev.home.short} x ${ev.away.short}`);
     }
@@ -89,26 +90,134 @@ function mergeEvents(list) {
     if (!S.leagueEvents.has(ev.league)) S.leagueEvents.set(ev.league, new Set());
     S.leagueEvents.get(ev.league).add(ev.id);
   }
+  if (partial) return;
   for (const id of [...S.events.keys()]) if (!seen.has(id)) S.events.delete(id);
   for (const set of S.leagueEvents.values()) for (const id of [...set]) if (!seen.has(id)) set.delete(id);
+}
+
+/* Mercados completos: a lista de jogos (/api/events) só traz o vencedor e a linha principal do total.
+   O jogo aberto, os do boletim e os das apostas em aberto recebem todos os mercados (/api/events/full). */
+const fullIds = () => [...new Set([
+  ...(S.view === 'event' && S.eventId ? [S.eventId] : []), ...S.slip.map((s) => s.evId),
+  ...S.bets.filter((b) => b.status === 'open').flatMap((b) => b.legs.map((l) => l.evId)),
+])].filter((id) => S.events.has(id)).slice(0, 40);
+async function loadFull(ids = fullIds()) {
+  if (!ids.length) return;
+  try {
+    const r = await fetch('/api/events/full?ids=' + ids.map(encodeURIComponent).join(','), { cache: 'no-store' });
+    if (!r.ok) return;
+    const now = Date.now();
+    for (const f of (await r.json()).events) {
+      const ev = S.events.get(f.id);
+      if (!ev) continue;
+      ev.markets = f.markets; ev.stats = f.stats; ev.details = f.details || []; ev.fullAt = now;
+      if (f.home?.form) ev.home.form = f.home.form;
+      if (f.away?.form) ev.away.form = f.away.form;
+      for (const s of selections(ev)) {
+        const prev = S.oddsCache.get(s.key);
+        if (prev && prev !== s.odds) S.moves.set(s.key, { dir: s.odds > prev ? 'up' : 'down', until: now + 6000 });
+        S.oddsCache.set(s.key, s.odds);
+      }
+    }
+  } catch { /* fica com os mercados principais até à próxima atualização */ }
+}
+
+/* Tempo real: o servidor empurra cada jogo que muda (GET /api/stream, Server-Sent Events).
+   - Os jogos abertos aqui (página do jogo, boletim, apostas em aberto) vêm com os mercados completos no próprio
+     fluxo: o servidor sabe quais são por POST /api/stream/watch (enviado quando a lista muda).
+   - O servidor manda um "ping" a cada 10 s. Sem nada há 25 s, o fluxo conta como parado (ex.: um proxy a
+     segurá-lo) e a lista volta a ser pedida a cada 5 s; com ele vivo, a lista é só reserva (a cada 30 s). */
+const streamAlive = () => S.streamSid && Date.now() - (S.streamAt || 0) < 25000;
+let watchKey = '', watchT = 0;
+function syncWatch() {
+  if (!S.streamSid) return;
+  const ids = fullIds();
+  const key = S.streamSid + '|' + ids.join(',');
+  if (key === watchKey || watchT) return;
+  watchT = setTimeout(async () => {
+    watchT = 0;
+    const now = fullIds(), k = S.streamSid + '|' + now.join(',');
+    if (k === watchKey) return;
+    watchKey = k;
+    try { await api('POST', '/api/stream/watch', { sid: S.streamSid, ids: now }); } catch { watchKey = ''; }
+  }, 300);
+}
+function applyEvents(d, partial) {
+  const offset = Date.now() - (d.now || Date.now());
+  for (const l of d.leagues || []) addLeague(l);
+  for (const e of d.events || []) if (e.removed) S.events.delete(e.id);
+  const fix = (ev) => ({
+    ...ev, date: new Date(ev.date),
+    suspendedUntil: ev.suspendedUntil ? ev.suspendedUntil + offset : 0,
+    goalAt: ev.goalAt ? ev.goalAt + offset : 0,
+  });
+  const list = (d.events || []).filter((e) => !e.removed && LEAGUE_BY_KEY[e.league]).map(fix);
+  // os mercados completos que já tínhamos não se perdem com a versão leve (só os principais)
+  for (const ev of list) { const old = S.events.get(ev.id); if (old?.fullAt && !(d.full || []).some((f) => f.id === ev.id)) { ev.markets = mergeLight(old.markets, ev.markets); ev.stats = old.stats; ev.details = old.details; ev.fullAt = old.fullAt; } }
+  for (const f of d.full || []) {
+    if (!LEAGUE_BY_KEY[f.league]) continue;
+    const i = list.findIndex((e) => e.id === f.id);
+    const ev = { ...fix(f), nsel: (f.markets || []).reduce((n, mk) => n + mk.sels.length, 0), fullAt: Date.now() };
+    if (i >= 0) list[i] = ev; else list.push(ev);
+  }
+  mergeEvents(list, partial);
+}
+// a versão leve traz só o vencedor e a linha principal: atualiza esses no conjunto completo que já existia
+function mergeLight(full, light) {
+  if (!full) return light;
+  if (!light) return full.map((mk) => ({ ...mk, sels: mk.sels.map((x) => ({ ...x, lock: true })) }));
+  const key = (mk) => `${mk.k}|${mk.per ?? ''}`;
+  const lk = new Map(light.map((mk) => [key(mk), mk]));
+  return full.map((mk) => {
+    const l = lk.get(key(mk));
+    if (!l) return mk;
+    const byPick = new Map(l.sels.map((x) => [`${x.pick}|${x.line ?? ''}|${x.base ?? ''}`, x]));
+    return { ...mk, sels: mk.sels.map((x) => byPick.get(`${x.pick}|${x.line ?? ''}|${x.base ?? ''}`) || x) };
+  });
+}
+function startStream() {
+  if (!window.EventSource) return;
+  let es = null, raf = 0;
+  const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; S.keepScroll = true; safeRender(); }); };
+  const connect = () => {
+    es = new EventSource('/api/stream?watch=' + encodeURIComponent(fullIds().join(',')));
+    es.addEventListener('hello', (msg) => {
+      let d; try { d = JSON.parse(msg.data); } catch { return; }
+      S.streamSid = d.sid; S.streamAt = Date.now(); S.live = true; watchKey = '';
+      for (const l of d.leagues || []) addLeague(l);
+      syncWatch();
+    });
+    es.addEventListener('ping', () => { S.streamAt = Date.now(); });
+    es.onerror = () => { S.live = false; }; // o navegador volta a ligar sozinho
+    es.onmessage = (msg) => {
+      let d; try { d = JSON.parse(msg.data); } catch { return; }
+      S.streamAt = Date.now(); S.live = true;
+      applyEvents(d, true);
+      S.lastUpdate = Date.now(); S.etag = null; // a próxima lista completa vem inteira
+      paint();
+    };
+  };
+  connect();
+  // separador escondido muito tempo: o navegador pode ter cortado a ligação sem avisar → liga de novo ao voltar
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden || streamAlive() || !es) return;
+    try { es.close(); } catch { /* */ }
+    S.streamSid = null; connect();
+    loadEvents().then((ch) => { if (ch) safeRender(); });
+  });
 }
 
 async function loadEvents() {
   try {
     const r = await fetch('/api/events', { headers: S.etag ? { 'If-None-Match': S.etag } : {}, cache: 'no-store' });
-    const offset = Date.now() - Number(r.headers.get('X-Server-Now') || Date.now());
     if (r.status === 304) { S.failed = false; return false; }
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     S.etag = r.headers.get('ETag');
-    setCatalog(d.catalog); // modalidades e campeonatos criados pela equipa
-    const list = d.events.map((ev) => ({
-      ...ev, date: new Date(ev.date),
-      suspendedUntil: ev.suspendedUntil ? ev.suspendedUntil + offset : 0,
-      goalAt: ev.goalAt ? ev.goalAt + offset : 0,
-    }));
-    mergeEvents(list);
-    S.lastUpdate = d.lastFeedOk ? d.lastFeedOk + offset : null;
+    // torneios de ténis (criados na hora pelo servidor) e jogos; os abertos aqui mantêm os mercados completos
+    applyEvents({ ...d, now: Number(r.headers.get('X-Server-Now')) || Date.now() }, false);
+    await loadFull(); // a lista só traz os mercados principais: os jogos abertos/no boletim/apostados recebem tudo
+    S.lastUpdate = d.lastFeedOk ? d.lastFeedOk + (Date.now() - (Number(r.headers.get('X-Server-Now')) || Date.now())) : null;
     S.failed = false; S.loaded = true;
     return true;
   } catch {
@@ -117,16 +226,23 @@ async function loadEvents() {
   }
 }
 
+// espera de uma aposta ao vivo: a maior das modalidades dos jogos ao vivo do boletim (+1 s para confirmar o placar)
+const liveWait = (evs) => {
+  const d = S.liveDelays || {};
+  const list = evs.filter((e) => e && e.state === 'in').map((e) => d[e.sport] || 8);
+  return (list.length ? Math.max(...list) : 8) + 1;
+};
+
 /* ---------------- conta ---------------- */
 const ST_PT = { open: 'Aberta', won: 'Ganha', lost: 'Perdida', void: 'Devolvida', cashout: 'Cash Out' };
 const RES_PT = { won: 'Ganhou', halfwon: 'Meio ganho', void: 'Devolvida', halflost: 'Meia perda', lost: 'Perdeu' };
 
 async function loadAccount(silent) {
   try {
-    const { user, payments, liveDelay, liveCashoutDelay, casino, games, testMode } = await api('GET', '/api/me');
+    const { user, payments, liveDelays, casino, games, testMode } = await api('GET', '/api/me');
     S.testMode = !!testMode; // servidor de teste (emuladores): sem BravoPay, com saldo de teste
     S.casino = !!casino; S.games = games || {}; document.body.classList.toggle('has-casino', S.casino);
-    if (liveDelay) { S.liveDelay = liveDelay; S.liveCashoutDelay = liveCashoutDelay; }
+    if (liveDelays) S.liveDelays = liveDelays; // segundos de espera ao vivo, por modalidade
     S.user = user;
     if (payments) { S.payments = payments; document.body.classList.toggle('live-pay', !!payments.live); }
     if (user) {
@@ -255,26 +371,28 @@ function oddBtn(sel, ev, opts = {}) {
 }
 
 function timeCell(ev) {
-  if (ev.outright) return `<b style="color:#fff">🏆</b><br>até ${ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
   if (ev.state === 'in') return `<span class="lv"><span class="live-dot"></span>${esc(ev.clock || 'Ao vivo')}</span>`;
   const dd = ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   if (ev.state === 'post') return `<span>${esc(ev.clock)}</span><br><span>${dd}</span>`;
   return `<b style="color:#fff">${hhmm(ev.date)}</b><br>${sameDay(ev.date, new Date()) ? 'Hoje' : dd}`;
 }
 
+// emblema da equipa; sem emblema, as iniciais num círculo (se a imagem falhar, também)
+const crestText = (t) => initials(String(t.short || t.name || '').replace(/[^\p{L}\p{N} ]/gu, '')) || '?'; // só letras/números (vai dentro do onerror)
+const crest = (t) => (t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.outerHTML='<i class=crest>${crestText(t)}</i>'">` : `<i class="crest">${crestText(t)}</i>`);
 function teamLine(t, ev, other) {
   const showScore = ev.state !== 'pre' && t.score != null;
   const won = ev.state === 'post' && showScore && t.score > other.score;
-  return `<div class="team-line ${won ? 'won' : ''}">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}<span class="nm">${esc(t.name)}</span>${showScore ? `<span class="sc">${t.score}</span>` : ''}</div>`;
+  // ténis ao vivo: bola em quem serve e pontos do game atual
+  const side = t.id === 'h' ? 0 : 1;
+  const serve = ev.state === 'in' && ev.serve === (side ? 'away' : 'home') ? '<i class="serve" title="Ao serviço"></i>' : '';
+  const pt = ev.state === 'in' && ev.point ? `<span class="pt">${esc(ev.point[side])}</span>` : '';
+  return `<div class="team-line ${won ? 'won' : ''}">${crest(t)}<span class="nm">${esc(t.name)}${serve}</span>${pt}${showScore ? `<span class="sc">${t.score}</span>` : ''}</div>`;
 }
 
-// seleções que aparecem na linha do jogo: 1X2 / vencedor; sem estes, o primeiro mercado da equipa (até 3 seleções)
+// seleções que aparecem na linha do jogo: 1X2 (futebol) ou vencedor
 function mainSels(ev, sels) {
   const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
-  if (!by('ml', 'home')) {
-    const first = sels.find((s) => s.market === 'custom');
-    if (first) return sels.filter((s) => s.market === 'custom' && s.pick.split('.')[0] === first.pick.split('.')[0]).slice(0, 3);
-  }
   return ev.sport === 'soccer' ? [by('ml', 'home'), by('ml', 'draw'), by('ml', 'away')] : [by('ml', 'home'), by('ml', 'away')];
 }
 
@@ -282,23 +400,23 @@ function evRow(ev) {
   const sels = selections(ev);
   const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
   const main = mainSels(ev, sels);
-  const custom = LEAGUE_BY_KEY[ev.league]?.custom;
-  const tot = custom ? [] : [by('total', 'over'), by('total', 'under')];
+  const tk = ev.sport === 'tennis' ? 'gtotal' : 'total'; // ténis: total de games
+  const tot = [by(tk, 'over'), by(tk, 'under')];
   const goal = ev.goalAt && Date.now() - ev.goalAt < 12000;
   const oddsHtml = ev.state === 'post' ? '' :
-    main.map((s) => oddBtn(s, ev)).join('') + (custom ? '' : '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join(''));
+    main.map((s) => oddBtn(s, ev)).join('') + '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join('');
   return `<div class="ev-row ${goal ? 'goal' : ''} ${ev.state === 'in' ? 'live' : ''}" data-ev="${ev.id}">
     <div class="ev-time">${timeCell(ev)}</div>
-    <div class="ev-teams">${ev.outright ? `<div class="team-line"><span class="nm">${esc(ev.home.name)}</span></div><div class="out-close">${isSuspended(ev) ? 'Apostas encerradas' : 'Apostas até ' + dateLabel(ev.date)}</div>` : teamLine(ev.home, ev, ev.away) + teamLine(ev.away, ev, ev.home)}</div>
+    <div class="ev-teams">${teamLine(ev.home, ev, ev.away) + teamLine(ev.away, ev, ev.home)}</div>
     <div class="ev-odds">${oddsHtml}</div>
-    <div class="ev-more">${ev.state !== 'post' && sels.length ? '+' + sels.length : ''}</div>
+    <div class="ev-more">${ev.state !== 'post' && sels.length ? '+' + (ev.nsel || sels.length) : ''}</div>
   </div>`;
 }
 
 function leagueBlocks(list) {
   const groups = new Map();
   for (const ev of list) { if (!groups.has(ev.league)) groups.set(ev.league, []); groups.get(ev.league).push(ev); }
-  const keys = [...groups.keys()].sort((a, b) => LEAGUE_BY_KEY[a].order - LEAGUE_BY_KEY[b].order);
+  const keys = [...groups.keys()].sort((a, b) => LEAGUE_BY_KEY[a].order - LEAGUE_BY_KEY[b].order || LEAGUE_BY_KEY[a].name.localeCompare(LEAGUE_BY_KEY[b].name));
   return keys.map((k) => {
     const lg = LEAGUE_BY_KEY[k];
     const evs = groups.get(k).sort((a, b) => (b.state === 'in') - (a.state === 'in') || a.date - b.date);
@@ -306,7 +424,7 @@ function leagueBlocks(list) {
     const allPost = evs.every((e) => e.state === 'post');
     return `<section class="league">
       <div class="league-head">${SPORTS[lg.sport].icon} ${esc(lg.name)} <span class="country">· ${esc(lg.country)}</span>
-        ${allPost || lg.custom ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
+        ${allPost ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
       </div>
       ${evs.map(evRow).join('')}
     </section>`;
@@ -348,10 +466,10 @@ function homeHero(live) {
       <span class="hb-cta"><button class="hb-btn" data-action="deposit">Depositar</button></span></div>
       <img class="hb-art hb-logo" src="/img/logo.png" alt=""></div>`);
   // jogo ao vivo em destaque: de preferência um com odds abertas, pela ordem das ligas
-  const withOdds = live.filter((e) => e.markets || e.cm);
+  const withOdds = live.filter((e) => e.markets);
   const ev = (withOdds.length ? withOdds : live).slice().sort((a, b) => (LEAGUE_BY_KEY[a.league]?.order ?? 999) - (LEAGUE_BY_KEY[b.league]?.order ?? 999))[0];
   if (ev) {
-    const team = (t) => `<span class="hb-team">${t.logo ? `<img src="${esc(t.logo)}" alt="">` : `<i>${esc((t.short || '?').slice(0, 3))}</i>`}<em>${esc(t.short)}</em></span>`;
+    const team = (t) => `<span class="hb-team">${crest(t)}<em>${esc(t.short)}</em></span>`;
     slides.push(`<div class="hb-slide hb-live">
       <div class="hb-txt"><small><span class="live-dot"></span>Ao vivo · ${esc(ev.clock || '')}</small><b>${esc(ev.home.short)} x ${esc(ev.away.short)}</b><p>${esc(ev.leagueName)} · ${live.length} jogos ao vivo agora</p>
       <span class="hb-cta"><button class="hb-btn" data-ev="${ev.id}">Apostar</button><button class="hb-btn hb-btn-ghost" data-view="live">Ver todos</button></span></div>
@@ -394,9 +512,9 @@ function heroCard(ev) {
   return `<div class="hero-card" data-ev="${ev.id}">
     <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center"><span class="live-dot"></span>${esc(ev.clock || '')}</span></div>
     <div class="hero-teams">
-      <div class="hero-team">${ev.home.logo ? `<img src="${esc(ev.home.logo)}" alt="">` : ''}${esc(ev.home.short)}</div>
+      <div class="hero-team">${crest(ev.home)}${esc(ev.home.short)}</div>
       <div class="hero-score">${ev.home.score ?? 0}:${ev.away.score ?? 0}</div>
-      <div class="hero-team">${ev.away.logo ? `<img src="${esc(ev.away.logo)}" alt="">` : ''}${esc(ev.away.short)}</div>
+      <div class="hero-team">${crest(ev.away)}${esc(ev.away.short)}</div>
     </div>
     <div class="hero-odds">${sels.length ? sels.map((s) => oddBtn(s, ev)).join('') : '<span class="muted" style="font-size:12px">Mercados suspensos</span>'}</div>
   </div>`;
@@ -498,12 +616,9 @@ function renderMain() {
       html += homeHero(live);
       html += homeCasino();
       html += sportTabs();
-      const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
+      const featured = live.filter((e) => e.markets).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
-      const upcoming = filtered((e) => !e.outright && e.state === 'pre' && (isToday(e) || isTomorrow(e)) && (e.markets || e.cm));
-      // longo prazo (campeão, artilheiro...): enquanto as apostas estiverem abertas
-      const longTerm = filtered((e) => e.outright && e.cm && !isSuspended(e)).sort((a, b) => a.date - b.date);
-      if (longTerm.length) html += `<div class="section-head"><h2>🏆 Longo prazo</h2><span class="muted">${longTerm.length} mercados</span></div>` + leagueBlocks(longTerm);
+      const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && e.markets && !isSuspended(e));
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
       html += upcoming.length ? leagueBlocks(upcoming) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {
@@ -564,24 +679,63 @@ function linesTable(list, ev) {
     ${[...rows].sort((a, b) => a[0] - b[0]).map(([k, r]) => `<div class="ln-row">${total ? `<span class="ln">${k}</span>` : ''}${cell(r[0], total ? '' : fmtLine(r[0]?.cline ?? k))}${cell(r[1], total ? '' : fmtLine(r[1]?.cline ?? -k))}</div>`).join('')}</div>`;
 }
 
-// evento de longo prazo: título, prazo de fechamento e os mercados (lista de participantes)
-function renderOutright(ev, sels) {
-  const closed = isSuspended(ev);
-  let html = `<a href="#" class="back" data-action="back">← Voltar</a>
-  <div class="ev-detail-head">
-    <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>🏆 Longo prazo</span></div>
-    <div class="out-title">${esc(ev.home.name)}</div>
-    <div class="big-clock" style="color:var(--muted);text-align:center">${closed ? 'Apostas encerradas — à espera do resultado' : 'Apostas até ' + dateLabel(ev.date)}</div>
-  </div>`;
-  const groups = {};
-  for (const s of sels) (groups[s.marketName] ||= []).push(s);
-  if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento.</div>`;
-  for (const [name, list] of Object.entries(groups)) {
-    const c = list[0].cclose;
-    html += `<div class="market"><div class="market-head">${esc(name)}${c ? `<small>${Date.now() >= c ? 'fechado' : 'até ' + dateLabel(new Date(c))}</small>` : ''}</div><div class="market-body many">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div></div>`;
-  }
-  return html;
+/* Secções da página do jogo. Cada secção diz que seleções mostra; um mercado pode estar em várias
+   (ex.: "Vencedor do 1º set" aparece em "1º set" e em "Sets"). */
+// secções dos mercados da equipa (vêm com "cat" do leitor da fonte)
+const CAT_LABEL = {
+  pop: 'Principais', goals: 'Gols', hcp: 'Handicaps e totais', halves: '1º / 2º tempo', corners: 'Escanteios', cards: 'Cartões',
+  players: 'Jogadores', stats: 'Estatísticas', quarters: 'Quartos', periods: 'Períodos', points: 'Ponto a ponto', games: 'Games',
+  sets: 'Sets', serve: 'Saque', other: 'Outros',
+};
+const catLabel = (c) => CAT_LABEL[c] || (/^map(\d+)$/.test(c) ? `Mapa ${c.slice(3)}` : 'Outros');
+function eventTabs(ev) {
+  const base = sportTabsOf(ev);
+  // os mercados da equipa entram na secção com o mesmo nome; os que não têm secção própria ganham uma
+  // mercados com secção da fonte (da equipa e por parte do jogo) entram na secção com o mesmo nome
+  const tabs = base.map((t) => (t.id === 'all' ? t : { ...t, has: (s) => (s.cat ? s.cat === t.id : t.has(s)) }));
+  const cats = [...new Set(selections(ev).filter((s) => s.cat).map((s) => s.cat))].filter((c) => !tabs.some((t) => t.id === c));
+  cats.sort((a, b) => (a === 'other') - (b === 'other') || a.localeCompare(b, undefined, { numeric: true }));
+  return tabs.concat(cats.map((c) => ({ id: c, label: catLabel(c), has: (s) => s.cat === c })));
 }
+function sportTabsOf(ev) {
+  const K = (...ks) => (s) => ks.includes(s.market);
+  const setOf = (s) => Number(String(s.per ?? '').split(/[:/]/)[0]) || 0;
+  const all = { id: 'all', label: 'Todos', has: () => true };
+  if (ev.sport === 'esports') {
+    // um separador por mapa (os mercados da equipa trazem "mapN"; o vencedor do mapa também entra)
+    const maps = [...new Set(selections(ev).filter((s) => s.market === 'emw').map((s) => s.per))].sort();
+    return [all, { id: 'pop', label: 'Principais', has: K('ml', 'ecs', 'emh', 'e1m') },
+      ...maps.map((n) => ({ id: `map${n}`, label: `Mapa ${n}`, has: (s) => s.market === 'emw' && s.per === n }))];
+  }
+  if (ev.sport === 'tennis') {
+    // ao vivo: "set atual" em vez de "1º set"
+    const n = ev.state === 'in' ? (ev.home.score || 0) + (ev.away.score || 0) + 1 : 1;
+    const SET_K = ['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh', 'tslead', 'tsafter', 'tsrace', 'tstbw', 'tsbrk', 'tgw', 'tgs', 'tgd', 'tgsw', 'tgpw', 'tgpd'];
+    return [all,
+      { id: 'pop', label: 'Principais', has: (s) => K('ml', 'sets', 'tsets', 'gtotal', 'gspread', 'tmrt')(s) || (s.market === 'tsw' && setOf(s) === n) },
+      { id: 'set', label: `${n}º set`, has: (s) => (SET_K.includes(s.market) && setOf(s) === n) || (s.market === 'tpbrk' && String(s.per).endsWith(`:${n}`)) },
+      { id: 'sets', label: 'Sets', has: K('sets', 'tsets', 'tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tstbw', 'tcast', 'tstraight', 'tdist', 'tdr', 'ttb') },
+      { id: 'games', label: 'Games', has: K('tgw', 'tgs', 'tgd', 'tgsw', 'tgpw', 'tgpd', 'tslead', 'tsafter', 'tsrace', 'toe') },
+      { id: 'serve', label: 'Saque', has: K('tfswin', 'tfsg', 'tfsw', 'tfsd', 'tsbrk', 'tfbrk', 'tpbrk', 'tbrk') },
+      { id: 'hcp', label: 'Handicaps e totais', has: K('gspread', 'gtotal', 'tsgh', 'tsgt', 'tpgw', 'tmrt', 'ttb', 'tbrk', 'tpbrk') },
+      { id: 'players', label: 'Jogadores', has: K('tpto', 'tpgw', 'tace', 'tdf') },
+    ];
+  }
+  if (ev.sport === 'soccer') {
+    return [all,
+      { id: 'pop', label: 'Principais', has: K('ml', 'dc', 'dnb', 'btts') },
+      { id: 'goals', label: 'Gols', has: K('total', 'btts') },
+      { id: 'hcp', label: 'Handicaps', has: K('spread') },
+      { id: 'cs', label: 'Placar exato', has: K('cs') },
+    ];
+  }
+  return [all,
+    { id: 'pop', label: 'Principais', has: K('ml', 'mlr', 'dcr') },
+    { id: 'hcp', label: 'Handicaps e totais', has: K('spread', 'total') },
+  ];
+}
+// mercado liquidado pela equipa: aviso no cabeçalho do mercado (o pagamento sai depois de a equipa confirmar)
+const manualNote = (list) => (list[0]?.manual ? '<small title="Resultado confirmado pela equipa depois do jogo; aposta máxima mais baixa">confirmado pela equipa</small>' : '');
 
 function renderEvent() {
   const ev = S.events.get(S.eventId);
@@ -593,50 +747,58 @@ function renderEvent() {
   const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${esc(ev.clock)}</div>`
     : `<div class="big-clock" style="color:var(--muted)">${ev.state === 'post' ? esc(ev.clock) : dateLabel(ev.date)}</div>`;
   const score = ev.state === 'pre' ? 'vs' : `${ev.home.score ?? 0} : ${ev.away.score ?? 0}`;
-  if (ev.outright) return renderOutright(ev, sels);
   let html = `<a href="#" class="back" data-action="back">← Voltar</a>
   <div class="ev-detail-head">
     <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>${esc(ev.venue)}</span></div>
     <div class="ev-detail-teams">
-      <div class="hero-team">${ev.home.logo ? `<img src="${esc(ev.home.logo)}" alt="">` : ''}${esc(ev.home.name)}${form(ev.home.form)}</div>
+      <div class="hero-team">${crest(ev.home)}${esc(ev.home.name)}${form(ev.home.form)}</div>
       <div><div class="big-score">${score}</div>${status}</div>
-      <div class="hero-team">${ev.away.logo ? `<img src="${esc(ev.away.logo)}" alt="">` : ''}${esc(ev.away.name)}${form(ev.away.form)}</div>
+      <div class="hero-team">${crest(ev.away)}${esc(ev.away.name)}${form(ev.away.form)}</div>
     </div>
   </div>`;
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
-    // os totais de gols ficam juntos e por ordem de linha (0.5, 1.5, 2.5...)
-    let entries = Object.entries(groups);
-    const isTot = ([n]) => /^Total de Gols — /.test(n);
-    const firstTot = entries.findIndex(isTot);
-    if (firstTot >= 0) {
-      const tots = entries.filter(isTot).sort((a, b) => parseFloat(a[0].split('— ')[1]) - parseFloat(b[0].split('— ')[1]));
-      entries = entries.filter((e) => !isTot(e));
-      entries.splice(firstTot, 0, ...tots);
-    }
-    // melhor de 3, 5...: mercados da partida primeiro, depois um bloco por mapa
-    const multi = new Set(entries.map(([, l]) => l[0].cgroup).filter(Boolean)).size > 1;
-    if (multi) {
-      const gnum = (g) => (g ? parseInt(g.replace(/\D+/g, ''), 10) || 0 : -1);
-      entries = entries.map((e, i) => [e, i]).sort((a, b) => gnum(a[0][1][0].cgroup) - gnum(b[0][1][0].cgroup) || a[1] - b[1]).map(([e]) => e);
-    }
-    let lastGroup;
-    for (const [rawName, list] of entries) {
-      const g = list[0].cgroup || null;
-      if (g !== lastGroup && multi) html += `<div class="map-head">${esc(g || 'Partida')}</div>`;
-      lastGroup = g;
-      const name = g && rawName.startsWith(g + ' — ') ? rawName.slice(g.length + 3) : rawName;
-      const cc = list[0].cclose;
-      html += `<div class="market"><div class="market-head">${esc(name)}${cc ? `<small>${Date.now() >= cc ? 'fechado' : 'apostas até ' + dateLabel(new Date(cc))}</small>` : ev.state === 'in' ? '<small>Ao vivo · odds reais</small>' : ''}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
+    // secções (como na bet365): só aparecem as que têm mercados; "Todos" mostra tudo
+    const tabs = eventTabs(ev).filter((t) => t.id === 'all' || sels.some((s) => t.has(s)));
+    let tab = S.evTab?.id === ev.id ? S.evTab.tab : 'all';
+    if (!tabs.some((t) => t.id === tab)) tab = 'all';
+    const cur = tabs.find((t) => t.id === tab);
+    if (tabs.length > 2) html += `<div class="tabs ev-tabs">${tabs.map((t) => `<button class="${t.id === tab ? 'active' : ''}" data-evtab="${t.id}">${esc(t.label)}<span class="tab-cnt">${t.id === 'all' ? Object.keys(groups).length : new Set(sels.filter((s) => t.has(s)).map((s) => s.marketName)).size}</span></button>`).join('')}</div>`;
+    // totais e handicaps aparecem em tabela (uma linha por fila)
+    for (const [name, list] of Object.entries(groups)) {
+      if (!cur.has(list[0])) continue;
+      html += `<div class="market"><div class="market-head">${esc(name)}${manualNote(list) || (ev.state === 'in' ? '<small>Ao vivo</small>' : '')}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
     }
   }
-  const tl = ev.details.filter((d) => d.goal || d.red || d.yellow);
+  html += statsPanel(ev);
+  const tl = (ev.details || []).filter((d) => d.goal || d.red || d.yellow);
   if (tl.length) {
     html += `<div class="section-head" style="margin-top:16px"><h2 style="font-size:16px">Lances</h2></div><div class="timeline">` +
       tl.slice().reverse().map((d) => `<div class="tl-item ${d.teamId === ev.away.id ? 'away' : ''}"><span class="min">${esc(d.min)}</span><span>${d.goal ? '⚽' : d.red ? '🟥' : '🟨'}</span><span>${esc(d.player)}${d.pen ? ' (pên.)' : ''}${d.own ? ' (contra)' : ''}</span></div>`).join('') + `</div>`;
   }
   return html;
+}
+
+/* Estatísticas ao vivo (vêm da fonte pelo servidor, já traduzidas): parciais por período/set/mapa e barras casa x fora */
+function statsPanel(ev) {
+  const st = ev.state === 'in' ? ev.stats : null;
+  if (!st || (!st.rows?.length && !st.periods)) return '';
+  let html = `<div class="section-head" style="margin-top:16px"><h2 style="font-size:16px">Estatísticas ao vivo</h2></div><div class="live-stats">`;
+  const p = st.periods;
+  if (p && p.labels?.length) {
+    const cells = (list) => p.labels.map((_, i) => `<td>${esc(list[i] ?? '')}</td>`).join('');
+    html += `<div class="ls-table"><table><thead><tr><th></th>${p.labels.map((l) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>` +
+      `<tr><td class="ls-team">${esc(ev.home.short)}</td>${cells(p.home)}</tr><tr><td class="ls-team">${esc(ev.away.short)}</td>${cells(p.away)}</tr></tbody></table></div>`;
+  }
+  for (const [label, h, a, pct] of st.rows || []) {
+    const tot = pct ? 100 : h + a;
+    const wh = tot > 0 ? Math.round((100 * h) / (pct ? Math.max(h + a, 1) : tot)) : 50;
+    const fmt = (v) => (pct ? `${Math.round(v)}%` : String(Math.round(v * 100) / 100));
+    html += `<div class="ls-row"><div class="ls-vals"><b>${fmt(h)}</b><span>${esc(label)}</span><b>${fmt(a)}</b></div>` +
+      `<div class="ls-bar"><i style="width:${wh}%"></i><i style="width:${100 - wh}%"></i></div></div>`;
+  }
+  return html + '</div>';
 }
 
 /* ---------------- render: apostas ---------------- */
@@ -649,13 +811,13 @@ function betCard(bet) {
     return `<div class="leg ${cls}">
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
       <div class="lm">${esc(l.marketName)} · ${esc(l.event)}</div>
-      ${l.result ? `<span class="lm">${RES_PT[l.result]} · Final ${esc(l.final)}</span>` : live}
+      ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : live}
     </div>`;
   }).join('');
   let action = '';
   if (bet.status === 'open') {
     const co = cashoutValue(bet);
-    if (S.cashoutBusy === bet.id) action = `<button class="cashout-btn" disabled>${bet.legs.some((l) => !l.result && S.events.get(l.evId)?.state === 'in') ? `Aprovando Cash Out (até ${S.liveCashoutDelay || 25}s)...` : 'Processando Cash Out...'}</button>`;
+    if (S.cashoutBusy === bet.id) action = `<button class="cashout-btn" disabled>${bet.legs.some((l) => !l.result && S.events.get(l.evId)?.state === 'in') ? `Aprovando Cash Out (até ${liveWait(bet.legs.filter((l) => !l.result).map((l) => S.events.get(l.evId)))}s)...` : 'Processando Cash Out...'}</button>`;
     else if (co) action = `<button class="cashout-btn ${S.cashoutConfirm === bet.id ? 'confirm' : ''}" data-cashout="${bet.id}">${S.cashoutConfirm === bet.id ? `Confirmar Cash Out ${money(co)}` : `Cash Out ${money(co)}`}</button>`;
     else action = `<button class="cashout-btn" disabled>Cash Out indisponível</button>`;
   }
@@ -734,7 +896,7 @@ function renderSlip() {
   html += `<label class="check"><input type="checkbox" id="acceptAny" ${acceptAny() ? 'checked' : ''}> Aceitar qualquer alteração de odds</label>`;
   if (items.some((i) => i.changed) && !acceptAny()) html += `<button class="btn btn-ghost btn-block" data-action="accept" style="margin-bottom:8px">Aceitar alterações</button>`;
   const live = items.some((i) => i.ev?.state === 'in');
-  const label = !S.user ? 'Entrar para apostar' : S.placing ? (live ? `Aprovando aposta ao vivo (até ${S.liveDelay || 25}s)...` : 'Processando...') : `Apostar ${money(totalStake)}`;
+  const label = !S.user ? 'Entrar para apostar' : S.placing ? (live ? `Aprovando aposta ao vivo (até ${liveWait(items.map((i) => i.ev))}s)...` : 'Processando...') : `Apostar ${money(totalStake)}`;
   html += `<button class="btn btn-green btn-block" data-action="place" ${S.placing ? 'disabled' : ''}>${label}</button>
     <button class="clear-link" data-action="clear">Limpar boletim</button>`;
   body.innerHTML = html;
@@ -761,7 +923,10 @@ function renderSidebar() {
     if (!open) continue;
     html += `<div class="side-leagues">`;
     if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
+    let circuit = null;
     for (const l of lgs) {
+      // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
+      if (l.dyn && l.country !== circuit) { circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`; }
       const le = evs.filter((e) => e.league === l.key);
       const lv = le.filter((e) => e.state === 'in').length;
       html += `<button class="side-item ${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
@@ -798,6 +963,7 @@ function renderHeader() {
 function render() {
   const sk = $('#skeleton'); if (sk && S.loaded) sk.remove();
   renderHeader(); renderSidebar(); renderMain(); renderSlip();
+  syncWatch(); // o servidor passa a mandar os mercados completos dos jogos abertos aqui
 }
 // não redesenha campos com foco (para não perder o que está a ser escrito)
 function safeRender() {
@@ -1137,6 +1303,8 @@ function go(view, extra = {}, opts = {}) {
   S.keepScroll = false;
   if (!opts.fromHistory) syncUrl(opts.replace);
   closeDrawers(); render(); window.scrollTo(0, 0);
+  // página do jogo: mostra logo o que há e completa com todos os mercados
+  if (view === 'event' && S.eventId) loadFull([S.eventId]).then(() => { if (S.view === 'event') { S.keepScroll = true; safeRender(); } });
 }
 // botões voltar/avançar do navegador
 window.addEventListener('popstate', () => { const r = routeFromPath(); go(r.view, r, { fromHistory: true }); });
@@ -1194,6 +1362,7 @@ document.addEventListener('click', async (e) => {
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
   if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
+  if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
   if (d.view) { e.preventDefault(); go(d.view); return; }
   if (d.ev) { S.prevView = S.view === 'event' ? S.prevView : { view: S.view, league: S.league, sport: S.sport }; go('event', { eventId: d.ev }); return; }
@@ -1307,8 +1476,15 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
   // abre a secção do endereço (ex.: /cassino, /ao-vivo, /liga/bra.1) e corrige endereços antigos/desconhecidos
   Object.assign(S, routeFromPath());
   syncUrl(true);
+  await loadFull(); // endereço de um jogo (/evento/...) e boletim guardado: mercados completos já na primeira vista
   render();
-  setInterval(async () => { if (await loadEvents()) safeRender(); }, EVENTS_MS);
+  startStream();
+  let lastList = Date.now();
+  setInterval(async () => {
+    if (streamAlive() && Date.now() - lastList < 30000) return; // tempo real ligado: a lista completa é só reserva
+    lastList = Date.now();
+    if (await loadEvents()) safeRender();
+  }, EVENTS_MS);
   setInterval(async () => { if (S.user) { await loadAccount(); safeRender(); } }, ACCOUNT_MS);
   // reabre mercados e apaga setas sem esperar o próximo ciclo
   setInterval(() => {

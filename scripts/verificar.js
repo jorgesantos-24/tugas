@@ -61,21 +61,12 @@ let problems = 0;
     BP.webhookEnabled ? ok('Segredo do webhook definido') : warn('Sem BRAVOPAY_WEBHOOK_SECRET: os depósitos só são confirmados por consulta (até ~1 min)', 'crie o webhook em https://bravopay.club/dashboard/integracoes quando tiver o site num endereço público');
   }
 
-  console.log('\nAPI-Football (confirmação dos resultados de futebol)');
-  if (!process.env.APIFOOTBALL_KEY) warn('Sem APIFOOTBALL_KEY: os resultados vêm só da ESPN', 'copie a chave de https://dashboard.api-football.com (Account > My Access) para APIFOOTBALL_KEY no .env');
-  else {
-    try {
-      const r = await fetch('https://v3.football.api-sports.io/status', { headers: { 'x-apisports-key': process.env.APIFOOTBALL_KEY }, signal: AbortSignal.timeout(10000) });
-      const d = await r.json().catch(() => ({}));
-      const errs = d.errors && (Array.isArray(d.errors) ? d.errors : Object.values(d.errors));
-      if (errs && errs.length) bad('A API-Football recusou a chave: ' + errs.join('; '));
-      else {
-        const s = d.response || {};
-        ok(`Chave válida — plano ${s.subscription?.plan || '?'}, ${s.requests?.current ?? '?'} de ${s.requests?.limit_day ?? '?'} pedidos usados hoje`);
-        if ((s.requests?.limit_day || 0) < 100) warn('Limite diário baixo: as confirmações podem atrasar em dias com muitos jogos');
-      }
-    } catch (e) { bad('Sem ligação à API-Football: ' + e.message); }
-  }
+  console.log('\nMoviOdds (jogos, odds e resultados)');
+  try {
+    const r = await fetch('https://moviodds.com/odds?sport=soccer&groups=40', { signal: AbortSignal.timeout(20000) });
+    const d = await r.json();
+    r.ok ? ok(`A responder: ${(d.matches || []).length} jogos de futebol com 1X2`) : bad('A MoviOdds respondeu HTTP ' + r.status);
+  } catch (e) { bad('Sem ligação à MoviOdds: ' + e.message); }
 
   console.log('\nDados da empresa (aparecem no rodapé e nas páginas legais)');
   for (const [k, label] of [['COMPANY_NAME', 'Razão social'], ['COMPANY_CNPJ', 'CNPJ'], ['SPA_LICENSE', 'Nº da autorização SPA/MF'], ['SUPPORT_EMAIL', 'E-mail de suporte']]) {

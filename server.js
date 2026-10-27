@@ -4,7 +4,7 @@
    - Dados: Firestore (perfis, saldo, extrato, apostas, depósitos, saques, sessões)
    - Depósitos: PIX pela BravoPay. Saques: pedido do jogador, pago À MÃO pela equipa no painel /admin
    - Sem chave da BravoPay, depósitos e saques ficam indisponíveis
-   - Lê placares e odds do feed público da ESPN
+   - Jogos, placares, odds e resultados: MoviOdds (odds da bet365), ver feeds/moviodds.js
 
    Estrutura no Firestore:
      users/{uid}                       perfil, saldo (centavos), CPF, limites, pausa
@@ -17,37 +17,47 @@
      sessions/{sha256(token)}          sessões de login
      webhookEvents/{id}                webhooks da BravoPay já processados
      adminLogs/{id}                    tudo o que a equipa faz no painel
-     pgsoftTxns/{txn_id}               rodadas dos slots já processadas (idempotência)
-     catalogSports/{key}, catalogLeagues/{key}   modalidades e campeonatos criados pela equipa
-     manualEvents/{id}                 eventos criados pela equipa (com os seus mercados)
-     manualMarkets/{evId}              mercados extra da equipa em jogos reais da ESPN */
+     pgsoftTxns/{txn_id}               rodadas dos slots já processadas (idempotência) */
 
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+// o navegador aceita gzip? (a lista de jogos e as odds comprimem ~10x)
+const acceptsGzip = (req) => /\bgzip\b/.test(String(req.headers['accept-encoding'] || ''));
 // carrega o ficheiro .env (chaves da BravoPay, Firebase, dados da empresa), se existir
 try { process.loadEnvFile(path.join(__dirname, '.env')); } catch { /* sem .env */ }
 const M = require('./public/markets.js');
 const BP = require('./bravopay.js');
 const FB = require('./firebase.js');
-const VF = require('./verify.js'); // segunda fonte de resultados (API-Football)
+const FEED = require('./feeds/moviodds.js'); // jogos, odds e resultados
+const LOGOS = require('./feeds/logos.js');   // emblemas das equipas
+const ESPN = require('./feeds/espn.js');     // futebol: resultado do prolongamento e dos penáltis
 const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailVerification, WEB_CONFIG, EMULATOR } = FB;
 
 const PORT = Number(process.env.PORT) || 3000;
 const PUB = path.join(__dirname, 'public');
-const API = 'https://site.api.espn.com/apis/site/v2/sports/';
-const FAST_MS = 5000, SLOW_MS = 120000; // ao vivo: 5 s (só as ligas com jogos a decorrer); completo: 2 min
+const FAST_MS = 5000, SLOW_MS = 60000; // ao vivo: 5 s (só os jogos a decorrer); completo: 1 min
 // tempo de aprovação: ao vivo 25s (configurável) para dar tempo de o feed apanhar o que acontece no campo
-const LIVE_DELAY_MS = Number(process.env.LIVE_BET_DELAY || 25) * 1000, PRE_DELAY_MS = 800, CASHOUT_DELAY_MS = 2000;
-const LIVE_CASHOUT_DELAY_MS = Number(process.env.LIVE_CASHOUT_DELAY || process.env.LIVE_BET_DELAY || 25) * 1000;
+/* Espera antes de aceitar uma aposta / cash out ao vivo, por modalidade (segundos). Cobre o tempo entre o lance
+   acontecer e a bet365 suspender o mercado (+ ~1-2 s até chegar cá). Ajustável no .env: LIVE_DELAY_SOCCER=8 ...
+   Com várias modalidades no mesmo boletim vale a maior. Mínimo 3 s. */
+const LIVE_DELAY_DEFAULT = { soccer: 8, hockey: 8, tennis: 6, basketball: 5, esports: 5 };
+const LIVE_DELAYS = Object.fromEntries(Object.entries(LIVE_DELAY_DEFAULT).map(([k, v]) => {
+  const n = Number(process.env[`LIVE_DELAY_${k.toUpperCase()}`]);
+  return [k, Math.max(3, Number.isFinite(n) && n > 0 ? n : v)];
+}));
+const liveDelayMs = (sports) => Math.max(...[...sports].map((s) => LIVE_DELAYS[s] ?? Math.max(...Object.values(LIVE_DELAYS))), 3) * 1000;
+if (process.env.LIVE_BET_DELAY || process.env.LIVE_CASHOUT_DELAY) console.warn('[Ao vivo] LIVE_BET_DELAY / LIVE_CASHOUT_DELAY já não são usados: a espera agora é por modalidade (LIVE_DELAY_SOCCER, LIVE_DELAY_TENNIS...).');
+const PRE_DELAY_MS = 800, CASHOUT_DELAY_MS = 2000;
 const SESSION_DAYS = 30;
 // nome do cookie de sessão: o Firebase Hosting (domínio próprio à frente do Cloud Run) só deixa passar "__session"
 const COOKIE = '__session';
 const MAX_WIN = 50000000; // R$ 500.000 em centavos
-// mercados calculados (Ambas Marcam, Placar Exato...): aposta e prêmio máximos mais baixos
-const DERIVED_MAX_STAKE = Math.round(Number(process.env.DERIVED_MAX_STAKE || 200) * 100);
-const DERIVED_MAX_WIN = Math.round(Number(process.env.DERIVED_MAX_WIN || 10000) * 100);
+// mercados liquidados pela equipa (escanteios, cartões, jogadores...): aposta e prêmio máximos mais baixos
+const MANUAL_MAX_STAKE = Math.round(Number(process.env.MANUAL_MAX_STAKE || 100) * 100);
+const MANUAL_MAX_WIN = Math.round(Number(process.env.MANUAL_MAX_WIN || 5000) * 100);
 const DAY = 24 * 3600000;
 const BR_OFFSET = 3 * 3600000; // horário de Brasília (UTC-3)
 const ADMIN_EMAILS = new Set(String(process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
@@ -224,80 +234,290 @@ const openBets = new Map();        // apostas em aberto (todas as contas)
 const pendingDeposits = new Map(); // PIX à espera de pagamento
 const openWithdrawals = new Map(); // pedidos de saque à espera da equipa
 
-/* ---------------- feed ESPN ---------------- */
+/* ---------------- jogos e odds (feeds/moviodds.js) ---------------- */
 const events = new Map();
+const LW = require('./livewatch.js')({ col, inc, M, events, findSel, now }); // vigilância das apostas ao vivo
+// liquidação antecipada: seleções já decididas pagas 2,5 min depois (sem esperar pelo fim do jogo)
+const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now });
 let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
+// resultado só conta depois de lido igual duas vezes, com pelo menos 5 min de intervalo
+const RESULT_CONFIRM_MS = 5 * 60000;
 
-async function fetchJSON(url) {
-  const r = await fetch(url, { headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36' }, signal: AbortSignal.timeout(12000) });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  return r.json();
-}
-async function fetchLeague(lg, date) {
-  if (!lg || !lg.path) return null; // campeonato da equipa: não vem da ESPN
-  try {
-    const d = await fetchJSON(`${API}${lg.path}/scoreboard${date ? `?dates=${date}` : ''}`);
-    return (d.events || []).map((e) => M.parseEvent(e, lg)).filter(Boolean);
-  } catch { return null; }
-}
-// A ESPN organiza os jogos por dia no horário de Nova Iorque. Os pedidos usam sempre esse calendário,
-// seja qual for o relógio do servidor (no Cloud Run é UTC; no Brasil é UTC-3).
-const ET_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
-const etDay = (t) => ET_FMT.format(new Date(t)).replace(/-/g, '');
+// jogos com apostas em aberto (não podem sair da memória)
+const openEvIds = () => new Set([...openBets.values()].flatMap((b) => b.legs.filter((l) => !l.result).map((l) => l.evId)));
 
-// fetchedAt = quando o pedido à ESPN começou. Uma resposta mais antiga (ex.: a atualização completa,
+// fetchedAt = quando o pedido começou. Uma resposta mais antiga (ex.: a atualização completa,
 // que demora alguns segundos) nunca substitui um placar mais recente já recebido.
-function mergeEvents(list, fetchedAt) {
+// fromWs = atualização pelo WebSocket: entra sempre (é a mais recente) e não mexe na ordem dos pedidos normais
+function mergeEvents(list, fetchedAt, fromWs = false) {
   const t = now();
   let changed = false;
   const same = (a, b) => { const { fetchedAt: x, ...ra } = a; const { fetchedAt: y, ...rb } = b; return JSON.stringify(ra) === JSON.stringify(rb); };
   for (const ev of list) {
     const old = events.get(ev.id);
-    if (old && old.fetchedAt > fetchedAt) continue;
-    ev.fetchedAt = fetchedAt;
+    if (old && (old.state === 'post' || (!fromWs && old.fetchedAt > fetchedAt))) continue;
+    ev.fetchedAt = fromWs && old ? old.fetchedAt : fetchedAt;
+    // emblemas: futebol primeiro; dentro de cada modalidade, ao vivo e jogos mais próximos
+    const pr = (ev.sport === 'soccer' ? 0 : 1e13) + (ev.state === 'in' ? 0 : +ev.date);
+    ev.home.logo = LOGOS.logo(ev.sport, ev.home.name, pr, ev.league); ev.away.logo = LOGOS.logo(ev.sport, ev.away.name, pr, ev.league);
     if (old) {
-      const scored = old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score);
-      if (scored) { ev.suspendedUntil = t + 20000; ev.goalAt = t; }
+      // gol (futebol, hóquei): mercados suspensos 20 s. No basquete e no ténis o placar muda a toda a hora.
+      const scored = M.GOAL_SPORTS.has(ev.sport) && old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score);
+      if (scored) {
+        ev.suspendedUntil = t + 20000; ev.goalAt = t;
+        if (ev.home.score > old.home.score || ev.away.score > old.away.score) LW.goal(ev.id, ev.home.score > old.home.score ? 'home' : 'away', t);
+      }
       else { ev.suspendedUntil = old.suspendedUntil; ev.goalAt = old.goalAt; }
     }
-    ev.cm = extraMarketsOf(ev.id);
-    if (!old || !same(old, ev)) changed = true;
+    if (!old || !same(old, ev)) { changed = true; touch(ev.id); }
     events.set(ev.id, ev);
   }
   return changed;
 }
 
+/* ---------------- tempo real para o navegador (Server-Sent Events: GET /api/stream) ----------------
+   Cada jogo que muda é enviado logo aos navegadores ligados (no máximo a cada 150 ms), sem esperarem pela
+   atualização seguinte. A lista completa (/api/events) continua a ser pedida de tempos a tempos, como reserva.
+   - Para a lista vai só a versão leve do jogo, e só quando ela mudou de facto (a maioria das odds que mexem
+     são de mercados que não aparecem na lista).
+   - Cada navegador diz que jogos tem abertos (página do jogo, boletim, apostas): desses recebe os mercados
+     completos no próprio fluxo (POST /api/stream/watch), sem pedidos extra.
+   - A cada 10 s vai um "ping" com a hora: o navegador sabe que o fluxo está vivo (se um proxy o segurar, volta
+     a pedir a lista de 5 em 5 s). */
+const streams = new Map(); // id do fluxo → { res, out, watch: Set }
+const touched = new Set();
+const sentLight = new Map(); // jogo → { j: última versão leve enviada (texto), at, urgent }
+const LIGHT_MIN_MS = 1000;   // na lista, cada jogo muda no máximo 1x/s (odds a mexer); gol, suspensão e início/fim vão na hora
+let pushT = null, sentLeagues = '';
+function touch(id) {
+  touched.add(id);
+  if (!pushT && streams.size) pushT = setTimeout(pushNow, 150);
+}
+// cada mensagem sai comprimida (gzip) e é empurrada logo (flush), sem esperar por mais dados
+const sse = (st, data, ev) => {
+  try { st.out.write(`${ev ? `event: ${ev}\n` : ''}data: ${data}\n\n`); if (st.out.flush) st.out.flush(); return true; } catch { return false; }
+};
+const urgentKey = (ev) => `${ev.state}|${ev.home.score}-${ev.away.score}|${ev.suspendedUntil || 0}|${ev.awaiting ? 1 : 0}|${ev.markets ? 1 : 0}`;
+function pushNow() {
+  pushT = null;
+  if (!streams.size) { touched.clear(); sentLight.clear(); return; }
+  const ids = [...touched]; touched.clear();
+  feedVersion++; feedCache = null;
+  const t = now();
+  const light = [], fullJson = new Map();
+  let later = false;
+  for (const id of ids) {
+    const ev = events.get(id);
+    if (!ev) { sentLight.delete(id); light.push(`{"id":${JSON.stringify(id)},"removed":true}`); continue; }
+    const j = JSON.stringify(lightEvent(ev));
+    const last = sentLight.get(id);
+    if (last && last.j === j) continue;
+    const uk = urgentKey(ev);
+    if (last && last.urgent === uk && t - last.at < LIGHT_MIN_MS) { touched.add(id); later = true; continue; } // vai no próximo envio
+    sentLight.set(id, { j, at: t, urgent: uk });
+    light.push(j);
+  }
+  if (later && !pushT) pushT = setTimeout(pushNow, 250);
+  const lg = JSON.stringify(M.dynLeagues());
+  const leagues = lg !== sentLeagues ? lg : null;
+  sentLeagues = lg;
+  const head = `{"now":${now()}${leagues ? `,"leagues":${leagues}` : ''},"events":[${light.join(',')}]`;
+  for (const [sid, st] of streams) {
+    // mercados completos dos jogos que este navegador tem abertos
+    const full = [];
+    for (const id of ids) {
+      if (!st.watch.has(id)) continue;
+      if (!fullJson.has(id)) { const ev = events.get(id); fullJson.set(id, ev ? JSON.stringify(publicEvent(ev)) : null); }
+      if (fullJson.get(id)) full.push(fullJson.get(id));
+    }
+    if (!light.length && !full.length && !leagues) continue;
+    if (!sse(st, `${head}${full.length ? `,"full":[${full.join(',')}]` : ''}}`)) streams.delete(sid);
+  }
+}
+setInterval(() => {
+  for (const [sid, st] of streams) if (!sse(st, `{"now":${now()}}`, 'ping')) streams.delete(sid);
+  for (const id of sentLight.keys()) if (!events.has(id)) sentLight.delete(id);
+}, 10000);
+function handleStream(req, res) {
+  if (streams.size >= MAX_STREAMS) { res.writeHead(503, { 'Retry-After': '15' }); res.end(); return; }
+  res.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no', Vary: 'Accept-Encoding', ...(acceptsGzip(req) ? { 'Content-Encoding': 'gzip' } : {}) });
+  const sid = crypto.randomBytes(12).toString('base64url');
+  const watch = new Set(String(new URL(req.url, 'http://x').searchParams.get('watch') || '').split(',').filter(Boolean).slice(0, 40));
+  // gzip com flush a cada mensagem: ~10x menos dados (importante no telemóvel)
+  let out = res;
+  // janela pequena (≈64 KB de memória por navegador em vez de ≈256 KB): com 800 ligações cabe nos 512 MB
+  if (acceptsGzip(req)) { out = zlib.createGzip({ level: 5, windowBits: 13, memLevel: 6 }); out.pipe(res); }
+  const st = { res, out, watch };
+  streams.set(sid, st);
+  out.write('retry: 3000\n');
+  sse(st, JSON.stringify({ sid, now: now(), leagues: M.dynLeagues() }), 'hello');
+  req.on('close', () => { streams.delete(sid); if (out !== res) out.destroy(); });
+}
+const MAX_STREAMS = Number(process.env.MAX_STREAMS || 800); // abaixo da concorrência do Cloud Run (1000): sobra para os pedidos normais
+
+/* WebSocket da MoviOdds: os jogos que mudam são reconstruídos e entram logo (gol → suspensão na hora).
+   removed = jogos que a fonte tirou da oferta: ao vivo ficam logo bloqueados e a lista ao vivo é relida. */
+let wsRefreshT = null;
+function quickLiveRefresh(ms) { if (!wsRefreshT) wsRefreshT = setTimeout(() => { wsRefreshT = null; refresh(false); }, ms); }
+function onWsChange(ids, removed = []) {
+  const list = ids.map((id) => FEED.fromWs(id)).filter(Boolean);
+  if (list.length && mergeEvents(list, now(), true)) { feedVersion++; feedCache = null; }
+  let locked = false;
+  for (const id of removed) {
+    const ev = events.get(id);
+    if (!ev || ev.state !== 'in' || !ev.markets) continue;
+    ev.markets = ev.markets.map((mk) => ({ ...mk, sels: mk.sels.map((x) => ({ ...x, lock: true })) }));
+    touch(id); locked = true;
+  }
+  if (locked) { feedVersion++; feedCache = null; quickLiveRefresh(1000); }
+}
+// ligação à MoviOdds caiu: as odds ao vivo voltam já aos pedidos normais (sem esperar pelo ciclo seguinte)
+const onWsDown = () => quickLiveRefresh(200);
+// jogos a seguir pelo WebSocket: ao vivo e os que começam nos próximos 15 min (ou começaram há pouco)
+function wsWanted() {
+  const t = now(), ids = [];
+  for (const ev of events.values()) {
+    if (ev.state === 'post' || ev.awaiting) continue;
+    if (ev.state === 'in' || (+ev.date - t < 15 * 60000 && t - +ev.date < 6 * 3600000)) ids.push(ev.id);
+  }
+  return ids;
+}
+
+/* Jogos que deixaram de vir na lista da fonte:
+   - ainda longe do início: saíram da oferta (some do site; se houver apostas, fica sem mercados);
+   - já começaram: o jogo acabou (ou foi retirado) → fica à espera do resultado.
+   A lista ao vivo só traz jogos a decorrer, por isso só serve para os jogos que estavam ao vivo.
+   okSports = modalidades que responderam (uma que falhou não conta como "o jogo saiu"). */
+function markMissing(seen, full, t, okSports) {
+  let changed = false;
+  const keep = openEvIds();
+  for (const [id, ev] of events) {
+    if (seen.has(id) || ev.state === 'post' || ev.awaiting || !okSports.has(ev.sport)) continue;
+    if (!full && ev.state !== 'in') continue;
+    if (ev.state === 'pre' && +ev.date > t + 10 * 60000) {
+      if (!keep.has(id)) events.delete(id); else ev.markets = null;
+    } else {
+      Object.assign(ev, { awaiting: true, markets: null, clock: 'Aguardando resultado' });
+    }
+    changed = true;
+    touch(id);
+  }
+  return changed;
+}
+
+// evento mínimo a partir de uma aposta (ex.: o servidor reiniciou depois de o jogo sair da lista)
+function stubFromLeg(l) {
+  // torneio de ténis que já saiu da lista (ex.: o servidor reiniciou): volta a existir para a aposta aparecer e ser paga
+  if (!M.LEAGUE_BY_KEY[l.league]) M.addLeague({ key: l.league, name: l.leagueName, country: '', sport: l.sport || 'tennis', order: 999 });
+  const [h, a] = String(l.event).split(' x ');
+  const team = (name, id) => ({ id, name, short: name, logo: '', score: null, form: '' });
+  return {
+    id: l.evId, league: l.league, leagueName: l.leagueName, country: M.LEAGUE_BY_KEY[l.league]?.country || '', sport: l.sport || 'soccer',
+    date: new Date(l.startsAt), state: 'in', completed: false, statusName: '', clock: 'Aguardando resultado',
+    home: team(h, 'h'), away: team(a, 'a'), details: [], venue: '', markets: null, awaiting: true, fetchedAt: 0,
+  };
+}
+
+// procura o resultado dos jogos terminados (cada jogo no máximo 1x/min; depois de 6h, 1x a cada 10 min)
+const resultTried = new Map();
+async function checkResults() {
+  const t = now();
+  let changed = false;
+  const want = new Map();
+  for (const ev of events.values()) if (ev.awaiting && ev.state !== 'post') want.set(ev.id, null);
+  for (const b of openBets.values()) for (const l of b.legs) {
+    if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.'))) want.set(l.evId, l);
+  }
+  let asked = 0;
+  for (const [id, leg] of want) {
+    const ev0 = events.get(id);
+    const startsAt = ev0 ? +ev0.date : leg.startsAt;
+    if (t - (resultTried.get(id) || 0) < (t - startsAt > 6 * 3600000 ? 600000 : 60000)) continue;
+    if (++asked > 20) break;
+    resultTried.set(id, t);
+    let r;
+    try { r = await FEED.fetchResult(id, ev0 ? ev0.sport : leg.sport || 'soccer'); } catch (e) { console.error(`[Resultados] ${id}: ${e.message}`); continue; }
+    if (!r) continue;
+    const ev = ev0 || stubFromLeg(leg);
+    if (!ev0) { events.set(id, ev); changed = true; }
+    if (!r.done) { // parou antes do fim (ou placar ilegível): a equipa decide no painel
+      if (ev.clock !== 'Resultado por confirmar') { ev.clock = 'Resultado por confirmar'; ev.resultNote = r.note; changed = true; }
+      continue;
+    }
+    const { done, finishedAt, note, ...R } = r;
+    const sig = JSON.stringify(R);
+    const p = ev.pendingResult;
+    if (!p || p.sig !== sig) { ev.pendingResult = { sig, at: t }; continue; }
+    if (t - p.at < RESULT_CONFIRM_MS) continue;
+    Object.assign(ev, {
+      state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado' + (R.alts ? ' (pênaltis)' : ''), pendingResult: null,
+      result: R, resultNote: note || (R.alts ? 'decidido nos pênaltis: a fonte não diz quem ganhou; mercados do vencedor ficam para a equipa' : null),
+      home: { ...ev.home, score: R.h }, away: { ...ev.away, score: R.a },
+    });
+    changed = true;
+    touch(id);
+    console.log(`[Resultados] ${M.evLabel(ev)}: ${M.resultText(R)}${note ? ` (${note})` : ''}`);
+  }
+  return changed;
+}
+
+/* Futebol: prolongamento e penáltis (a MoviOdds só regista os 90 minutos). Para jogos terminados com apostas em
+   mercados de prolongamento/penáltis — ou de jogadores numa eliminatória empatada aos 90' — vai-se buscar o
+   resultado à ESPN (a cada 2 min, durante 6 h). Sem resultado, essas apostas ficam para a equipa no painel. */
+const etTried = new Map();
+async function checkExtraTime() {
+  const t = now();
+  const want = new Map(); // jogo → precisa (pet = prolongamento/penáltis; pp = jogadores à espera)
+  for (const b of openBets.values()) for (const l of b.legs) if (!l.result && (l.market === 'pet' || l.market === 'pp')) want.set(l.evId, want.get(l.evId) === 'pet' ? 'pet' : l.market);
+  let changed = false;
+  for (const [id, kind] of want) {
+    const ev = events.get(id);
+    if (!ev || ev.state !== 'post' || ev.sport !== 'soccer' || !ev.result || ev.result.et) continue;
+    if (kind === 'pp' && !ev.result.needEt) continue;
+    const ended = ev.result.finishedAt || +ev.date + 2 * 3600000;
+    if (t - ended > 6 * 3600000) continue; // desistiu: fica para a equipa
+    const tr = etTried.get(id) || 0;
+    if (t - tr < 120000) continue;
+    etTried.set(id, t);
+    try {
+      const et = await ESPN.extraTime(ev, [ev.result.h, ev.result.a]);
+      if (!et) continue;
+      ev.result = { ...ev.result, et };
+      changed = true;
+      console.log(`[Prolongamento] ${M.evLabel(ev)}: ${et.espn} → fim ${et.end}${et.pens ? `, penáltis ${et.pens.join('-')}` : ''}, passa ${et.qualified || '?'}`);
+    } catch (e) { console.error(`[Prolongamento] ${M.evLabel(ev)}: ${e.message}`); }
+  }
+  for (const id of etTried.keys()) if (!want.has(id)) etTried.delete(id);
+  if (changed) { feedVersion++; feedCache = null; }
+  return changed;
+}
+
 // atualização completa e atualização ao vivo correm em separado: a completa não bloqueia a ao vivo
 const refreshing = { full: false, live: false };
+let lastFeedErr = '';
 async function refresh(full) {
   const kind = full ? 'full' : 'live';
   if (refreshing[kind]) return;
   refreshing[kind] = true;
   try {
     const t = now();
-    const jobs = [];
-    if (full) {
-      // todas as ligas: ontem (resultados), hoje, amanhã e depois de amanhã (calendário da ESPN)
-      const days = [...new Set([etDay(t - DAY), etDay(t), etDay(t + DAY), etDay(t + 2 * DAY)])];
-      for (const l of M.LEAGUES) if (l.path) for (const d of days) jobs.push(fetchLeague(l, d));
-    } else {
-      // só as ligas com jogos ao vivo / a começar / com apostas em aberto, no dia certo de cada jogo
-      const want = new Map();
-      const add = (lg, ts) => { if (!M.LEAGUE_BY_KEY[lg]?.path) return; if (!want.has(lg)) want.set(lg, new Set()); want.get(lg).add(etDay(ts)); };
-      for (const ev of events.values()) {
-        const dt = ev.date - t;
-        if (ev.state === 'in' || (ev.state === 'pre' && dt < 45 * 60000 && dt > -6 * 3600000)) add(ev.league, +ev.date);
-      }
-      for (const b of openBets.values()) for (const l of b.legs) if (!l.result) add(l.league, l.startsAt);
-      for (const [lg, days] of want) for (const d of days) jobs.push(fetchLeague(M.LEAGUE_BY_KEY[lg], d));
-    }
-    const res = (await Promise.all(jobs)).filter(Boolean);
     let changed = false;
-    if (res.length || !full) {
-      changed = mergeEvents(res.flat(), t);
-      if (res.length) lastFeedOk = now();
+    const { events: list, ok, errors } = await (full ? FEED.fetchAll() : FEED.fetchLive());
+    const err = errors.join(' · ');
+    if (err && err !== lastFeedErr) console.error(`[${FEED.name}] Erro ao atualizar ${full ? 'jogos' : 'ao vivo'}:`, err);
+    lastFeedErr = err;
+    if (ok.size) {
+      changed = mergeEvents(list, t);
+      if (markMissing(new Set(list.map((e) => e.id)), full, t, ok)) changed = true;
+      lastFeedOk = now();
     }
-    if (full) for (const [id, ev] of events) if (!ev.manual && t - ev.date > 36 * 3600000) { events.delete(id); changed = true; }
+    FEED.ws.want(wsWanted()); // WebSocket: segue os jogos ao vivo e os que vão começar
+    if (full) {
+      if (await checkResults()) changed = true;
+      if (await checkExtraTime()) changed = true;
+      const keep = openEvIds();
+      for (const [id, ev] of events) if (t - ev.date > 36 * 3600000 && !keep.has(id)) { events.delete(id); changed = true; }
+    }
     // só muda a versão (e os navegadores só voltam a descarregar tudo) quando há novidades,
     // ou a cada 30 s para o "Última atualização" do site continuar a andar
     if (changed || now() - lastBump > 30000) { feedVersion++; feedCache = null; lastBump = now(); }
@@ -317,19 +537,22 @@ function liveSnapshot(evIds) {
   }
   return snap;
 }
-async function refreshEvents(evIds) {
+// placar e odds ao vivo mais recentes (um pedido só traz todos os jogos a decorrer)
+async function refreshLiveNow() {
   const t = now();
-  const pairs = new Set([...evIds].map((id) => events.get(id)).filter((ev) => ev && !ev.manual).map((ev) => `${ev.league}|${etDay(+ev.date)}`));
-  const res = await Promise.all([...pairs].map((p) => { const [lg, d] = p.split('|'); return M.LEAGUE_BY_KEY[lg] ? fetchLeague(M.LEAGUE_BY_KEY[lg], d) : null; }));
-  const list = res.filter(Boolean).flat();
-  if (list.length) { mergeEvents(list, t); feedVersion++; feedCache = null; }
+  try {
+    const { events: list, ok } = await FEED.fetchLive();
+    mergeEvents(list, t);
+    markMissing(new Set(list.map((e) => e.id)), false, t, ok);
+    feedVersion++; feedCache = null;
+  } catch (e) { console.error(`[${FEED.name}] Erro ao confirmar ao vivo:`, e.message); }
 }
 // devolve o motivo da recusa, ou null se nada mudou desde o pedido
 function liveChanged(snap, t0) {
   for (const [id, s] of snap) {
     const ev = events.get(id);
     if (!ev || ev.state !== s.state) return 'o jogo mudou de estado durante a aprovação';
-    if (ev.home.score !== s.h || ev.away.score !== s.a || (ev.goalAt && ev.goalAt >= t0)) return 'houve gol durante a aprovação';
+    if (M.GOAL_SPORTS.has(ev.sport) && (ev.home.score !== s.h || ev.away.score !== s.a || (ev.goalAt && ev.goalAt >= t0))) return 'houve gol durante a aprovação';
     if (M.isSuspended(ev)) return 'mercado suspenso durante a aprovação';
   }
   return null;
@@ -341,91 +564,46 @@ function findSel(key) {
   return { ev, sel: M.selections(ev).find((s) => s.key === key) || null };
 }
 
+/* A lista de jogos leva só os mercados da linha do jogo (vencedor e linha principal do total) e o número total
+   de seleções ("+N"). Os mercados completos de um jogo vêm de /api/events/full (página do jogo, boletim, apostas
+   em aberto) — com dezenas de mercados por jogo de ténis, mandar tudo a cada 5 s pesaria vários MB. */
+const LIST_KINDS = new Set(['ml', 'mlr', 'total', 'gtotal']);
+function lightMarkets(markets) {
+  if (!markets) return null;
+  const out = [];
+  for (const mk of markets) {
+    if (!LIST_KINDS.has(mk.k) || mk.per != null) continue;
+    if (mk.k === 'total' || mk.k === 'gtotal') {
+      const line = mk.main ?? mk.sels[0]?.line;
+      out.push({ ...mk, sels: mk.sels.filter((s) => s.line === line) });
+    } else out.push(mk);
+  }
+  return out.length ? out : markets.slice(0, 1).map((mk) => ({ ...mk, sels: mk.sels.slice(0, 3) })); // sempre algo, para o jogo não parecer fechado
+}
+const publicEvent = ({ goalAt, fetchedAt, pendingResult, result, ...ev }) => ({ ...ev, goalAt: goalAt || null });
+// versão para a lista de jogos: só os mercados da linha do jogo + o número de seleções
+function lightEvent(e) {
+  const { stats, details, ...ev } = publicEvent(e); // estatísticas e lances só na página do jogo
+  return { ...ev, markets: lightMarkets(ev.markets), nsel: (ev.markets || []).reduce((n, mk) => n + mk.sels.length, 0) };
+}
+// estado da fonte para o painel da equipa
+function feedInfo() {
+  const list = [...events.values()];
+  return {
+    source: FEED.name, lastFeedOk, events: list.length, live: list.filter((e) => e.state === 'in').length,
+    browsers: streams.size, ws: FEED.ws.info(),
+  };
+}
 function feedPayload() {
   if (!feedCache) {
-    const list = [...events.values()].map(({ goalAt, fetchedAt, ...ev }) => ({ ...ev, goalAt: goalAt || null }));
-    feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, catalog: catalogCache, events: list }) };
+    const list = [...events.values()].map(lightEvent);
+    // leagues: campeonatos criados na hora (torneios de ténis), para o navegador os conhecer
+    feedCache = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, leagues: M.dynLeagues(), events: list }) };
   }
   return feedCache;
 }
 
-/* ---------------- catálogo da equipa ----------------
-   Modalidades, campeonatos, eventos e mercados criados no painel /admin. Ficam em memória
-   (ligação em tempo real ao Firestore) e entram no feed ao lado dos jogos da ESPN.
-   Os mercados da equipa são liquidados quando a equipa marca o resultado no painel. */
-const catSports = new Map(), catLeagues = new Map();
-const manualEvents = new Map();  // eventos da equipa (cada um com os seus mercados)
-const manualMarkets = new Map(); // id do jogo da ESPN -> { markets } (mercados extra em jogos reais)
-let catalogCache = null;
-
-// o que o site vê de cada mercado: só os abertos e suspensos, sem resultados
-function pubMarkets(list) {
-  const out = (list || []).filter((m) => m.status !== 'settled')
-    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, group: m.group || null, closesAt: m.closesAt ?? null, sels: m.sels.filter((s) => !s.hidden).map((s) => ({ id: s.id, name: s.name, odds: s.odds, ...(s.locked ? { locked: true } : {}), ...(s.side ? { side: s.side, line: s.line ?? null } : {}) })) }))
-    .filter((m) => m.sels.length); // mercado fechado na reta final: sai do site
-  return out.length ? out : null;
-}
-const extraMarketsOf = (evId) => pubMarkets(manualMarkets.get(evId)?.markets);
-// mercados da equipa de um evento (manual ou da ESPN), com resultados
-const teamMarkets = (evId) => (manualEvents.get(evId) || manualMarkets.get(evId))?.markets || [];
-
-function publicCatalog() {
-  const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt;
-  const sports = [...catSports.values()].filter((s) => !s.hidden).sort(byOrder).map((s) => ({ key: s.id, name: s.name, icon: s.icon }));
-  const visible = (k) => (M.SPORTS[k] && !M.SPORTS[k].custom) || sports.some((s) => s.key === k);
-  const leagues = [...catLeagues.values()].filter((l) => !l.hidden && visible(l.sport)).sort(byOrder)
-    .map((l) => ({ key: l.id, name: l.name, country: l.country || '', sport: l.sport }));
-  return { sports, leagues };
-}
-
-function manualToEvent(d) {
-  const lg = M.LEAGUE_BY_KEY[d.league];
-  const side = (name, score, id) => ({ id, name, short: name, logo: '', score: d.state === 'pre' ? null : score ?? 0, form: '' });
-  return {
-    id: d.id, manual: true, league: d.league, leagueName: lg.name, country: lg.country, sport: lg.sport, path: null,
-    date: new Date(d.startsAt), state: d.state, completed: d.state === 'post', statusName: '',
-    clock: d.clock || (d.state === 'post' ? 'Encerrado' : d.state === 'in' ? 'Ao vivo' : undefined),
-    home: side(d.home, d.score?.h, 'h'), away: side(d.away, d.score?.a, 'a'), details: [], venue: '', markets: null, cm: pubMarkets(d.markets),
-    // longo prazo (campeão, artilheiro...): sem adversário; as apostas fecham na data do evento
-    ...(d.outright ? { outright: true, closesAt: d.startsAt } : {}),
-  };
-}
-
-// reconstrói tudo o que depende do catálogo (corre a cada mudança no Firestore)
-function applyCatalog() {
-  catalogCache = publicCatalog();
-  M.setCatalog(catalogCache);
-  for (const [id, ev] of events) if (ev.manual) events.delete(id);
-  for (const d of manualEvents.values()) if (!d.archived && M.LEAGUE_BY_KEY[d.league]) events.set(d.id, manualToEvent(d));
-  for (const ev of events.values()) if (!ev.manual) ev.cm = extraMarketsOf(ev.id);
-  feedVersion++; feedCache = null;
-}
-
-// seleção de um mercado da equipa: fica decidida quando a equipa liquida o mercado
-const CUSTOM_RESULT = { won: 1, lost: -1, void: 0 };
-function settleCustomLeg(leg) {
-  const [mId, sId] = String(leg.pick).split('.');
-  const mk = teamMarkets(leg.evId).find((m) => m.id === mId);
-  if (!mk || mk.status !== 'settled') return false;
-  const r = mk.sels.find((s) => s.id === sId)?.result || 'void'; // seleção removida: devolvida
-  leg.result = r; leg.value = CUSTOM_RESULT[r] ?? 0;
-  leg.final = mk.sels.filter((s) => s.result === 'won').map((s) => s.name).join(', ') || 'anulado';
-  return true;
-}
-
 /* ---------------- liquidação ---------------- */
-const summaryTried = new Map();
-async function eventFromSummary(leg) {
-  if (now() - (summaryTried.get(leg.evId) || 0) < 60000) return null;
-  summaryTried.set(leg.evId, now());
-  try {
-    const d = await fetchJSON(`${API}${leg.path}/summary?event=${leg.evId}`);
-    const c = d.header?.competitions?.[0];
-    if (!c) return null;
-    return M.parseEvent({ id: leg.evId, date: c.date, competitions: [c], status: c.status }, M.LEAGUE_BY_KEY[leg.league]);
-  } catch { return null; }
-}
-
 // fecha uma aposta (ganha, perdida, devolvida) e paga, se for o caso. Só acontece uma vez.
 async function closeBet(bet, status, payout, legs, txType) {
   const ok = await runTx([bet.userId], async (t) => {
@@ -451,26 +629,23 @@ async function settleBets() {
   try { await settleAll(); } finally { settling = false; }
 }
 async function settleAll() {
+  EARLY.tick(); // mercados abertos/fechados de cada jogo ao vivo (para o VAR)
   for (const row of [...openBets.values()]) {
     try {
       const legs = structuredClone(row.legs);
       let changed = false;
       for (const leg of legs) {
         if (leg.result) continue;
-        if (leg.market === 'custom') { if (settleCustomLeg(leg)) changed = true; continue; }
-        let ev = events.get(leg.evId);
-        if (!ev && now() - row.placedAt > 3 * 3600000) ev = await eventFromSummary(leg);
-        // futebol: só paga se a segunda fonte (API-Football) confirmar o placar da ESPN
-        if (VF.enabled && ev && ev.state === 'post' && ev.sport === 'soccer') {
-          const v = await VF.check(ev);
-          if (v.state !== 'ok') continue; // à espera, ou divergente / não encontrado → painel
-        }
-        if (M.settleLeg(leg, ev)) changed = true;
+        // o resultado já vem confirmado (lido duas vezes igual, ver checkResults)
+        if (M.settleLeg(leg, events.get(leg.evId))) changed = true;
+        else if (EARLY.check(row.id, leg)) { changed = true; console.log(`[Liquidação antecipada] aposta ${row.id}: ${leg.name} (${leg.marketName}, ${leg.event}) → ${leg.result} · ${leg.final}`); }
       }
       const anyLost = legs.some((l) => l.result === 'lost');
       const allDone = legs.every((l) => l.result);
       if (anyLost || allDone) {
-        const payout = anyLost ? 0 : Math.round(row.stake * legs.reduce((p, l) => p * M.outcomeFactor(l.value, l.odds), 1));
+        // todas ganhas: paga exatamente o "retorno potencial" mostrado (odd total arredondada a 2 casas);
+        // com devolvidas / meio ganhas, recalcula com as odds de cada seleção
+        const payout = anyLost ? 0 : legs.every((l) => l.value === 1) ? row.potential : Math.round(row.stake * legs.reduce((p, l) => p * M.outcomeFactor(l.value, l.odds), 1));
         const status = payout === 0 ? 'lost' : payout > row.stake ? 'won' : 'void';
         await closeBet(row, status, payout, legs, status === 'won' ? 'Prêmio' : 'Aposta devolvida');
       } else if (changed) {
@@ -685,8 +860,30 @@ const routes = {
     const p = feedPayload();
     ctx.res.setHeader('X-Server-Now', String(now()));
     if (ctx.req.headers['if-none-match'] === p.etag) { ctx.res.writeHead(304, { ETag: p.etag }); ctx.res.end(); return; }
-    ctx.res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ETag: p.etag, 'Cache-Control': 'no-cache' });
+    const headers = { 'Content-Type': 'application/json; charset=utf-8', ETag: p.etag, 'Cache-Control': 'no-cache', Vary: 'Accept-Encoding' };
+    if (acceptsGzip(ctx.req)) {
+      if (!p.gz) p.gz = zlib.gzipSync(p.body, { level: 6 }); // uma compressão por versão da lista
+      ctx.res.writeHead(200, { ...headers, 'Content-Encoding': 'gzip' });
+      ctx.res.end(p.gz);
+      return;
+    }
+    ctx.res.writeHead(200, headers);
     ctx.res.end(p.body);
+  },
+
+  // mercados completos de alguns jogos (página do jogo, boletim, apostas em aberto): ?ids=a,b,c (até 40)
+  'GET /api/events/full': (ctx) => {
+    const ids = String(new URL(ctx.req.url, 'http://x').searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 40);
+    ctx.res.setHeader('X-Server-Now', String(now()));
+    return { events: ids.map((id) => events.get(id)).filter(Boolean).map(publicEvent) };
+  },
+
+  // jogos abertos neste navegador (página do jogo, boletim, apostas): recebem os mercados completos pelo fluxo
+  'POST /api/stream/watch': (ctx) => {
+    const st = streams.get(String(ctx.body.sid || ''));
+    if (!st) fail(404, 'Fluxo não encontrado.');
+    st.watch = new Set((Array.isArray(ctx.body.ids) ? ctx.body.ids : []).map(String).filter((id) => id.length < 40).slice(0, 40));
+    return { ok: true };
   },
 
   'GET /api/site': () => ({ site: SITE }),
@@ -772,7 +969,7 @@ const routes = {
 
   'GET /api/me': (ctx) => ({
     user: ctx.user ? publicUser(ctx.user) : null,
-    liveDelay: LIVE_DELAY_MS / 1000, liveCashoutDelay: LIVE_CASHOUT_DELAY_MS / 1000,
+    liveDelays: LIVE_DELAYS, // segundos de espera ao vivo por modalidade (aposta e cash out)
     payments: BP.enabled ? { live: true, depositMin: DEP_MIN / 100, depositMax: DEP_MAX / 100, withdrawMin: WD_MIN / 100, withdrawEta: SITE.withdrawEta } : { live: false },
     casino: CASINO || MINES || SLOTS, games: { decola: CASINO, mines: MINES, slots: SLOTS },
     slotsGames: SLOTS ? SLOTS_GAMES : [],
@@ -976,8 +1173,8 @@ const routes = {
       const t0 = now();
       const liveIds = new Set(parsed.flatMap((tk) => tk.keys.map((k) => String(k).split('|')[0])));
       const snap = liveSnapshot(liveIds);
-      await sleep(live ? LIVE_DELAY_MS : PRE_DELAY_MS);
-      if (snap.size) await refreshEvents(snap.keys()); // placar mais recente antes de decidir
+      await sleep(live ? liveDelayMs([...snap.keys()].map((id) => events.get(id)?.sport)) : PRE_DELAY_MS);
+      if (snap.size) await refreshLiveNow(); // placar mais recente antes de decidir
       const liveReason = liveChanged(snap, t0);
       const placed = [], rejected = [];
       for (let i = 0; i < parsed.length; i++) {
@@ -991,7 +1188,7 @@ const routes = {
           if (!acceptAny && tk.seen[j] != null && Number(tk.seen[j]) !== sel.odds) { reason = 'odds alteradas'; break; }
           if (sel.maxStake && tk.stake > sel.maxStake) { reason = `aposta máxima no mercado "${sel.marketName}": ${brl(sel.maxStake)}`; break; }
           legs.push({
-            key: sel.key, evId: ev.id, league: ev.league, path: ev.path, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null,
+            key: sel.key, evId: ev.id, feed: 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
             name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
           });
@@ -1000,10 +1197,10 @@ const routes = {
         const odds = M.round2(legs.reduce((p, l) => p * l.odds, 1));
         const potential = Math.round(tk.stake * odds);
         if (potential > MAX_WIN) { rejected.push({ index: i, reason: 'prêmio máximo de R$ 500.000 excedido' }); continue; }
-        // mercados calculados pelo modelo: limites mais baixos (proteção contra erros do modelo)
-        if (legs.some((l) => M.DERIVED_MARKETS.has(l.market))) {
-          if (tk.stake > DERIVED_MAX_STAKE) { rejected.push({ index: i, reason: `aposta máxima neste mercado: ${brl(DERIVED_MAX_STAKE)}` }); continue; }
-          if (potential > DERIVED_MAX_WIN) { rejected.push({ index: i, reason: `prêmio máximo neste mercado: ${brl(DERIVED_MAX_WIN)}` }); continue; }
+        // mercados liquidados pela equipa: limites mais baixos (dependem de uma pessoa confirmar o resultado)
+        if (legs.some((l) => l.market === 'x')) {
+          if (tk.stake > MANUAL_MAX_STAKE) { rejected.push({ index: i, reason: `aposta máxima neste mercado: ${brl(MANUAL_MAX_STAKE)}` }); continue; }
+          if (potential > MANUAL_MAX_WIN) { rejected.push({ index: i, reason: `prêmio máximo neste mercado: ${brl(MANUAL_MAX_WIN)}` }); continue; }
         }
         const id = betId();
         const bet = {
@@ -1031,6 +1228,7 @@ const routes = {
           });
           openBets.set(id, bet);
           placed.push({ index: i, bet: publicBet(bet) });
+          if (live) LW.watch(bet, u); // revista 20 s e 45 s depois (gol logo a seguir / odd a cair)
         } catch (e) {
           if (!(e instanceof HttpError)) console.error('Erro ao gravar aposta:', e.message);
           rejected.push({ index: i, reason: e instanceof HttpError ? e.message : 'erro ao gravar a aposta' });
@@ -1051,9 +1249,9 @@ const routes = {
     // ao vivo: mesma proteção das apostas (espera, placar novo, recusa se houve gol)
     const t0 = now();
     const snap = liveSnapshot(new Set(s.data().legs.filter((l) => !l.result).map((l) => l.evId)));
-    await sleep(snap.size ? LIVE_CASHOUT_DELAY_MS : CASHOUT_DELAY_MS);
+    await sleep(snap.size ? liveDelayMs([...snap.keys()].map((sid) => events.get(sid)?.sport)) : CASHOUT_DELAY_MS);
     if (snap.size) {
-      await refreshEvents(snap.keys());
+      await refreshLiveNow();
       const why = liveChanged(snap, t0);
       if (why) fail(409, `Cash Out recusado: ${why}.`);
     }
@@ -1262,14 +1460,10 @@ routes['POST /api/slots/launch'] = async (ctx) => {
 
 // painel da equipa (/admin)
 const ADM = require('./admin.js')(routes, {
+  liveAlerts: (days) => LW.list(days),
   db, col, auth, FieldValue, runTx, addTx, getUser, dirty, fail, now, brl, fromCents, toCents, dayStart, dayKey, DAY,
   requireUser, authInfo, authState, endSessions, openWithdrawals, pendingDeposits, depositWindow, ADMIN_EMAILS, BP, SITE,
-  openBets, M, eventInfo: (id) => events.get(id) || null, VF,
-});
-// painel: modalidades, campeonatos, eventos e mercados da equipa
-require('./catalog.js')(routes, {
-  col, runTx, fail, now, fromCents, toCents, M, requireAdmin: ADM.requireAdmin, log: ADM.log,
-  events, openBets, catSports, catLeagues, manualEvents, manualMarkets, applyCatalog, settle: settleQueued,
+  openBets, M, eventInfo: (id) => events.get(id) || null, feedName: FEED.name, settle: settleQueued, feedInfo: () => feedInfo(),
 });
 
 /* Cassino (Decola e Mines)
@@ -1300,6 +1494,34 @@ if (EMULATOR) {
       addTx(t, u.id, 'Saldo de teste', 100000, null);
     });
     return { user: await meUser(u.id) };
+  };
+  /* testes (só nos emuladores): termina um jogo com o resultado dado e corre a liquidação
+     corpo: { id, result: R } (R como em markets.js: { h, a, reg?, alts?, sets?, log?, aces?, dfs? }) */
+  routes['POST /api/dev/finish'] = async (ctx) => {
+    requireUser(ctx);
+    const ev = events.get(String(ctx.body.id || ''));
+    if (!ev) fail(404, 'Jogo não encontrado.');
+    const R = ctx.body.result;
+    if (!R || !Number.isFinite(R.h) || !Number.isFinite(R.a)) fail(400, 'Resultado inválido.');
+    Object.assign(ev, { state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado', result: R, home: { ...ev.home, score: R.h }, away: { ...ev.away, score: R.a } });
+    feedVersion++; feedCache = null; touch(ev.id);
+    await settleQueued();
+    return { ok: true };
+  };
+  // testes: liquida um mercado da equipa como se fosse no painel (sem precisar de conta de administrador)
+  routes['POST /api/dev/settle-market'] = async (ctx) => {
+    requireUser(ctx);
+    return ADM.settleMarket(String(ctx.body.key || ''), ctx.body.results || {}, { email: 'teste@local', id: 'dev' }, 'teste automático');
+  };
+  routes['GET /api/dev/pending'] = async (ctx) => { requireUser(ctx); return { groups: ADM.pendingGroups() }; };
+  // testes: suspende um jogo por N segundos (como depois de um gol)
+  routes['POST /api/dev/suspend'] = async (ctx) => {
+    requireUser(ctx);
+    const ev = events.get(String(ctx.body.id || ''));
+    if (!ev) fail(404, 'Jogo não encontrado.');
+    ev.suspendedUntil = now() + (Number(ctx.body.seconds) || 30) * 1000;
+    feedVersion++; feedCache = null;
+    return { ok: true };
   };
 }
 
@@ -1364,6 +1586,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (req.method === 'POST' && url.pathname === '/api/webhooks/bravopay') return handleWebhook(req, res);
+  if (req.method === 'GET' && url.pathname === '/api/stream') return handleStream(req, res); // odds ao vivo empurradas
 
   const handler = routes[`${req.method} ${url.pathname}`];
   const cookies = [];
@@ -1396,8 +1619,14 @@ const server = http.createServer(async (req, res) => {
     const out = await handler(ctx);
     if (res.headersSent) return;
     if (cookies.length) res.setHeader('Set-Cookie', cookies);
+    const body = JSON.stringify(out);
+    if (body.length > 8192 && acceptsGzip(req)) { // ex.: mercados completos de vários jogos
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' });
+      res.end(zlib.gzipSync(body, { level: 6 }));
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(out));
+    res.end(body);
   } catch (e) {
     if (res.headersSent) return;
     const code = e instanceof HttpError ? e.status : 500;
@@ -1425,23 +1654,24 @@ const server = http.createServer(async (req, res) => {
   }
   if (!ADMIN_EMAILS.size) console.warn('[Admin] Nenhum administrador definido. Ponha ADMIN_EMAILS=seu@email no .env para usar o painel /admin.');
   await Promise.all([
-    watchReady(col.catSports(), catSports, 'modalidades', applyCatalog),
-    watchReady(col.catLeagues(), catLeagues, 'campeonatos', applyCatalog),
-    watchReady(col.manualEvents(), manualEvents, 'eventos da equipa', applyCatalog),
-    watchReady(col.manualMarkets(), manualMarkets, 'mercados da equipa', applyCatalog),
     watchReady(col.openBets(), openBets, 'apostas abertas'),
     watchReady(col.deposits().where('status', '==', 'PENDING'), pendingDeposits, 'depósitos pendentes'),
     watchReady(col.withdrawals().where('status', 'in', ['PENDING', 'PROCESSING']), openWithdrawals, 'pedidos de saque'),
   ]);
   console.log(`Firebase ligado: ${openBets.size} apostas abertas, ${pendingDeposits.size} PIX pendentes, ${openWithdrawals.size} pedidos de saque por tratar.`);
-  console.log('A carregar jogos e odds ao vivo...');
+  await LOGOS.start(); // emblemas (listas da ESPN) antes dos jogos, para já virem com imagem
+  console.log(`A carregar jogos e odds ao vivo (${FEED.name})...`);
+  FEED.ws.start(onWsChange, onWsDown); // odds e placar ao vivo empurrados pela MoviOdds
+  // mercados de jogadores: que ligas trazem estatísticas por jogador (em segundo plano; até lá ficam fechados)
+  FEED.loadPlayerCoverage().catch((e) => console.error('[Jogadores]', e.message));
+  setInterval(() => FEED.loadPlayerCoverage().catch(() => {}), 12 * 3600000);
   await refresh(true);
-  console.log(`${events.size} eventos carregados.`);
+  const nLive = [...events.values()].filter((e) => e.state === 'in').length;
+  console.log(`${events.size} jogos carregados (${nLive} ao vivo).`);
   setInterval(() => refresh(false), FAST_MS);
   setInterval(() => refresh(true), SLOW_MS);
   setInterval(purgeSessions, 3600000);
   if (BP.enabled) {
-    console.log(VF.enabled ? 'Resultados de futebol: ESPN + confirmação na API-Football (divergências vão para o painel).' : 'Resultados: só ESPN (defina APIFOOTBALL_KEY no .env para a dupla verificação no futebol).');
     console.log(`Pagamentos: BravoPay ATIVO (depósitos PIX). Saques: manuais pelo painel /admin.${BP.webhookEnabled ? '' : '\n  Sem BRAVOPAY_WEBHOOK_SECRET: webhooks recusados, confirmação só por consulta.'}`);
     reconcileDeposits();
     setInterval(reconcileDeposits, 30000);

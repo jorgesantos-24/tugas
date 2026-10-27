@@ -8,6 +8,7 @@
     "start": "node server.js",
     "dev": "node scripts/dev.js",
     "verificar": "node scripts/verificar.js",
+    "testar": "node scripts/testar-mercados.js",
     "deploy": "node scripts/deploy.js"
   },
   "engines": {

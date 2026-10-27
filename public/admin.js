@@ -1,5 +1,5 @@
 'use strict';
-/* Painel da equipa: pedidos de saque, depósitos, apostas, esportes e mercados, jogadores e registo de ações. */
+/* Painel da equipa: pedidos de saque, depósitos, apostas, jogadores e registo de ações. */
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -9,6 +9,18 @@ const dt = (t) => (t ? new Date(t).toLocaleString('pt-BR', { dateStyle: 'short',
 const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : `há ${Math.round(m / 1440)} d`; };
 const parseMoney = (s) => { const n = parseFloat(String(s ?? '').replace(/\s|R\$/g, '').replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.')); return isFinite(n) ? Math.round(n * 100) / 100 : 0; };
 const DEP_LABEL = { CREATING: 'a gerar', PENDING: 'à espera do PIX', PAID: 'pago', EXPIRED: 'expirado', FAILED: 'falhou', REFUNDED: 'estornado', CHARGEBACK: 'contestado', REVIEW: 'em revisão', DISMISSED: 'descartado', DUPLICATE: 'duplicado (não creditado)' };
+
+// odds ao vivo: ligação por WebSocket à fonte e navegadores ligados em tempo real
+function liveCard(l) {
+  if (!l) return '';
+  const w = l.ws || {};
+  const bad = Object.entries(w.health || {}).filter(([k, v]) => ['soccer', 'basketball', 'tennis', 'ice_hockey', 'esports'].includes(k) && (v.live !== 'ok' || v.pre !== 'ok'));
+  const state = w.open ? `<b style="color:#22c55e">Tempo real ligado</b>` : `<b style="color:#f59e0b">Só pedidos normais</b>`;
+  const lp = w.livePolls || {};
+  return `<div class="card"><small>Odds ao vivo (WebSocket)</small>${state}<span>${w.withData || 0}/${w.subscribed || 0} jogos seguidos · ${w.kbPerSec || 0} KB/s · ${l.browsers} navegadores · ${l.live} ao vivo` +
+    `${w.connects > 1 ? ` · ${w.connects - 1} religações` : ''}${lp.light || lp.heavy ? ` · pedidos leves ${Math.round((100 * (lp.light || 0)) / ((lp.light || 0) + (lp.heavy || 0)))}%` : ''}` +
+    `${bad.length ? `<br><b style="color:#f59e0b">Fonte com problemas: ${esc(bad.map(([k, v]) => `${k} (${v.live}${v.reason ? `, ${v.reason}` : ''})`).join(', '))}</b>` : ''}</span></div>`;
+}
 
 function toast(msg, kind = '') {
   const el = document.createElement('div');
@@ -32,8 +44,7 @@ function closeModal() { $('#modal').classList.remove('show'); $('#overlay').clas
 const formErr = (msg) => { const el = $('#formErr'); if (el) { el.textContent = msg; el.style.display = msg ? 'block' : 'none'; } };
 const pill = (status, label) => `<span class="pill ${esc(status)}">${esc(label || status)}</span>`;
 
-const A = { me: null, view: 'saques', wdFilter: 'OPEN', depFilter: 'ALL', betFilter: 'late', userQuery: '', userId: null, summary: null,
-  catTab: 'eventos', catArchived: false, catEv: null, cat: null, catData: null, realQuery: '' };
+const A = { me: null, view: 'saques', wdFilter: 'OPEN', depFilter: 'ALL', betFilter: 'late', userQuery: '', userId: null, summary: null };
 
 /* ---------- entrada ---------- */
 async function boot() {
@@ -57,8 +68,8 @@ function showLogin() {
 function renderTabs() {
   const s = A.summary;
   const open = s ? s.withdrawals.pending + s.withdrawals.processing : 0;
-  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Esportes e mercados', 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
-  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') || (k === 'mercados' && A.view === 'mercado-ev') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
+  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Mercados por liquidar', s && s.bets ? s.bets.pendingMarkets : 0], ['aovivo', 'Ao vivo suspeitas', s ? s.liveAlerts24h || 0 : 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
+  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
   document.title = (open ? `(${open}) ` : '') + 'Painel da equipa';
 }
 async function loadSummary() {
@@ -76,8 +87,8 @@ async function render() {
     if (A.view === 'saques') m.innerHTML = await viewWithdrawals();
     else if (A.view === 'depositos') m.innerHTML = await viewDeposits();
     else if (A.view === 'apostas') m.innerHTML = await viewBets();
-    else if (A.view === 'mercados') m.innerHTML = await viewCatalog();
-    else if (A.view === 'mercado-ev') m.innerHTML = A.catEv ? await viewCatEvent() : await viewCatalog();
+    else if (A.view === 'mercados') m.innerHTML = await viewPendingMarkets();
+    else if (A.view === 'aovivo') m.innerHTML = await viewLiveAlerts();
     else if (A.view === 'jogadores') m.innerHTML = await viewUsers();
     else if (A.view === 'jogador') m.innerHTML = await viewUser();
     else if (A.view === 'registo') m.innerHTML = await viewLogs();
@@ -205,17 +216,41 @@ async function viewLogs() {
     <div class="tbl-wrap">${logs.length ? `<table><thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Ainda sem ações.</div>'}</div>`;
 }
 
+/* ---------- apostas ao vivo suspeitas ---------- */
+async function viewLiveAlerts() {
+  const days = A.alertDays || 7;
+  const { alerts, users, goalWindowS, dropPct } = await api('GET', `/api/admin/live-alerts?days=${days}`);
+  const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '—');
+  const urows = users.map((u) => `<tr data-user="${esc(u.userId)}" style="cursor:pointer">
+    <td><b>${esc(u.userName || u.userId)}</b><div class="sub">${esc(u.userEmail)}</div>${u.blocked ? pill('bad', 'bloqueado') : ''}</td>
+    <td>${u.alerts}</td><td><b>${u.favorable}</b></td><td>${u.liveBets}</td>
+    <td>${u.liveBets >= 10 && u.liveFavorable / u.liveBets >= 0.2 ? pill('bad', pct(u.liveFavorable, u.liveBets)) : pct(u.liveFavorable, u.liveBets)}</td>
+    <td>${money(u.staked)}</td></tr>`).join('');
+  const what = (l) => (l.goalAfterS != null ? `gol ${l.goalAfterS}s depois` : `odd caiu ${l.drop}% (${l.odds} → ${l.oddsAfter})`);
+  const arows = alerts.map((a) => `<tr><td>${dt(a.placedAt)}</td>
+    <td><a href="#" class="link" data-user="${esc(a.userId)}">${esc(a.userName || a.userId)}</a><div class="sub">${esc(a.userEmail)}</div></td>
+    <td>${a.legs.map((l) => `<div><b>${esc(l.name)}</b> @${l.odds} · ${esc(l.marketName)}<div class="sub">${esc(l.event)}${l.scoreAt ? ` · ${esc(l.scoreAt)}` : ''}</div></div>`).join('')}</td>
+    <td>${a.legs.map((l) => `<div>${esc(what(l))} ${l.favorable ? pill('bad', 'a favor') : pill('', 'contra')}</div>`).join('')}</td>
+    <td>${money(a.stake)}<div class="sub">prêmio ${money(a.potential)}</div><div class="sub">${esc(a.betId)}</div></td></tr>`).join('');
+  return `<div class="bar"><h2>Apostas ao vivo suspeitas</h2>
+      <select id="alertDays">${[1, 7, 30, 90].map((d) => `<option value="${d}" ${d === days ? 'selected' : ''}>últimos ${d} dia${d > 1 ? 's' : ''}</option>`).join('')}</select></div>
+    <p class="sub" style="margin:0 0 12px">Cada aposta ao vivo é revista 20 s e 45 s depois de aceite. Fica aqui se houve gol até ${goalWindowS} s depois ou se a odd caiu ${dropPct}% ou mais.
+      "A favor" = o lance ajudou a aposta. Gols acontecem: uma ou outra é normal. O sinal de alerta é um jogador com muitas apostas ao vivo e uma percentagem alta "a favor" (marcado a vermelho a partir de 20% com 10+ apostas) —
+      quer dizer que vê os lances antes da casa. Nesse caso: aumentar a espera dessa modalidade (LIVE_DELAY_… no .env) ou bloquear a conta na ficha do jogador.</p>
+    <h3 style="margin:10px 0">Por jogador</h3>
+    <div class="tbl-wrap">${users.length ? `<table><thead><tr><th>Jogador</th><th>Marcadas</th><th>A favor</th><th>Apostas ao vivo (total)</th><th>% a favor (total)</th><th>Apostado nas marcadas</th></tr></thead><tbody>${urows}</tbody></table>` : '<div class="empty">Nenhuma aposta ao vivo marcada neste período.</div>'}</div>
+    ${alerts.length ? `<h3 style="margin:18px 0 10px">Apostas marcadas</h3><div class="tbl-wrap"><table><thead><tr><th>Aceite</th><th>Jogador</th><th>Seleção</th><th>O que aconteceu</th><th>Valor</th></tr></thead><tbody>${arows}</tbody></table></div>` : ''}`;
+}
+
 /* ---------- apostas ---------- */
 const BET_LABEL = { open: 'em aberto', won: 'ganha', lost: 'perdida', void: 'devolvida', cashout: 'cash out' };
 const RES_LABEL = { won: 'Ganhou', lost: 'Perdeu', void: 'Devolvida', halfwon: 'Meio ganho', halflost: 'Meia perda' };
-const VERIFY_LABEL = { ok: 'confirmado pela API-Football', pending: 'à espera da confirmação', mismatch: 'PLACAR DIVERGENTE', notfound: 'não encontrado na API-Football' };
+// jogo sem resultado final na fonte (parou antes do fim, placar ilegível): a equipa confere e liquida à mão
 const legVerify = (l) => {
+  if (l.result) return '';
   const fs = `<a href="${esc(l.flashscore)}" target="_blank" rel="noopener" class="copy">ver no Flashscore</a>`;
-  const v = l.verify;
-  if (!v) return l.now && l.now.state === 'post' && !l.result ? `<div class="sub">${fs}</div>` : '';
-  const cls = v.state === 'ok' ? 'ok' : v.state === 'pending' ? '' : 'bad';
-  const det = v.state === 'mismatch' ? ` · ESPN ${esc(v.espn)} × API ${esc(v.other)} (${esc(v.status)})` : v.error ? ` · ${esc(v.error)}` : '';
-  return `<div class="sub" style="margin-top:3px">${pill(cls, VERIFY_LABEL[v.state] || v.state)}${det} ${fs}</div>`;
+  if (l.issue === 'unconfirmed') return `<div class="sub" style="margin-top:3px">${pill('bad', 'sem resultado final')}${l.note ? ' · ' + esc(l.note) : ''} ${fs}</div>`;
+  return l.now && (l.now.state === 'post' || l.now.clock === 'Aguardando resultado') ? `<div class="sub">${fs}</div>` : '';
 };
 const legNow = (l) => legNowBase(l) + legVerify(l);
 const legNowBase = (l) => {
@@ -238,7 +273,8 @@ async function viewBets() {
       <div class="card"><small>Apostas em aberto</small><b>${summary.open}</b><span>${money(summary.staked)} apostados</span></div>
       <div class="card"><small>Prêmio máximo em risco</small><b>${money(summary.exposure)}</b><span>se todas ganharem</span></div>
       <div class="card"><small>Precisam de atenção</small><b>${summary.late}</b><span>atrasadas ou placar não confirmado</span></div>
-      <div class="card"><small>Confirmação de resultados</small><b>${summary.verifyOn ? 'ESPN + API-Football' : 'Só ESPN'}</b><span>${summary.verifyOn ? (summary.quota.error ? 'erro: ' + esc(summary.quota.error) : summary.quota.remaining != null ? summary.quota.remaining + ' de ' + summary.quota.limit + ' pedidos restantes hoje' : 'ainda sem pedidos hoje') : 'defina APIFOOTBALL_KEY no .env'}</span></div>
+      <div class="card"><small>Fonte dos resultados</small><b>${esc(summary.feed || '—')}</b><span>cada placar é lido 2 vezes (5 min de intervalo) antes de pagar</span></div>
+      ${liveCard(summary.live)}
     </div>
     <div class="bar"><h2>Apostas</h2>
       <select id="betFilter"><option value="late" ${A.betFilter === 'late' ? 'selected' : ''}>Precisam de atenção</option><option value="open" ${A.betFilter === 'open' ? 'selected' : ''}>Todas em aberto</option></select>
@@ -246,6 +282,35 @@ async function viewBets() {
     <div class="tbl-wrap">${bets.length ? `<table><thead><tr><th>Feita em</th><th>Jogador</th><th>Seleções e estado do jogo</th><th class="num">Valor</th><th class="num">Prêmio</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${A.betFilter === 'late' ? 'Nenhuma aposta precisa de atenção. A liquidação automática está em dia.' : 'Nenhuma aposta em aberto.'}</div>`}</div>
     <p class="note" style="text-align:left">As apostas são liquidadas sozinhas quando o jogo termina. Use <b>Liquidar</b> só quando o feed falhar (jogo sem resultado) e <b>Corrigir</b> (no perfil do jogador) quando o resultado automático estiver errado. Tudo fica no Registo.</p>`;
 }
+/* ---------- mercados por liquidar ----------
+   Mercados que o site não decide sozinho (escanteios, cartões, jogadores...) e os automáticos que a fonte não
+   deixou decidir. A equipa confere o resultado (ex.: no Flashscore) e marca cada seleção: vale para todas as apostas. */
+async function viewPendingMarkets() {
+  const { groups } = await api('GET', '/api/admin/markets/pending');
+  A.pending = groups;
+  const done = groups.filter((g) => g.state === 'post'), later = groups.filter((g) => g.state !== 'post');
+  const card = (g, i) => `<div class="card" style="margin-bottom:12px">
+    <form class="pmForm" data-i="${i}">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:baseline"><b>${esc(g.event)}</b><span class="sub">${esc(g.leagueName || '')} · ${dt(g.startsAt)}</span>
+        ${g.state === 'post' ? pill('ok', 'terminado' + (g.result ? ' · ' + g.result : '')) : g.state === 'in' ? pill('PROCESSING', 'ao vivo') : pill('', 'por começar')}
+        ${g.auto ? pill('REVIEW', 'automático sem decisão') : ''}</div>
+      <div style="margin:6px 0 8px"><b>${esc(g.marketName)}</b>${g.note ? `<div class="sub">${esc(g.note)}</div>` : ''}
+        <a href="https://www.google.com/search?q=${encodeURIComponent('flashscore ' + g.event.replace(' x ', ' '))}" target="_blank" rel="noopener" class="copy">ver no Flashscore</a></div>
+      <table><thead><tr><th>Seleção</th><th class="num">Odd</th><th class="num">Apostas</th><th class="num">Apostado</th><th class="num">Prêmio se ganhar</th><th>Resultado</th></tr></thead><tbody>
+      ${g.picks.map((p) => `<tr><td>${esc(p.name)}</td><td class="num">${p.odds.toFixed(2)}</td><td class="num">${p.bets}</td><td class="num">${money(p.stake)}</td><td class="num">${money(p.potential)}</td>
+        <td><select class="inp" style="width:130px" data-pick="${esc(p.pick)}"><option value="">—</option><option value="won">Ganhou</option><option value="lost">Perdeu</option><option value="void">Devolvida</option></select></td></tr>`).join('')}
+      </tbody></table>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><input class="inp" name="reason" placeholder="Fonte / motivo (ex.: Flashscore: 11 escanteios)" style="flex:1;min-width:220px" required minlength="3">
+        <button class="btn btn-green" type="submit">Liquidar mercado</button></div>
+    </form></div>`;
+  return `<div class="bar"><h2>Mercados por liquidar</h2><button class="btn btn-ghost" data-action="refresh">Atualizar</button></div>
+    <p class="note" style="text-align:left">Mercados sem resultado automático. Confira o resultado numa fonte (Flashscore, site da liga) e marque cada seleção.
+      As apostas com todas as seleções decididas são pagas na hora. Tudo fica no Registo. Seleções só aparecem aqui se alguém apostou nelas.</p>
+    ${done.length ? `<div class="section"><h3>Jogos terminados (${done.length})</h3>${done.map((g) => card(g, groups.indexOf(g))).join('')}</div>` : ''}
+    ${later.length ? `<div class="section"><h3>Ainda a decorrer ou por começar (${later.length})</h3>${later.map((g) => card(g, groups.indexOf(g))).join('')}</div>` : ''}
+    ${groups.length ? '' : '<div class="tbl-wrap"><div class="empty">Nenhum mercado por liquidar.</div></div>'}`;
+}
+
 let settleCtx = null;
 async function settleModal(uid, id, expect) {
   const { bet } = await api('GET', `/api/admin/bet?userId=${encodeURIComponent(uid)}&id=${encodeURIComponent(id)}`);
@@ -273,354 +338,6 @@ function updateSettlePreview() {
   el.innerHTML = `${money(payout)} <span class="sub">(saldo do jogador ${diff >= 0 ? '+' : ''}${money(diff)})</span>`;
 }
 
-/* ---------- esportes e mercados ---------- */
-const EV_STATE = { pre: ['PENDING', 'por começar'], in: ['PROCESSING', 'ao vivo'], post: ['', 'encerrado'] };
-const MK_STATE = { open: ['ok', 'aberto'], suspended: ['REVIEW', 'suspenso'], settled: ['', 'liquidado'] };
-const RES_PILL = { won: ['ok', 'Ganhou'], lost: ['bad', 'Perdeu'], void: ['', 'Devolvida'] };
-const SPORT_ICONS = ['🎾', '🏐', '🥊', '🥋', '🏎️', '🎮', '🏓', '🏉', '🤾', '⛳', '🏇', '🎯', '🏸', '🚴', '🏊', '🎱'];
-const fmtOddIn = (o) => String(o.toFixed(2));
-const localInput = (t) => { const d = new Date(t); return new Date(t - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16); };
-const evState = (ev) => pill(EV_STATE[ev.state][0], EV_STATE[ev.state][1] + (ev.score ? ` ${ev.score.h}-${ev.score.a}` : '') + (ev.state === 'in' && ev.clock ? ' · ' + ev.clock : ''));
-const evName = (ev) => (ev.outright ? `🏆 ${ev.home}` : `${ev.home}${ev.away ? ' x ' + ev.away : ''}`);
-async function catalog(fresh) { if (fresh || !A.cat) A.cat = await api('GET', '/api/admin/catalog'); return A.cat; }
-
-async function viewCatalog() {
-  const subs = [['eventos', 'Eventos da equipa'], ['jogos', 'Mercados em jogos reais'], ['campeonatos', 'Modalidades e campeonatos']];
-  const head = `<div class="bar"><h2>Esportes e mercados</h2></div>
-    <div class="subtabs">${subs.map(([k, l]) => `<button class="${A.catTab === k ? 'active' : ''}" data-cattab="${k}">${l}</button>`).join('')}</div>`;
-  if (A.catTab === 'jogos') return head + await viewRealEvents();
-  const cat = await catalog(true);
-  return head + (A.catTab === 'campeonatos' ? viewLeagues(cat) : viewManualEvents(cat));
-}
-
-function viewManualEvents(cat) {
-  const list = cat.events.filter((ev) => ev.archived === A.catArchived);
-  const rows = list.map((ev) => `<tr>
-    <td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${ev.outright ? pill(ev.startsAt > Date.now() ? 'ok' : 'REVIEW', ev.startsAt > Date.now() ? 'longo prazo · aberto' : 'prazo terminado') : evState(ev)}</td>
-    <td>${ev.markets ? `${ev.open} abertos de ${ev.markets}` : '<span class="sub">nenhum</span>'}${ev.toSettle && ev.state === 'post' ? `<div class="sub" style="color:var(--yellow)">${ev.toSettle} por liquidar</div>` : ''}</td>
-    <td class="num">${ev.bets || ''}</td>
-    <td><button class="btn btn-green" style="padding:6px 10px;font-size:12px" data-catev="${esc(ev.id)}">Gerir mercados</button></td></tr>`).join('');
-  return `<div class="bar"><h2 style="font-size:15px">Eventos criados pela equipa</h2>
-      <select id="catArchived"><option value="0" ${A.catArchived ? '' : 'selected'}>Ativos</option><option value="1" ${A.catArchived ? 'selected' : ''}>Arquivados</option></select>
-      <button class="btn btn-green" data-action="newEvent">+ Novo evento</button></div>
-    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>Início</th><th>Campeonato</th><th>Evento</th><th>Estado</th><th>Mercados</th><th class="num">Apostas abertas</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : `<div class="empty">${A.catArchived ? 'Nenhum evento arquivado.' : 'Ainda não há eventos. Crie um com "+ Novo evento" (pode ser num campeonato da ESPN ou num criado por si em "Modalidades e campeonatos").'}</div>`}</div>
-    <p class="note" style="text-align:left">Num evento da equipa, todos os mercados e odds são definidos por si. O placar e o estado (por começar / ao vivo / encerrado) também são atualizados à mão. As apostas são pagas quando <b>liquidar</b> cada mercado.</p>`;
-}
-
-function viewLeagues(cat) {
-  const vis = (x) => (x.hidden ? pill('REVIEW', 'oculto') : pill('ok', 'no site'));
-  const sportRows = cat.sports.map((s) => `<tr><td style="font-size:18px">${esc(s.icon)}</td><td><b>${esc(s.name)}</b></td><td>${s.builtin ? '<span class="sub">automática (ESPN)</span>' : 'equipa'}</td><td class="num">${s.leagues}</td>
-    <td>${s.builtin ? '' : vis(s)}</td>
-    <td>${s.builtin ? '' : `<div class="acts"><button class="btn btn-ghost" data-sportedit="${esc(s.key)}">Editar</button><button class="btn btn-ghost" data-sporthide="${esc(s.key)}">${s.hidden ? 'Mostrar' : 'Ocultar'}</button><button class="btn btn-ghost" data-sportdel="${esc(s.key)}">Apagar</button></div>`}</td></tr>`).join('');
-  const mine = cat.leagues.filter((l) => !l.builtin), auto = cat.leagues.filter((l) => l.builtin);
-  const lgRows = mine.map((l) => `<tr><td>${esc(l.sportName)}</td><td><b>${esc(l.name)}</b>${l.rules ? `<div class="sub">⚡ odds ao vivo: ${esc(rulesSummary(l.rules))}</div>` : ''}</td><td>${esc(l.country || '—')}</td><td class="num">${l.events}</td><td>${vis(l)}</td>
-    <td><div class="acts"><button class="btn btn-ghost" data-lgedit="${esc(l.key)}">Editar</button><button class="btn btn-ghost" data-lghide="${esc(l.key)}">${l.hidden ? 'Mostrar' : 'Ocultar'}</button><button class="btn btn-ghost" data-lgdel="${esc(l.key)}">Apagar</button></div></td></tr>`).join('');
-  return `<div class="bar"><h2 style="font-size:15px">Modalidades</h2><button class="btn btn-green" data-action="newSport">+ Nova modalidade</button></div>
-    <div class="tbl-wrap"><table><thead><tr><th></th><th>Modalidade</th><th>Origem</th><th class="num">Campeonatos</th><th>Estado</th><th></th></tr></thead><tbody>${sportRows}</tbody></table></div>
-    <div class="section"><div class="bar"><h2 style="font-size:15px">Campeonatos da equipa</h2><button class="btn btn-green" data-action="newLeague">+ Novo campeonato</button></div>
-    <div class="tbl-wrap">${mine.length ? `<table><thead><tr><th>Modalidade</th><th>Campeonato</th><th>País/região</th><th class="num">Eventos</th><th>Estado</th><th></th></tr></thead><tbody>${lgRows}</tbody></table>` : '<div class="empty">Nenhum campeonato criado pela equipa.</div>'}</div></div>
-    <p class="note" style="text-align:left">Modalidades e campeonatos novos aparecem no menu do site assim que tiverem eventos. Campeonatos automáticos da ESPN (${auto.length}): ${esc(auto.map((l) => l.name).join(', '))}.</p>`;
-}
-
-async function viewRealEvents() {
-  const { events } = await api('GET', '/api/admin/catalog/real');
-  const q = A.realQuery.trim().toLowerCase();
-  const list = events.filter((ev) => !q || `${ev.home} ${ev.away} ${ev.leagueName}`.toLowerCase().includes(q)).slice(0, 200);
-  const rows = list.map((ev) => `<tr><td>${dt(ev.startsAt)}</td><td>${esc(ev.leagueName)}</td><td><b>${esc(evName(ev))}</b></td><td>${evState(ev)}</td>
-    <td>${ev.markets ? `${ev.markets}${ev.toSettle ? ` · <span style="color:var(--yellow)">${ev.toSettle} por liquidar</span>` : ''}` : '<span class="sub">—</span>'}</td><td class="num">${ev.bets || ''}</td>
-    <td><button class="btn ${ev.markets ? 'btn-green' : 'btn-ghost'}" style="padding:6px 10px;font-size:12px" data-catev="${esc(ev.id)}">${ev.markets ? 'Gerir mercados' : '+ Mercados'}</button></td></tr>`).join('');
-  return `<div class="bar"><h2 style="font-size:15px">Jogos do feed da ESPN</h2>
-      <form id="realSearch" style="display:flex;gap:8px"><input name="q" value="${esc(A.realQuery)}" placeholder="Equipa ou campeonato" style="min-width:220px"><button class="btn btn-ghost" type="submit">Filtrar</button></form></div>
-    <div class="tbl-wrap">${list.length ? `<table><thead><tr><th>Início</th><th>Campeonato</th><th>Jogo</th><th>Estado</th><th>Mercados da equipa</th><th class="num">Apostas abertas</th><th></th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Nenhum jogo encontrado.</div>'}</div>
-    <p class="note" style="text-align:left">Os mercados da ESPN (resultado, totais, handicap...) continuam automáticos. Aqui acrescenta mercados seus a um jogo real (ex.: escanteios, cartões, marca primeiro), com odds e liquidação feitas pela equipa.</p>`;
-}
-
-async function viewCatEvent() {
-  const d = await api('GET', '/api/admin/catalog/event?id=' + encodeURIComponent(A.catEv));
-  A.catData = d;
-  const ev = d.event;
-  let info;
-  if (ev.manual && ev.outright) {
-    const cat = await catalog();
-    info = `<div class="card"><form id="evForm" data-id="${esc(ev.id)}" class="ev-form">
-      <label>Campeonato<select class="mini" name="league">${leagueOptions(cat, ev.league)}</select></label>
-      <label style="grid-column:span 2">Título<input class="mini" name="home" value="${esc(ev.home)}" required maxlength="80"></label>
-      <label>Apostas fecham em<input class="mini" type="datetime-local" name="startsAt" value="${localInput(ev.startsAt)}" required></label>
-      <label>Estado<select class="mini" name="state"><option value="pre" ${ev.state !== 'post' ? 'selected' : ''}>em aberto</option><option value="post" ${ev.state === 'post' ? 'selected' : ''}>terminado</option></select></label>
-      <button class="btn btn-green" type="submit">Guardar evento</button>
-    </form><div class="form-err" id="formErr"></div>
-    <p class="sub" style="margin:8px 0 0">${ev.startsAt > Date.now() ? `Apostas abertas até ${dt(ev.startsAt)}; depois fecham sozinhas.` : 'O prazo terminou: as apostas estão fechadas. Quando souber o resultado, liquide cada mercado (marque o vencedor; os outros ficam "Perdeu").'}</p>
-    <div class="acts" style="margin-top:10px"><button class="btn btn-ghost" data-archive="${esc(ev.id)}" data-val="${ev.archived ? '0' : '1'}">${ev.archived ? 'Reativar no site' : 'Arquivar (tirar do site)'}</button></div></div>`;
-  } else if (ev.manual) {
-    const cat = await catalog();
-    info = `<div class="card"><form id="evForm" data-id="${esc(ev.id)}" class="ev-form">
-      <label>Campeonato<select class="mini" name="league">${leagueOptions(cat, ev.league)}</select></label>
-      <label>Casa / participante 1<input class="mini" name="home" value="${esc(ev.home)}" required></label>
-      <label>Fora / participante 2<input class="mini" name="away" value="${esc(ev.away)}" required></label>
-      <label>Início<input class="mini" type="datetime-local" name="startsAt" value="${localInput(ev.startsAt)}" required></label>
-      <label>Estado<select class="mini" name="state">${Object.entries(EV_STATE).map(([k, [, l]]) => `<option value="${k}" ${ev.state === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      ${d.live && d.live.bestOf > 1 ? `<label>Mapas casa<input class="mini" name="mapsH" type="number" min="0" max="9" value="${d.live.state.mh}"></label>
-      <label>Mapas fora<input class="mini" name="mapsA" type="number" min="0" max="9" value="${d.live.state.ma}"></label>` : ''}
-      <label>Placar casa${d.rules ? ` (${esc(d.rules.unit)})` : ''}<input class="mini" name="scoreH" type="number" min="0" max="999" value="${ev.score ? ev.score.h : ''}"></label>
-      <label>Placar fora${d.rules ? ` (${esc(d.rules.unit)})` : ''}<input class="mini" name="scoreA" type="number" min="0" max="999" value="${ev.score ? ev.score.a : ''}"></label>
-      <label>Tempo (texto livre)<input class="mini" name="clock" value="${esc(ev.clock)}" placeholder="Ex.: 2º tempo 67'"></label>
-      <button class="btn btn-green" type="submit">Guardar evento</button>
-    </form><div class="form-err" id="formErr"></div>
-    <div class="acts" style="margin-top:10px"><button class="btn btn-ghost" data-archive="${esc(ev.id)}" data-val="${ev.archived ? '0' : '1'}">${ev.archived ? 'Reativar no site' : 'Arquivar (tirar do site)'}</button></div></div>
-    ${liveCard(d)}`;
-  } else {
-    info = `<div class="card"><div class="kv2"><span>Campeonato</span><b>${esc(ev.leagueName)}</b></div><div class="kv2"><span>Início</span><b>${dt(ev.startsAt)}</b></div>
-      <div class="kv2"><span>Estado (feed da ESPN)</span><b>${evState(ev)}</b></div>
-      <p class="sub" style="margin:8px 0 0">Jogo real: placar e mercados automáticos vêm da ESPN. Os mercados abaixo são só os da equipa.</p></div>`;
-  }
-  let lastG;
-  const markets = d.markets.map((m) => {
-    const g = m.group || null;
-    const head = new Set(d.markets.map((x) => x.group).filter(Boolean)).size > 1 && g !== lastG ? `<h3 class="map-sec">${esc(g || 'Partida')}</h3>` : '';
-    lastG = g;
-    return head + marketCard(m);
-  }).join('');
-  const pendingN = d.markets.filter((m) => m.status !== 'settled').length;
-  const ready = d.markets.filter((m) => m.status !== 'settled' && m.sels.length && m.sels.every((s) => s.suggest)).length;
-  return `<div class="bar"><h2>${esc(evName(ev))}</h2><span class="sub">${esc(ev.leagueName)}</span>${ready ? `<button class="btn btn-green" data-settleall="1">Liquidar tudo pelo placar (${ready})</button>` : ''}<button class="btn btn-ghost" data-go="mercados">← Voltar</button></div>
-    ${ev.state === 'post' && pendingN ? `<div class="warn">O evento terminou e há ${pendingN} mercado(s) por liquidar. As apostas só são pagas depois de liquidar.</div>` : ''}
-    ${info}
-    <div class="section"><div class="bar"><h2 style="font-size:15px">Mercados (${d.markets.length})</h2>
-      ${pendingN ? `<button class="btn btn-ghost" data-mkstatus="*|suspended">Suspender todos</button><button class="btn btn-ghost" data-mkstatus="*|open">Abrir todos</button>` : ''}
-      <button class="btn btn-green" data-action="newMarket">+ Novo mercado</button></div>
-    ${markets || '<div class="tbl-wrap"><div class="empty">Sem mercados. Crie o primeiro com "+ Novo mercado".</div></div>'}</div>`;
-}
-
-function liveCard(d) {
-  const ev = d.event, lv = d.live, R = d.rules;
-  if (!R) return `<div class="card" style="margin-top:12px"><b>Odds automáticas ao vivo</b><p class="sub" style="margin:6px 0 0">Para as odds acompanharem o placar, defina as <b>regras do jogo</b> do campeonato ${esc(ev.leagueName)} (Modalidades e campeonatos → Editar).</p></div>`;
-  const st = lv.state, last = st.history[st.history.length - 1];
-  const [h, a] = st.over && last ? [last.h, last.a] : [st.a, st.b];
-  const maps = lv.bestOf > 1 ? `<div class="lv-maps">${st.over ? 'Partida terminada' : `${esc(R.mapName)} ${st.curMap} (melhor de ${lv.bestOf})`} · ${esc(R.mapName)}s <b>${st.mh}-${st.ma}</b>${st.history.length ? ' · ' + st.history.map((m, i) => `${esc(R.mapName)} ${i + 1}: ${m.h}-${m.a}`).join(' · ') : ''}</div>` : '';
-  const btn = (side, name) => `<button class="btn btn-green lv-btn" data-round="${side}" ${st.over ? 'disabled' : ''}>+1 ${esc(R.unit.replace(/s$/, ''))}<small>${esc(name)}</small></button>`;
-  return `<div class="card live-card">
-    <div class="mk-head"><b class="grow">Placar ao vivo ${lv.auto ? pill('ok', 'odds automáticas ligadas') : pill('', 'odds automáticas desligadas')}</b><span class="sub">${esc(rulesSummary(R))}</span></div>
-    <div class="lv-score">${btn('h', ev.home)}<div class="lv-num">${h} : ${a}</div>${btn('a', ev.away)}</div>
-    ${maps}
-    <div class="acts" style="justify-content:center;margin-top:8px"><button class="btn btn-ghost" data-round="undo" ${lv.rounds ? '' : 'disabled'}>↶ Desfazer último round</button></div>
-    <p class="sub" style="text-align:center;margin:8px 0 14px">Cada clique conta 1 round, põe o evento ao vivo e recalcula as odds dos mercados automáticos. ${esc(R.mapName)} ganho passa sozinho ao seguinte; no fim, o evento fica encerrado.</p>
-    <form id="liveForm" class="ev-form">
-      <label class="check" style="margin:0"><input type="checkbox" name="auto" ${lv.auto ? 'checked' : ''}> Odds automáticas ao vivo</label>
-      <label>Melhor de<select class="mini" name="bestOf">${[1, 3, 5, 7].map((n) => `<option ${lv.bestOf === n ? 'selected' : ''}>${n}</option>`).join('')}</select></label>
-      <label>Chance de ${esc(ev.home)} ganhar, antes do jogo (%)<input class="mini" name="strength" inputmode="decimal" placeholder="${lv.prematch ?? lv.fromOdds ?? 'ex.: 65'}"></label>
-      <button class="btn btn-green" type="submit">Guardar</button>
-      <button type="button" class="btn btn-ghost" data-calib="1">Usar odds do Vencedor${lv.fromOdds != null ? ` (${lv.fromOdds}%)` : ''}</button>
-    </form>
-    <p class="sub" style="margin:8px 0 0">Mercados padrão (abrem ao ligar as odds automáticas): por ${esc(R.mapName)} — vencedor, total e handicap de ${esc(R.unit)} e corridas a X ${esc(R.unit)}; só antes do jogo — ${esc(R.unit)} de cada equipa, margem de vitória e placar exato (o placar do 1º tempo fica também ao vivo, até ao intervalo)${lv.bestOf > 1 ? `; na série — total e handicap de ${esc(R.mapName)}s, placar exato e ambas ganham um ${esc(R.mapName)}` : ''}. As odds seguem a força das equipas. <button type="button" class="btn btn-ghost" style="padding:5px 10px;font-size:12px" data-openmaps="1">Abrir mercados padrão</button></p>
-    <p class="sub" style="margin:10px 0 0">${lv.p != null ? `Modelo: ${esc(ev.home)} ganha cada round com <b>${(lv.p * 100).toFixed(1)}%</b> → chance de ganhar a partida antes do jogo <b>${lv.prematch}%</b>, agora <b>${lv.chance}%</b>.` : 'Força ainda não calibrada: crie um mercado do tipo "Vencedor da partida" e clique em "Usar odds do Vencedor" (ou escreva a chance).'}</p>
-  </div>`;
-}
-const sideTag = (s, ev) => {
-  if (!s.side) return '';
-  const nm = { home: ev.home, away: ev.away, over: `mais de ${s.line}`, under: `menos de ${s.line}` }[s.side];
-  const ln = (s.side === 'home' || s.side === 'away') && s.line != null ? ` ${s.line > 0 ? '+' : ''}${s.line}` : '';
-  return `<div class="sub">→ ${esc(nm)}${ln}${s.hidden ? ' · linha antiga (fora do site)' : s.locked ? ' · 🔒 fechada no site' : ''}${s.suggest ? ` · placar diz: ${RES_PILL[s.suggest][1].toLowerCase()}` : ''}</div>`;
-};
-const typeSelect = (auto) => {
-  const T = A.cat?.types || {};
-  return `<select class="mini" name="atype" title="Como as odds deste mercado são definidas"><option value="">Odds à mão</option>${Object.entries(T).filter(([, t]) => !t.gen).map(([k, t]) => `<option value="${k}" ${auto?.type === k ? 'selected' : ''}>⚡ ${esc(t.label)}</option>`).join('')}</select>
-    <label class="sub" style="display:flex;gap:4px;align-items:center">mapa<input class="mini" name="amap" type="number" min="1" max="9" style="width:52px" value="${auto?.map || 1}"></label>
-    <label class="sub" style="display:flex;gap:4px;align-items:center" title="Handicap e totais: a linha acompanha o placar (as linhas antigas saem do site)"><input type="checkbox" name="amove" ${auto?.lines === 'fixed' ? '' : 'checked'}> linhas móveis</label>`;
-};
-
-function marketCard(m) {
-  const [cls, label] = MK_STATE[m.status];
-  const betsN = m.sels.reduce((s, x) => s + x.bets, 0);
-  const T = m.auto && A.cat?.types?.[m.auto.type];
-  if (T && T.gen && m.status !== 'settled') {
-    // mercado do pacote padrão: odds e seleções só do modelo
-    const vis = m.sels.filter((s) => !s.hidden || s.bets);
-    const when = T.pre ? 'só antes do jogo' : 'antes e durante o jogo';
-    return `<div class="mk-card"><div class="mk-head"><b class="grow">${esc(m.name)}</b>${vis.some((s) => !s.hidden) ? pill(cls, label) : pill('REVIEW', 'fora do site')}<span class="sub">⚡ automático · ${when}</span></div>
-      ${vis.length ? `<table><tbody>${vis.map((s) => `<tr${s.hidden ? ' class="old-line"' : ''}><td>${esc(s.name)}${s.suggest ? `<div class="sub">placar diz: ${RES_PILL[s.suggest][1].toLowerCase()}</div>` : ''}</td><td class="num">${s.hidden ? '—' : s.locked ? '🔒' : s.odds.toFixed(2)}</td><td class="num">${s.bets ? `${s.bets} aposta(s) · ${money(s.stake)}` : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="sub" style="margin:0">Sem seleções no site neste momento.</p>'}
-      <div class="mk-foot"><button type="button" class="btn btn-ghost" data-mkstatus="${esc(m.id)}|${m.status === 'open' ? 'suspended' : 'open'}">${m.status === 'open' ? 'Suspender' : 'Abrir'}</button>
-        <button type="button" class="btn btn-ghost" data-mksettle="${esc(m.id)}">Liquidar</button>${betsN ? '' : `<button type="button" class="btn btn-ghost" data-mkdel="${esc(m.id)}">Apagar</button>`}</div></div>`;
-  }
-  if (m.status === 'settled') {
-    return `<div class="mk-card settled"><div class="mk-head"><b class="grow">${esc(m.name)}</b>${pill(cls, label)}<span class="sub">${dt(m.settledAt)} · ${esc(m.settledBy || '')}</span></div>
-      <table><tbody>${m.sels.map((s) => `<tr><td>${esc(s.name)}</td><td class="num">${s.odds.toFixed(2)}</td><td>${pill(...RES_PILL[s.result])}</td></tr>`).join('')}</tbody></table>
-      ${m.note ? `<div class="sub" style="margin-top:6px">${esc(m.note)}</div>` : ''}</div>`;
-  }
-  const rows = m.sels.map((s) => selRow(s, A.catData.event)).join('');
-  const oldN = m.sels.filter((s) => s.hidden).length;
-  const closed = m.auto && m.sels.length && m.sels.every((s) => s.hidden);
-  return `<form class="mk-card mkForm" data-mk="${esc(m.id)}">
-    <div class="mk-head"><input class="mini grow" name="name" value="${esc(m.name)}" required maxlength="80" title="Nome do mercado">${closed ? pill('REVIEW', 'fora do site (reta final)') : pill(cls, label)}${A.catData.event.manual ? typeSelect(m.auto) : ''}
-      <label class="sub" style="display:flex;gap:6px;align-items:center">Aposta máx. R$<input class="mini" name="maxStake" style="width:90px" value="${m.maxStake != null ? String(m.maxStake).replace('.', ',') : ''}" placeholder="sem limite"></label>
-      <label class="sub" style="display:flex;gap:6px;align-items:center" title="Depois desta data o mercado fecha sozinho (opcional)">Fecha em<input class="mini" type="datetime-local" name="mclose" value="${m.closesAt ? localInput(m.closesAt) : ''}"></label>
-      ${m.closesAt && m.closesAt <= Date.now() ? pill('REVIEW', 'prazo terminado') : ''}</div>
-    <div class="tbl-wrap" style="border:0"><table><thead><tr><th>Seleção</th><th>Odd</th><th class="num">Apostas</th><th class="num">Apostado</th><th class="num" title="Prêmio a pagar se esta seleção ganhar (apostas simples)">A pagar se ganhar</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>
-    <div class="mk-foot"><button type="button" class="btn btn-ghost" data-seladd="${esc(m.id)}">+ Seleção</button>
-      <button type="submit" class="btn btn-green">Guardar odds</button>
-      <button type="button" class="btn btn-ghost" data-mkstatus="${esc(m.id)}|${m.status === 'open' ? 'suspended' : 'open'}">${m.status === 'open' ? 'Suspender' : 'Abrir'}</button>
-      <button type="button" class="btn btn-ghost" data-mksettle="${esc(m.id)}">Liquidar</button>
-      ${betsN ? '' : `<button type="button" class="btn btn-ghost" data-mkdel="${esc(m.id)}">Apagar</button>`}
-      <span class="sub">${betsN ? `${betsN} seleção(ões) em apostas abertas` : 'sem apostas'}${m.maxStake != null ? ` · máx. ${money(m.maxStake)} por aposta` : ''}${m.auto ? ' · ⚡ odds recalculadas a cada round (o que escrever à mão vale até ao próximo round)' : ''}${oldN ? ` · ${oldN} linha(s) antiga(s) fora do site` : ''}</span></div>
-  </form>`;
-}
-const selRow = (s = {}, ev) => `<tr data-sel="${esc(s.id || '')}"${s.hidden ? ` class="old-line"${s.bets ? '' : ' style="display:none"'}` : ''}>
-  <td><input class="mini" name="sname" value="${esc(s.name || '')}" required maxlength="60" style="width:100%">${ev ? sideTag(s, ev) : ''}</td>
-  <td><input class="mini odd-in" name="sodds" value="${s.odds ? fmtOddIn(s.odds) : ''}" required inputmode="decimal" placeholder="1.85"></td>
-  <td class="num">${s.bets || ''}</td><td class="num">${s.bets ? money(s.stake) : ''}</td><td class="num">${s.bets ? money(s.singles) : ''}</td>
-  <td>${s.bets ? '' : '<button type="button" class="rm" data-selrm="1" title="Remover">×</button>'}</td></tr>`;
-
-function leagueOptions(cat, cur) {
-  const groups = new Map();
-  for (const l of cat.leagues) { if (!groups.has(l.sportName)) groups.set(l.sportName, []); groups.get(l.sportName).push(l); }
-  return [...groups].map(([sp, ls]) => `<optgroup label="${esc(sp)}">${ls.map((l) => `<option value="${esc(l.key)}" ${l.key === cur ? 'selected' : ''}>${esc(l.name)}${l.builtin ? '' : ' (equipa)'}${l.hidden ? ' — oculto' : ''}</option>`).join('')}</optgroup>`).join('');
-}
-async function newEventModal() {
-  const cat = await catalog(true);
-  const t = new Date(); t.setMinutes(0, 0, 0); t.setHours(t.getHours() + 2);
-  // de preferência um campeonato com regras do jogo (já vem com os mercados automáticos)
-  const pick = (cat.leagues.find((l) => !l.builtin && l.rules && !l.hidden) || cat.leagues.find((l) => !l.builtin))?.key;
-  openModal(`<h3>Novo evento</h3><p class="sub">Escolha o campeonato (pode criar um novo em "Modalidades e campeonatos").</p>
-    <form id="newEvForm"><div class="subtabs" style="margin:0 0 6px"><label class="check" style="margin:0 12px 0 0"><input type="radio" name="kind" value="game" checked> Jogo (casa x fora)</label><label class="check" style="margin:0"><input type="radio" name="kind" value="outright"> 🏆 Longo prazo (campeão, artilheiro...)</label></div>
-      <label class="lbl">Campeonato *</label><select class="inp" name="league" id="newEvLeague" required>${leagueOptions(cat, pick)}</select>
-      <fieldset id="evKindGame" style="border:0;padding:0;margin:0">
-        <label class="lbl">Casa / participante 1 *</label><input class="inp" name="home" required maxlength="60">
-        <label class="lbl">Fora / participante 2 *</label><input class="inp" name="away" required maxlength="60">
-        <label class="lbl">Início *</label><input class="inp" type="datetime-local" name="startsAt" value="${localInput(t.getTime())}" required>
-        <div id="newEvAuto"></div>
-      </fieldset>
-      <fieldset id="evKindOut" style="border:0;padding:0;margin:0;display:none" disabled>
-        <label class="lbl">Título *</label><input class="inp" name="title" required maxlength="80" placeholder="Ex.: Campeão do SIX Major 2026">
-        <label class="lbl">Apostas fecham em *</label><input class="inp" type="datetime-local" name="closesAt" value="${localInput(t.getTime() + 7 * 86400000)}" required>
-        <label class="lbl">Mercado *</label><input class="inp" name="mkName" value="Campeão" required maxlength="80">
-        <label class="lbl">Participantes e odds * (um por linha: <b>Nome; odd</b>)</label>
-        <textarea class="inp" name="mkSels" required placeholder="FaZe Clan; 3.50&#10;Team Liquid; 4.00&#10;w7m esports; 5.00&#10;Team Falcons; 6.50"></textarea>
-        <p class="sub" style="margin:6px 0 0">Depois do prazo as apostas fecham sozinhas. Pode juntar mais mercados (ex.: melhor jogador) na página do evento, cada um com o seu prazo.</p>
-      </fieldset>
-      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Criar evento</button></form>`);
-  renderNewEvAuto();
-}
-// campeonato com regras do jogo: o evento já nasce com o Vencedor e o pacote padrão de mercados automáticos
-function renderNewEvAuto() {
-  const box = $('#newEvAuto'), sel = $('#newEvLeague');
-  if (!box || !sel) return;
-  const lg = A.cat.leagues.find((l) => l.key === sel.value), R = lg?.rules;
-  if (!R) { box.innerHTML = '<p class="sub" style="margin-top:10px">Este campeonato não tem regras do jogo: os mercados são criados à mão depois.</p>'; return; }
-  box.innerHTML = `<div class="rules-box"><label class="check" style="color:var(--text);margin:0 0 8px"><input type="checkbox" name="auto" checked> <b>Mercados padrão com odds automáticas</b></label>
-    <div class="grid2">
-      <div><label class="lbl">Odd do Vencedor — casa</label><input class="inp" name="oddsHome" inputmode="decimal" placeholder="1.85"></div>
-      <div><label class="lbl">Odd do Vencedor — fora</label><input class="inp" name="oddsAway" inputmode="decimal" placeholder="1.85"></div>
-      <div><label class="lbl">Melhor de (${esc(R.mapName)}s)</label><select class="inp" name="bestOf">${[1, 3, 5, 7].map((n) => `<option ${R.bestOf === n ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-    </div>
-    <p class="sub" style="margin:8px 0 0">Abre logo: Vencedor, total e handicap de ${esc(R.unit)}, corridas, placar do 1º tempo, ${esc(R.unit)} de cada equipa, margem e placar exato${R.bestOf > 1 ? ', e os da série' : ''} (em melhor de 3+, um bloco por ${esc(R.mapName)}). As odds saem da força das equipas, tirada das odds do Vencedor (vazio = 50/50).<br>Regras: ${esc(rulesSummary(R))}</p></div>`;
-}
-function sportModal(s) {
-  openModal(`<h3>${s ? 'Editar modalidade' : 'Nova modalidade'}</h3>
-    <form id="sportForm" data-key="${esc(s?.key || '')}" data-hidden="${s?.hidden ? '1' : ''}"><label class="lbl">Nome *</label><input class="inp" name="name" value="${esc(s?.name || '')}" required maxlength="40" placeholder="Ex.: Tênis, Vôlei, MMA, eSports">
-      <label class="lbl">Ícone (emoji)</label><input class="inp" name="icon" id="sportIcon" value="${esc(s?.icon || '')}" maxlength="8" placeholder="🏅">
-      <div class="icons">${SPORT_ICONS.map((i) => `<button type="button" data-icon="${i}">${i}</button>`).join('')}</div>
-      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Guardar</button></form>`);
-}
-async function leagueModal(l) {
-  const cat = await catalog();
-  openModal(`<h3>${l ? 'Editar campeonato' : 'Novo campeonato'}</h3>
-    <form id="leagueForm" data-key="${esc(l?.key || '')}" data-hidden="${l?.hidden ? '1' : ''}"><label class="lbl">Modalidade *</label>
-      <select class="inp" name="sport" required>${cat.sports.filter((s) => !s.hidden || s.key === l?.sport).map((s) => `<option value="${esc(s.key)}" ${s.key === l?.sport ? 'selected' : ''}>${esc(s.icon)} ${esc(s.name)}</option>`).join('')}</select>
-      <label class="lbl">Nome *</label><input class="inp" name="name" value="${esc(l?.name || '')}" required maxlength="60" placeholder="Ex.: Campeonato Carioca, Roland Garros, UFC 320">
-      <label class="lbl">País / região</label><input class="inp" name="country" value="${esc(l?.country || '')}" maxlength="40" placeholder="Ex.: Brasil, Mundo">
-      ${rulesFields(l?.rules || null)}
-      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Guardar</button></form>`);
-  updateRulesExample();
-}
-/* Regras do jogo do campeonato: o motor de odds ao vivo usa-as para saber como se ganha um mapa e a partida */
-const OT_LABEL = { none: 'Sem prorrogação: no empate, o round seguinte decide', by2: 'Vence quem abrir 2 rounds de vantagem', blocks: 'Blocos de rounds: vence quem ganhar a maioria do bloco' };
-function rulesFields(r) {
-  const P = A.cat.presets, on = !!r;
-  r = r || { ...P.r6, preset: 'r6', notes: '' };
-  const f = (label, html) => `<div><label class="lbl">${label}</label>${html}</div>`;
-  return `<div class="rules-box"><label class="check" style="color:var(--text)"><input type="checkbox" name="rulesOn" id="rulesOn" ${on ? 'checked' : ''}> <b>Regras do jogo por rounds</b> &nbsp;<span class="sub">(liga as odds automáticas ao vivo nos eventos deste campeonato)</span></label>
-    <div id="rulesBody" style="${on ? '' : 'display:none'}">
-      ${f('Modelo', `<select class="inp" name="preset" id="rulesPreset">${Object.entries(P).map(([k, x]) => `<option value="${k}" ${r.preset === k ? 'selected' : ''}>${esc(x.label)}</option>`).join('')}<option value="custom" ${r.preset === 'custom' ? 'selected' : ''}>Personalizado</option></select>`)}
-      <div class="grid2">
-        ${f('Rounds para ganhar um mapa', `<input class="inp" name="target" type="number" min="1" max="50" value="${r.target}">`)}
-        ${f('Partida: melhor de (mapas)', `<select class="inp" name="bestOf">${[1, 3, 5, 7].map((n) => `<option value="${n}" ${r.bestOf === n ? 'selected' : ''}>${n}</option>`).join('')}</select>`)}
-        ${f('Prorrogação (empate em N-1 x N-1)', `<select class="inp" name="ot">${Object.entries(OT_LABEL).map(([k, l]) => `<option value="${k}" ${r.ot === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`)}
-        ${f('Rounds por bloco da prorrogação', `<input class="inp" name="otBlock" type="number" min="1" max="20" value="${r.otBlock}">`)}
-        ${f('Margem da casa (%)', `<input class="inp" name="margin" value="${r.margin}">`)}
-        ${f('Nome da unidade / do mapa', `<div style="display:flex;gap:6px"><input class="inp" name="unit" value="${esc(r.unit)}" placeholder="rounds"><input class="inp" name="mapName" value="${esc(r.mapName)}" placeholder="mapa"></div>`)}
-        ${f('Odd mínima das linhas (handicap e totais)', `<input class="inp" name="minOdd" inputmode="decimal" value="${r.minOdd ?? 1.15}" title="Linhas com odd abaixo disto ficam bloqueadas: não deixa apostas fáceis">`)}
-        ${f('Reta final: reduzir a 1 linha a X rounds do fim', `<input class="inp" name="endgame" type="number" min="0" max="10" value="${r.endgame ?? 2}" title="Ex.: 2 no R6 → a partir de 5 rounds só a linha equilibrada; no match point (6) handicap e totais do mapa saem do site. 0 = desligado">`)}
-        ${f('Rounds do 1º tempo (0 = sem mercado de 1º tempo)', `<input class="inp" name="half" type="number" min="0" max="40" value="${r.half ?? 0}" title="R6: 6 · CS2 e Valorant: 12">`)}
-        ${f('Linhas por mercado (móveis)', `<select class="inp" name="lines">${[1, 3, 5].map((n) => `<option value="${n}" ${(r.lines ?? 3) === n ? 'selected' : ''}>${n === 1 ? '1 (só a equilibrada)' : `${n} (equilibrada ± ${(n - 1) / 2})`}</option>`).join('')}</select>`)}
-      </div>
-      <p class="sub" id="rulesExample" style="margin:8px 0"></p>
-      ${f('Notas sobre as regras (para a equipa)', `<textarea class="inp" name="notes" style="min-height:64px;font-family:inherit" maxlength="1000" placeholder="Ex.: regulamento do SIX Major; mapas escolhidos por veto">${esc(r.notes || '')}</textarea>`)}
-    </div></div>`;
-}
-function rulesExample(N, ot, B) {
-  if (!(N >= 1)) return '';
-  if (ot === 'none') return `Ganha o mapa quem chegar primeiro a ${N}. Em ${N - 1}-${N - 1}, o round seguinte decide (no máximo ${2 * N - 1} rounds).`;
-  if (ot === 'by2') return `Ganha quem chegar a ${N}. Em ${N - 1}-${N - 1} joga-se até alguém abrir 2 de vantagem (${N + 1}-${N - 1}, ${N + 2}-${N}, ...).`;
-  const k = Math.floor(B / 2) + 1;
-  return `Ganha quem chegar a ${N}. Em ${N - 1}-${N - 1} jogam-se blocos de ${B} rounds e ganha quem fizer ${k} no bloco (ex.: ${N - 1 + k}-${N - 1}, ${N - 1 + k}-${N - 1 + k - 1})${B % 2 === 0 ? `; bloco empatado ${B / 2}-${B / 2} → novo bloco` : ''}.`;
-}
-function updateRulesExample() {
-  const f = $('#leagueForm'); if (!f) return;
-  const x = f.elements, el = $('#rulesExample'); if (el) el.textContent = rulesExample(Number(x.target.value), x.ot.value, Number(x.otBlock.value));
-}
-const rulesSummary = (R) => `${R.target} ${R.unit} por ${R.mapName}${R.bestOf > 1 ? `, melhor de ${R.bestOf}` : ''}, prorrogação: ${R.ot === 'none' ? 'não' : R.ot === 'by2' ? '2 de vantagem' : `blocos de ${R.otBlock}`}, margem ${R.margin}%, odd mínima ${R.minOdd ?? 1.15}, ${R.lines ?? 3} linha(s)${R.endgame ? `, reta final a ${R.endgame} do fim` : ''}`;
-function marketModal() {
-  const ev = A.catData.event;
-  const tpls = [
-    ['Vencedor (1X2)', 'Vencedor', `${ev.home}; \nEmpate; \n${ev.away}; `],
-    ['Vencedor (sem empate)', 'Vencedor', `${ev.home}; \n${ev.away}; `],
-    ['Sim / Não', '', 'Sim; \nNão; '],
-    ['Mais / Menos', 'Total — 2.5', 'Mais de 2.5; \nMenos de 2.5; '],
-    ['Handicap', 'Handicap', `${ev.home} -1.5; \n${ev.away} +1.5; `],
-  ];
-  // com regras do jogo: modelos com odds automáticas (o tipo vai junto)
-  if (A.catData.rules) {
-    const U = A.catData.rules.unit, T = A.catData.rules.target;
-    tpls.splice(0, tpls.length,
-      ['⚡ Vencedor da partida', 'Vencedor', `${ev.home}; 1.85\n${ev.away}; 1.85`, 'match'],
-      ['⚡ Total de ' + U, `Total de ${U}`, `Mais de ${T + 3}.5; 1.85\nMenos de ${T + 3}.5; 1.85`, 'map_total'],
-      ['⚡ Handicap de ' + U, `Handicap de ${U}`, `${ev.home} -2.5; 1.85\n${ev.away} +2.5; 1.85`, 'map_handicap'],
-      ['⚡ Vencedor do ' + A.catData.rules.mapName, `Vencedor do ${A.catData.rules.mapName} 1`, `${ev.home}; 1.85\n${ev.away}; 1.85`, 'map_winner'],
-      ['Sim / Não (à mão)', '', 'Sim; \nNão; ', ''],
-    );
-  }
-  openModal(`<h3>Novo mercado</h3><p class="sub">${esc(evName(ev))}</p>
-    <form id="newMkForm"><label class="lbl">Nome do mercado *</label><input class="inp" name="name" id="mkName" required maxlength="80" placeholder="Ex.: Total de escanteios, Marca primeiro, Vencedor do set">
-      <label class="lbl">Seleções e odds * (uma por linha: <b>Nome; odd</b>)</label>
-      <div class="tpl">${tpls.map(([l, n, v, t], i) => `<button type="button" data-tpl="${i}" data-name="${esc(n)}" data-val="${esc(v)}" data-type="${t ?? ''}">${esc(l)}</button>`).join('')}</div>
-      ${ev.manual ? `<label class="lbl">Odds</label><div style="display:flex;gap:8px;align-items:center" id="mkType">${typeSelect(null)}</div>${A.catData.rules ? '' : '<p class="sub">⚡ Odds automáticas: defina as regras do jogo no campeonato.</p>'}` : ''}
-      <textarea class="inp" name="sels" id="mkSels" required placeholder="Flamengo; 1.85&#10;Empate; 3.40&#10;Palmeiras; 4.20"></textarea>
-      <label class="lbl">Aposta máxima por aposta (R$, opcional)</label><input class="inp" name="maxStake" placeholder="sem limite">
-      <label class="lbl">Apostas fecham em (opcional)</label><input class="inp" type="datetime-local" name="mclose">
-      <label class="check"><input type="checkbox" name="open" checked> Abrir já para apostas (senão fica suspenso)</label>
-      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit">Criar mercado</button></form>`);
-}
-function parseSelLines(text) {
-  return text.split('\n').map((l) => l.trim()).filter(Boolean).map((line, i) => {
-    const m = line.match(/^(.+?)\s*[;@\t|]\s*([\d.,]+)\s*$/);
-    if (!m) throw new Error(`Linha ${i + 1} ("${line}"): falta a odd. Use "Nome; 1.85".`);
-    return { name: m[1].trim(), odds: m[2].replace(',', '.') };
-  });
-}
-function settleMkModal(id) {
-  const m = A.catData.markets.find((x) => x.id === id);
-  if (!m) return;
-  const betsN = m.sels.reduce((s, x) => s + x.bets, 0);
-  openModal(`<h3>Liquidar mercado</h3><p class="sub">${esc(evName(A.catData.event))} · <b>${esc(m.name)}</b><br>${betsN ? `${betsN} seleção(ões) em apostas abertas serão decididas agora.` : 'Sem apostas abertas neste mercado.'} Não pode ser desfeito (só corrigindo aposta a aposta).</p>
-    <form id="settleMkForm" data-id="${esc(m.id)}">
-      ${m.sels.map((s) => `<div class="kv2" style="align-items:center"><span style="color:var(--text)"><b>${esc(s.name)}</b> @${s.odds.toFixed(2)}<br><small class="muted">${s.bets ? `${s.bets} aposta(s) · a pagar se ganhar ${money(s.singles)}` : 'sem apostas'}</small></span>
-        <select class="inp" style="width:140px" data-res="${esc(s.id)}">${['', 'won', 'lost', 'void'].map((v) => `<option value="${v}" ${s.suggest === v ? 'selected' : ''}>${v ? RES_PILL[v][1] : '—'}</option>`).join('')}</select></div>`).join('')}
-      ${m.sels.some((s) => s.suggest) ? '<p class="sub">Resultados pré-preenchidos pelo placar. Confira antes de liquidar.</p>' : ''}
-      <div class="acts" style="margin:10px 0"><button type="button" class="btn btn-ghost" data-allvoid="1">Anular mercado (tudo devolvido)</button></div>
-      <label class="lbl">Observação (opcional, fica no registo)</label><input class="inp" name="note" maxlength="300" placeholder="Ex.: resultado oficial confirmado na súmula">
-      <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Liquidar e pagar apostas</button></form>`);
-}
-
 /* ---------- eventos ---------- */
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, tr[data-user]');
@@ -636,67 +353,6 @@ document.addEventListener('click', async (e) => {
     if (d.wdClaim) { await api('POST', '/api/admin/withdrawals/claim', { id: d.wdClaim }); toast('Saque assumido. Faça o PIX e marque como pago.', 'ok'); return render(); }
     if (d.wdRelease) { await api('POST', '/api/admin/withdrawals/release', { id: d.wdRelease }); toast('Saque devolvido à fila'); return render(); }
     if (d.settle) { const [uid, id, expect] = d.settle.split('|'); return settleModal(uid, id, expect); }
-    // esportes e mercados
-    if (d.cattab) { A.catTab = d.cattab; return render(); }
-    if (d.catev) return go('mercado-ev', { catEv: d.catev });
-    if (d.action === 'newEvent') return newEventModal();
-    if (d.action === 'newSport') return sportModal(null);
-    if (d.action === 'newLeague') return leagueModal(null);
-    if (d.action === 'newMarket') return marketModal();
-    if (d.icon) { $('#sportIcon').value = d.icon; return; }
-    if (d.tpl) {
-      $('#mkSels').value = d.val; if (d.name && !$('#mkName').value) $('#mkName').value = d.name;
-      const ts = document.querySelector('#mkType select[name=atype]'); if (ts && d.type !== undefined && A.catData.rules) ts.value = d.type;
-      $('#mkSels').focus(); return;
-    }
-    if (d.round) {
-      t.disabled = true;
-      await api('POST', '/api/admin/catalog/event/round', { id: A.catEv, side: d.round });
-      return render();
-    }
-    if (d.settleall) {
-      if (!confirm('Liquidar todos os mercados que o placar já decidiu? As apostas são pagas a seguir.')) return;
-      const r = await api('POST', '/api/admin/catalog/event/settle-all', { id: A.catEv });
-      toast(`${r.settled} mercado(s) liquidado(s) pelo placar`, 'ok'); return render();
-    }
-    if (d.openmaps) {
-      const f = $('#liveForm');
-      const r = await api('POST', '/api/admin/catalog/event/live', { id: A.catEv, auto: true, bestOf: f.elements.bestOf.value });
-      toast(r.made ? `${r.made} mercados abertos` : 'Os mercados padrão já estavam abertos', 'ok'); return render();
-    }
-    if (d.calib) {
-      const f = $('#liveForm');
-      await api('POST', '/api/admin/catalog/event/live', { id: A.catEv, auto: f.elements.auto.checked, bestOf: f.elements.bestOf.value, fromOdds: true });
-      toast('Força calibrada pelas odds do Vencedor', 'ok'); return render();
-    }
-    if (d.sportedit) return sportModal(A.cat.sports.find((x) => x.key === d.sportedit));
-    if (d.lgedit) return leagueModal(A.cat.leagues.find((x) => x.key === d.lgedit));
-    if (d.sporthide) {
-      const s = A.cat.sports.find((x) => x.key === d.sporthide);
-      await api('POST', '/api/admin/catalog/sport', { key: s.key, name: s.name, icon: s.icon, hidden: !s.hidden });
-      toast(s.hidden ? 'Modalidade visível no site' : 'Modalidade oculta do site', 'ok'); return render();
-    }
-    if (d.lghide) {
-      const l = A.cat.leagues.find((x) => x.key === d.lghide);
-      await api('POST', '/api/admin/catalog/league', { key: l.key, name: l.name, country: l.country, sport: l.sport, hidden: !l.hidden });
-      toast(l.hidden ? 'Campeonato visível no site' : 'Campeonato oculto do site', 'ok'); return render();
-    }
-    if (d.sportdel) { if (!confirm('Apagar esta modalidade?')) return; await api('POST', '/api/admin/catalog/sport/delete', { key: d.sportdel }); toast('Modalidade apagada', 'ok'); return render(); }
-    if (d.lgdel) { if (!confirm('Apagar este campeonato?')) return; await api('POST', '/api/admin/catalog/league/delete', { key: d.lgdel }); toast('Campeonato apagado', 'ok'); return render(); }
-    if (d.archive) {
-      await api('POST', '/api/admin/catalog/event/archive', { id: d.archive, archived: d.val === '1' });
-      toast(d.val === '1' ? 'Evento arquivado (saiu do site)' : 'Evento de volta ao site', 'ok'); return render();
-    }
-    if (d.mkstatus) {
-      const [id, status] = d.mkstatus.split('|');
-      await api('POST', '/api/admin/catalog/market/status', { evId: A.catEv, id, status });
-      toast(status === 'open' ? 'Aberto para apostas' : 'Suspenso', 'ok'); return render();
-    }
-    if (d.mksettle) return settleMkModal(d.mksettle);
-    if (d.mkdel) { if (!confirm('Apagar este mercado?')) return; await api('POST', '/api/admin/catalog/market/delete', { evId: A.catEv, id: d.mkdel }); toast('Mercado apagado', 'ok'); return render(); }
-    if (d.seladd) { t.closest('form').querySelector('tbody').insertAdjacentHTML('beforeend', selRow()); return; }
-    if (d.selrm) { t.closest('tr').remove(); return; }
-    if (d.allvoid) { document.querySelectorAll('select[data-res]').forEach((x) => { x.value = 'void'; }); return; }
     if (d.wdPay) return payModal(d.wdPay);
     if (d.wdReject) return rejectModal(d.wdReject);
     if (d.depCredit) {
@@ -731,24 +387,10 @@ $('#overlay').onclick = closeModal;
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
 document.addEventListener('change', (e) => {
   if (e.target.matches('select[data-leg]')) return updateSettlePreview();
-  // liquidar mercado: ao marcar uma vencedora, as que ainda não têm resultado passam a "Perdeu"
-  if (e.target.matches('select[data-res]') && e.target.value === 'won') document.querySelectorAll('select[data-res]').forEach((x) => { if (!x.value) x.value = 'lost'; });
-  if (e.target.id === 'catArchived') { A.catArchived = e.target.value === '1'; render(); }
-  if (e.target.id === 'newEvLeague') renderNewEvAuto();
-  if (e.target.name === 'kind' && e.target.form?.id === 'newEvForm') {
-    const out = e.target.value === 'outright';
-    $('#evKindGame').disabled = out; $('#evKindGame').style.display = out ? 'none' : '';
-    $('#evKindOut').disabled = !out; $('#evKindOut').style.display = out ? '' : 'none';
-  }
-  if (e.target.id === 'rulesOn') $('#rulesBody').style.display = e.target.checked ? '' : 'none';
-  if (e.target.id === 'rulesPreset' && A.cat.presets[e.target.value]) {
-    const P = A.cat.presets[e.target.value], f = e.target.form;
-    for (const k of ['target', 'bestOf', 'ot', 'otBlock', 'margin', 'unit', 'mapName', 'minOdd', 'lines', 'endgame', 'half']) f.elements[k].value = P[k];
-  }
-  if (e.target.form && e.target.form.id === 'leagueForm') updateRulesExample();
   if (e.target.id === 'betFilter') { A.betFilter = e.target.value; render(); }
   if (e.target.id === 'wdFilter') { A.wdFilter = e.target.value; render(); }
   if (e.target.id === 'depFilter') { A.depFilter = e.target.value; render(); }
+  if (e.target.id === 'alertDays') { A.alertDays = Number(e.target.value); render(); }
 });
 document.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -758,42 +400,6 @@ document.addEventListener('submit', async (e) => {
   try {
     if (f.id === 'loginForm') { await api('POST', '/api/login', fd); return boot(); }
     if (f.id === 'userSearch') { A.userQuery = fd.q.trim(); return render(); }
-    if (f.id === 'realSearch') { A.realQuery = fd.q; return render(); }
-    if (f.id === 'sportForm') { await api('POST', '/api/admin/catalog/sport', { key: f.dataset.key || undefined, name: fd.name, icon: fd.icon, hidden: !!f.dataset.hidden }); closeModal(); toast('Modalidade guardada', 'ok'); }
-    if (f.id === 'leagueForm') {
-      const rules = fd.rulesOn ? { enabled: true, preset: fd.preset, target: fd.target, bestOf: fd.bestOf, ot: fd.ot, otBlock: fd.otBlock, margin: fd.margin, unit: fd.unit, mapName: fd.mapName, notes: fd.notes, minOdd: fd.minOdd, lines: fd.lines, endgame: fd.endgame, half: fd.half } : { enabled: false };
-      await api('POST', '/api/admin/catalog/league', { key: f.dataset.key || undefined, name: fd.name, country: fd.country, sport: fd.sport, hidden: !!f.dataset.hidden, rules });
-      closeModal(); toast('Campeonato guardado', 'ok');
-    }
-    if (f.id === 'liveForm') {
-      const r = await api('POST', '/api/admin/catalog/event/live', { id: A.catEv, auto: !!fd.auto, bestOf: fd.bestOf, strength: fd.strength });
-      toast(r.made ? `Odds automáticas guardadas · ${r.made} mercados abertos` : 'Odds automáticas guardadas', 'ok');
-    }
-    if (f.id === 'newEvForm') {
-      const r = fd.kind === 'outright'
-        ? await api('POST', '/api/admin/catalog/event', { league: fd.league, outright: true, home: fd.title, away: '', startsAt: new Date(fd.closesAt).getTime(), state: 'pre', market: { name: fd.mkName, sels: parseSelLines(fd.mkSels) } })
-        : await api('POST', '/api/admin/catalog/event', { league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: 'pre', auto: !!fd.auto, oddsHome: fd.oddsHome, oddsAway: fd.oddsAway, bestOf: fd.bestOf });
-      closeModal(); toast(fd.kind === 'outright' ? 'Evento de longo prazo criado' : r.made ? `Evento criado com ${r.made} mercados automáticos` : 'Evento criado. Agora adicione os mercados.', 'ok'); return go('mercado-ev', { catEv: r.id });
-    }
-    if (f.id === 'evForm') {
-      await api('POST', '/api/admin/catalog/event', { id: f.dataset.id, league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: fd.state, scoreH: fd.scoreH, scoreA: fd.scoreA, mapsH: fd.mapsH, mapsA: fd.mapsA, clock: fd.clock });
-      toast('Evento atualizado', 'ok');
-    }
-    if (f.id === 'newMkForm') {
-      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, name: fd.name, sels: parseSelLines(fd.sels), maxStake: fd.maxStake, open: !!fd.open, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null, closesAt: fd.mclose ? new Date(fd.mclose).getTime() : null });
-      closeModal(); toast('Mercado criado', 'ok');
-    }
-    if (f.classList.contains('mkForm')) {
-      const sels = [...f.querySelectorAll('tr[data-sel]')].map((tr) => ({ id: tr.dataset.sel || undefined, name: tr.querySelector('[name=sname]').value, odds: tr.querySelector('[name=sodds]').value }));
-      await api('POST', '/api/admin/catalog/market', { evId: A.catEv, id: f.dataset.mk, name: fd.name, maxStake: fd.maxStake, sels, auto: fd.atype ? { type: fd.atype, map: fd.amap, lines: fd.amove ? 'move' : 'fixed' } : null, closesAt: fd.mclose ? new Date(fd.mclose).getTime() : null });
-      toast('Mercado guardado', 'ok');
-    }
-    if (f.id === 'settleMkForm') {
-      const results = Object.fromEntries([...f.querySelectorAll('select[data-res]')].map((x) => [x.dataset.res, x.value]));
-      if (Object.values(results).some((v) => !v)) { formErr('Escolha o resultado de todas as seleções.'); if (btn) btn.disabled = false; return; }
-      await api('POST', '/api/admin/catalog/market/settle', { evId: A.catEv, id: f.dataset.id, results, note: fd.note });
-      closeModal(); toast('Mercado liquidado. As apostas foram decididas.', 'ok');
-    }
     if (f.id === 'payForm') { await api('POST', '/api/admin/withdrawals/pay', { id: f.dataset.id, proof: fd.proof, note: fd.note }); closeModal(); toast('Saque marcado como pago ✓', 'ok'); }
     if (f.id === 'rejectForm') { await api('POST', '/api/admin/withdrawals/reject', { id: f.dataset.id, reason: fd.reason }); closeModal(); toast('Saque recusado; valor devolvido ao jogador', 'ok'); }
     if (f.id === 'depForm') { await api('POST', '/api/admin/deposits/resolve', { id: f.dataset.id, action: f.dataset.act, amount: parseMoney(fd.amount), reason: fd.reason }); closeModal(); toast('Feito', 'ok'); }
@@ -803,13 +409,20 @@ document.addEventListener('submit', async (e) => {
       const r = await api('POST', '/api/admin/bets/settle', { userId: f.dataset.uid, id: f.dataset.id, expect: f.dataset.expect, results, reason: fd.reason });
       closeModal(); toast(`Aposta ${BET_LABEL[r.status]} · retorno ${money(r.payout)} · saldo do jogador ${r.diff >= 0 ? '+' : ''}${money(r.diff)}`, 'ok');
     }
+    if (f.classList.contains('pmForm')) {
+      const g = A.pending[Number(f.dataset.i)];
+      const results = Object.fromEntries([...f.querySelectorAll('select[data-pick]')].filter((x) => x.value).map((x) => [x.dataset.pick, x.value]));
+      if (!Object.keys(results).length) { toast('Escolha o resultado de pelo menos uma seleção', 'err'); if (btn) btn.disabled = false; return; }
+      if (!confirm(`Liquidar "${g.marketName}" (${g.event})? As apostas são pagas a seguir.`)) { if (btn) btn.disabled = false; return; }
+      const r = await api('POST', '/api/admin/markets/settle', { key: g.key, results, reason: fd.reason });
+      toast(`Mercado liquidado · ${r.bets} aposta(s) atualizadas`, 'ok');
+    }
     if (f.id === 'adjForm') { await api('POST', '/api/admin/user/adjust', { id: f.dataset.id, amount: parseMoney(fd.amount), reason: fd.reason }); closeModal(); toast('Saldo ajustado', 'ok'); }
     if (f.id === 'blockForm') { await api('POST', '/api/admin/user/block', { id: f.dataset.id, blocked: f.dataset.val === '1', reason: fd.reason }); closeModal(); toast('Feito', 'ok'); }
     render();
   } catch (err) {
     if (btn) btn.disabled = false;
-    // os cartões de mercado não têm caixa de erro própria
-    if (f.classList.contains('mkForm') || !$('#formErr')) toast(err.message, 'err'); else formErr(err.message);
+    if (!$('#formErr')) toast(err.message, 'err'); else formErr(err.message);
   }
 });
 

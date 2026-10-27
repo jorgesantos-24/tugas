@@ -51,18 +51,17 @@ module.exports = function adminRoutes(routes, D) {
   const LEG_VALUE = { won: 1, lost: -1, void: 0 };
   const BET_LABEL = { open: 'em aberto', won: 'ganha', lost: 'perdida', void: 'devolvida', cashout: 'cash out' };
   const LATE_MS = 3 * 3600000;
-  // precisa de atenção: atrasada (jogo começou há +3h) ou a segunda fonte não confirmou o placar
-  const legIssue = (l) => { if (l.result) return null; const v = D.VF.verdict(l.evId); return v && (v.state === 'mismatch' || v.state === 'notfound') ? v.state : null; };
+  // precisa de atenção: atrasada (jogo começou há +3h) ou a fonte não deu resultado final (jogo parado, placar ilegível)
+  const legIssue = (l) => { if (l.result) return null; const ev = D.eventInfo(l.evId); return ev && ev.clock === 'Resultado por confirmar' ? 'unconfirmed' : null; };
   const isLate = (b, t = now()) => b.legs.some((l) => (!l.result && l.startsAt < t - LATE_MS) || legIssue(l));
   const flashscoreUrl = (event) => 'https://www.google.com/search?q=' + encodeURIComponent(`flashscore ${event.replace(' x ', ' ')}`);
   const legInfo = (l) => {
     const ev = D.eventInfo(l.evId);
-    const v = l.result ? null : D.VF.verdict(l.evId);
     return {
       event: l.event, leagueName: l.leagueName, marketName: l.marketName, name: l.name, odds: l.odds, startsAt: l.startsAt,
       result: l.result || null, final: l.final || null, manual: !!l.manual, flashscore: flashscoreUrl(l.event),
       now: ev ? { state: ev.state, score: ev.home.score != null ? `${ev.home.score}-${ev.away.score}` : null, clock: ev.clock, status: ev.statusName } : null,
-      verify: v ? { state: v.state, espn: v.espn || null, other: v.h != null ? `${v.h}-${v.a}` : null, status: v.status || null, error: v.error || null } : null,
+      issue: legIssue(l), note: ev && ev.resultNote ? ev.resultNote : null,
     };
   };
   const pubBet = (b) => ({
@@ -72,8 +71,67 @@ module.exports = function adminRoutes(routes, D) {
   });
   const betSummary = () => {
     const list = [...D.openBets.values()];
-    return { verifyOn: D.VF.enabled, quota: D.VF.quota, open: list.length, late: list.filter((b) => isLate(b)).length, exposure: fromCents(list.reduce((s, b) => s + b.potential, 0)), staked: fromCents(list.reduce((s, b) => s + b.stake, 0)) };
+    return { feed: D.feedName, live: D.feedInfo ? D.feedInfo() : null, pendingMarkets: pendingGroups().filter((g) => g.state === 'post').length, open: list.length, late: list.filter((b) => isLate(b)).length, exposure: fromCents(list.reduce((s, b) => s + b.potential, 0)), staked: fromCents(list.reduce((s, b) => s + b.stake, 0)) };
   };
+
+  /* Mercados por liquidar: um grupo por mercado (jogo + tipo + parte do jogo + linha) com as seleções apostadas.
+     Entram os mercados da equipa ("x") e, depois do jogo, os automáticos que a fonte não deixou decidir. */
+  const groupKey = (l) => `${l.evId}|${l.market}|${l.per ?? ''}|${l.line ?? ''}|${Array.isArray(l.base) ? l.base.join('-') : ''}`;
+  function pendingGroups() {
+    const groups = new Map();
+    for (const b of D.openBets.values()) for (const l of b.legs) {
+      if (l.result) continue;
+      const ev = D.eventInfo(l.evId);
+      if (l.market !== 'x') {
+        if (!ev || ev.state !== 'post') continue; // automático: só quando o jogo acabou e a liquidação não conseguiu
+        if (D.M.settleLeg(structuredClone(l), ev)) continue;
+      }
+      const key = groupKey(l);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key, evId: l.evId, event: l.event, leagueName: l.leagueName, marketName: l.marketName, startsAt: l.startsAt, auto: l.market !== 'x',
+          state: ev ? ev.state : null, clock: ev ? ev.clock : null, result: ev?.result ? D.M.resultText(ev.result) : ev && ev.home.score != null ? `${ev.home.score}-${ev.away.score}` : null,
+          note: ev?.resultNote || null, picks: new Map(),
+        });
+      }
+      const g = groups.get(key);
+      if (!g.picks.has(l.pick)) g.picks.set(l.pick, { pick: l.pick, name: l.name, odds: l.odds, bets: 0, stake: 0, potential: 0 });
+      const p = g.picks.get(l.pick);
+      p.bets++; p.stake += b.stake; p.potential += b.potential;
+    }
+    return [...groups.values()]
+      .map((g) => ({ ...g, picks: [...g.picks.values()].map((p) => ({ ...p, stake: fromCents(p.stake), potential: fromCents(p.potential) })) }))
+      .sort((a, b) => (b.state === 'post') - (a.state === 'post') || a.startsAt - b.startsAt);
+  }
+  // marca o resultado das seleções de um mercado em todas as apostas abertas; as que ficarem decididas são pagas
+  async function settleMarket(key, results, admin, reason) {
+    // o mercado tem de existir entre os que estão por liquidar (a parte do jogo pode ter "|", ex.: "shots|13")
+    if (typeof key !== 'string' || key.length > 400 || !pendingGroups().some((g) => g.key === key)) fail(400, 'Mercado inválido.');
+    const res = new Map(Object.entries(results).filter(([, r]) => r in LEG_VALUE));
+    if (!res.size) fail(400, 'Escolha o resultado das seleções.');
+    let changed = 0;
+    for (const b of [...D.openBets.values()]) {
+      let touched = false;
+      const legs = b.legs.map((l) => {
+        if (l.result || groupKey(l) !== key || !res.has(l.pick)) return l;
+        touched = true;
+        const r = res.get(l.pick);
+        return { ...l, result: r, value: LEG_VALUE[r], final: 'equipa', manual: true, settledBy: admin.email };
+      });
+      if (!touched) continue;
+      const bt = db.batch();
+      bt.update(col.openBets().doc(b.id), { legs });
+      bt.update(col.bets(b.userId).doc(b.id), { legs });
+      await bt.commit();
+      D.openBets.set(b.id, { ...b, legs });
+      dirty(b.userId);
+      changed++;
+    }
+    await log(null, admin, 'mercado:liquidar', key, { results: Object.fromEntries(res), reason, bets: changed });
+    await D.settle(); // fecha e paga as apostas que ficaram com todas as seleções decididas (ou com uma perdida)
+    console.log(`[Admin] ${admin.email}: mercado ${key} liquidado (${changed} apostas)`);
+    return { bets: changed };
+  }
 
   // muda o estado de um pedido de saque (com regras de quem pode ir para onde)
   async function moveWithdrawal(admin, id, to, fields = {}) {
@@ -114,11 +172,12 @@ module.exports = function adminRoutes(routes, D) {
       await requireAdmin(ctx);
       const open = [...D.openWithdrawals.values()];
       const start = dayStart();
-      const [depToday, wdToday, review, agg] = await Promise.all([
+      const [depToday, wdToday, review, agg, alerts24] = await Promise.all([
         col.deposits().where('createdAt', '>=', start).get(),
         col.withdrawals().where('paidAt', '>=', start).get(),
         col.deposits().where('status', '==', 'REVIEW').get(),
         col.users().aggregate({ n: AggregateField.count(), total: AggregateField.sum('balance') }).get().catch(() => null),
+        col.liveAlerts().where('at', '>=', now() - 86400000).count().get().catch(() => null),
       ]);
       const paidDeps = depToday.docs.map((d) => d.data()).filter((d) => d.status === 'PAID' || d.status === 'REFUNDED' || d.status === 'CHARGEBACK');
       return {
@@ -133,6 +192,7 @@ module.exports = function adminRoutes(routes, D) {
         },
         users: agg ? { count: agg.data().n, balances: fromCents(agg.data().total || 0) } : null,
         bets: betSummary(),
+        liveAlerts24h: alerts24 ? alerts24.data().count : 0, // apostas ao vivo marcadas nas últimas 24 h
         gateway: D.BP.enabled ? 'BravoPay' : 'desligado',
       };
     },
@@ -337,7 +397,8 @@ module.exports = function adminRoutes(routes, D) {
         if (bet.status === 'cashout') fail(409, 'Esta aposta foi encerrada com Cash Out e não pode ser alterada.');
         if (results.length !== bet.legs.length) fail(400, 'Número de seleções não confere.');
         const legs = bet.legs.map((l, i) => ({ ...l, result: results[i], value: LEG_VALUE[results[i]], final: l.final || 'equipa', manual: true }));
-        const payout = legs.some((l) => l.value === -1) ? 0 : Math.round(bet.stake * legs.reduce((p, l) => p * D.M.outcomeFactor(l.value, l.odds), 1));
+        // todas ganhas: o "retorno potencial" mostrado; com devolvidas, recalcula (igual à liquidação automática)
+        const payout = legs.some((l) => l.value === -1) ? 0 : legs.every((l) => l.value === 1) ? bet.potential : Math.round(bet.stake * legs.reduce((p, l) => p * D.M.outcomeFactor(l.value, l.odds), 1));
         const status = payout === 0 ? 'lost' : payout > bet.stake ? 'won' : 'void';
         const wasOpen = bet.status === 'open';
         const diff = wasOpen ? payout : payout - (bet.payout || 0);
@@ -358,11 +419,32 @@ module.exports = function adminRoutes(routes, D) {
       return { status: out.status, payout: fromCents(out.payout), diff: fromCents(out.diff) };
     },
 
+    /* ---------- mercados por liquidar ----------
+       Seleções que a liquidação automática não decide: mercados da equipa (escanteios, cartões, jogadores...) e,
+       depois do jogo, as que a fonte não deixou decidir (hóquei nos pênaltis, ténis sem histórico de games...). */
+    'GET /api/admin/markets/pending': async (ctx) => {
+      await requireAdmin(ctx);
+      return { groups: pendingGroups() };
+    },
+    // a equipa marca o resultado de cada seleção de um mercado: vale para todas as apostas nesse mercado
+    'POST /api/admin/markets/settle': async (ctx) => {
+      const admin = await requireAdmin(ctx);
+      const reason = reasonOf(ctx.body.reason, 3);
+      return settleMarket(String(ctx.body.key || ''), ctx.body.results || {}, admin, reason);
+    },
+
+    // apostas ao vivo suspeitas (gol ou odd a cair logo depois de aceites): ?days=7
+    'GET /api/admin/live-alerts': async (ctx) => {
+      await requireAdmin(ctx);
+      const days = Math.min(90, Math.max(1, Number(new URL(ctx.req.url, 'http://x').searchParams.get('days')) || 7));
+      return D.liveAlerts(days);
+    },
+
     'GET /api/admin/logs': async (ctx) => {
       await requireAdmin(ctx);
       const qs = await col.adminLogs().orderBy('at', 'desc').limit(200).get();
       return { logs: qs.docs.map((d) => d.data()) };
     },
   });
-  return { requireAdmin, log };
+  return { requireAdmin, log, settleMarket, pendingGroups };
 };

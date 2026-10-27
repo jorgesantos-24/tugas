@@ -2,7 +2,7 @@
 /* Publica o TUGAS no Google Cloud Run (São Paulo).
    Uso: npm run deploy            (precisa de "gcloud auth login" feito uma vez)
    - Lê o .env local.
-   - As chaves (Firebase, BravoPay, API-Football) vão para o Secret Manager — nunca para dentro da imagem.
+   - As chaves (Firebase, BravoPay, MoviOdds) vão para o Secret Manager — nunca para dentro da imagem.
    - O resto das configurações vai como variáveis de ambiente do serviço.
    - 1 instância, sempre ligada, CPU sempre ativa (placares, liquidação e PIX correm em segundo plano). */
 
@@ -29,7 +29,7 @@ const g = (args) => `gcloud ${args} --project=${PROJECT} --quiet`;
 
 // segredos: nome no Secret Manager -> conteúdo
 const SECRETS = { 'tugas-firebase-sa': fs.readFileSync(path.resolve(ROOT, env.FIREBASE_SERVICE_ACCOUNT || 'firebase-service-account.json'), 'utf8') };
-const SECRET_ENV = { BRAVOPAY_API_KEY: 'tugas-bravopay-key', BRAVOPAY_WEBHOOK_SECRET: 'tugas-bravopay-webhook', APIFOOTBALL_KEY: 'tugas-apifootball-key' };
+const SECRET_ENV = { BRAVOPAY_API_KEY: 'tugas-bravopay-key', BRAVOPAY_WEBHOOK_SECRET: 'tugas-bravopay-webhook', MOVIODDS_KEY: 'tugas-moviodds-key' };
 for (const [k, name] of Object.entries(SECRET_ENV)) if (env[k]) SECRETS[name] = env[k];
 
 // variáveis normais (sem segredos, sem vazias)
@@ -73,7 +73,8 @@ const plain = { ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !
     sh(g([
       `run deploy ${SERVICE}`, '--source=.', `--region=${REGION}`, '--allow-unauthenticated',
       '--min-instances=1', '--max-instances=1', '--no-cpu-throttling', '--cpu=1', '--memory=512Mi',
-      '--concurrency=80', '--timeout=120', '--cpu-boost',
+      // cada navegador com o tempo real aberto (GET /api/stream) ocupa uma ligação: 80 seria pouco para uma instância só
+      '--concurrency=1000', '--timeout=3600', '--cpu-boost',
       `--env-vars-file="${envFile}"`, `--set-secrets="${secretFlags}"`,
     ].join(' ')));
   } finally { fs.rmSync(envFile, { force: true }); }
