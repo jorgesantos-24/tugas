@@ -1348,7 +1348,7 @@ function go(view, extra = {}, opts = {}) {
 }
 // botões voltar/avançar do navegador
 window.addEventListener('popstate', () => { const r = routeFromPath(); go(r.view, r, { fromHistory: true }); });
-function closeDrawers() { $('#sidebar').classList.remove('open'); $('#slip').classList.remove('open'); if (!$('#modal').classList.contains('show')) $('#overlay').classList.remove('show'); }
+function closeDrawers() { $('#sidebar').classList.remove('open'); $('#slip').classList.remove('open'); document.documentElement.classList.remove('drawer-open'); if (!$('#modal').classList.contains('show')) $('#overlay').classList.remove('show'); }
 
 document.addEventListener('click', async (e) => {
   const t = e.target.closest('button, a, .ev-row, .hero-card');
@@ -1498,8 +1498,9 @@ document.addEventListener('keydown', (e) => {
 
 $('#logoLink').onclick = (e) => { e.preventDefault(); go('home'); };
 $('#overlay').onclick = () => { afterAuth = null; closeModal(); }; // fechou sem entrar: esquece a ação pendente
-$('#menuBtn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); };
-$('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').classList.add('show'); };
+// gaveta aberta: a página de fundo fica parada (senão o dedo desliza a página em vez da gaveta)
+$('#menuBtn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); document.documentElement.classList.add('drawer-open'); };
+$('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').classList.add('show'); document.documentElement.classList.add('drawer-open'); };
 
 /* ---------------- slots (Fortune Tiger) ---------------- */
 // o modal vive no index.html; aqui só expomos uma função para o site refrescar o saldo ao fechar

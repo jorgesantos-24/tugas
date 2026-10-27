@@ -337,9 +337,10 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
   .topbar{gap:10px}
   .wallet{margin-left:auto}
   .layout{grid-template-columns:minmax(0,1fr);padding:12px}
-  .sidebar{position:fixed;left:0;top:0;bottom:0;max-height:none;width:270px;z-index:55;border-radius:0;transform:translateX(-100%);transition:transform .2s}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;height:100vh;height:100dvh;max-height:none;width:270px;z-index:55;border-radius:0;transform:translateX(-100%);transition:transform .2s;
+    overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;touch-action:pan-y}
   .sidebar.open{transform:none}
-  .slip{position:fixed;left:0;right:0;bottom:0;top:auto;max-height:80vh;z-index:55;border-radius:16px 16px 0 0;transform:translateY(100%);transition:transform .2s}
+  .slip{position:fixed;left:0;right:0;bottom:0;top:auto;max-height:80vh;max-height:80dvh;overscroll-behavior:contain;z-index:55;border-radius:16px 16px 0 0;transform:translateY(100%);transition:transform .2s}
   .slip.open{transform:none}
   .slip-fab{position:fixed;bottom:14px;right:14px;z-index:40;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font-weight:800;padding:12px 18px;border-radius:30px;box-shadow:0 6px 20px rgba(0,0,0,.5)}
   .slip-fab .badge{background:#211800;color:var(--yellow)}
@@ -613,3 +614,7 @@ a.cg-card:hover .cg-play{opacity:1;transform:none}
   .hb-brand::after{right:24px;width:50px;height:130px}
   .hb-galo{right:-4px;bottom:-8px;height:138px}
 }
+
+/* telemóvel: com o menu ou o boletim abertos, a página de fundo não desliza (o dedo desliza a gaveta) */
+html.drawer-open,html.drawer-open body{overflow:hidden;overscroll-behavior:none}
+#slipBody{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
