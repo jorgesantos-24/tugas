@@ -80,7 +80,8 @@ function addLeague(l) {
   if (LEAGUE_BY_KEY[l.key]) return LEAGUE_BY_KEY[l.key];
   const x = { key: l.key, name: l.name, country: l.country || '', sport: l.sport, order: l.order ?? 999, dyn: true };
   LEAGUES.push(x); LEAGUE_BY_KEY[x.key] = x;
-  LEAGUES.sort((a, b) => a.order - b.order || (a.dyn && b.dyn ? a.name.localeCompare(b.name) : 0));
+  // ligas criadas na hora: por ordem, depois por país (ou circuito, no ténis) e por nome
+  LEAGUES.sort((a, b) => a.order - b.order || (a.dyn && b.dyn ? a.country.localeCompare(b.country) || a.name.localeCompare(b.name) : 0));
   return x;
 }
 const dynLeagues = () => LEAGUES.filter((l) => l.dyn).map(({ key, name, country, sport, order }) => ({ key, name, country, sport, order }));

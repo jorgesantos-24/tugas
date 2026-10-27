@@ -53,6 +53,57 @@ function leagueOf(sport, name) {
   return M.LEAGUES.find((l) => l.sport === sport && (l.src === name || (l.re && l.re.test(name)))) || null;
 }
 
+/* Futebol: todas as competições que a fonte oferece (decisão de 2026-10-27). As 24 principais têm nome e ordem
+   próprios (markets.js); as outras criam-se na hora ("fut.<nome>"), agrupadas por país no menu.
+   Ficam de fora: competições de menores (sub-15 a sub-20, UEFA Youth League) e futebol virtual (e-soccer). */
+const SOCCER_SKIP = /\bU-?(1[0-9]|20)\b|Youth League|e-?soccer|virtual|\d+ mins play/i;
+const MULTI_COUNTRY = ['Bosnia & Herzegovina', 'Northern Ireland', 'South Korea', 'North Korea', 'Saudi Arabia', 'New Zealand', 'Hong Kong', 'Costa Rica',
+  'El Salvador', 'United Arab Emirates', 'Faroe Islands', 'North Macedonia', 'Republic of Ireland', 'South Africa', 'Ivory Coast', 'Czech Republic',
+  'San Marino', 'Dominican Republic', 'Trinidad & Tobago', 'Burkina Faso', 'Sierra Leone', 'Sri Lanka', 'Puerto Rico', 'United States', 'Cape Verde'];
+const INTERNATIONAL = /^(UEFA|AFC|CAF|CONMEBOL|CONCACAF|OFC|FIFA|Copa |Club |International|World|Africa|Asia|Euro|Gulf|Arab|Leagues Cup|Campeones|Champions)/i;
+const GENERIC_REGION = new Set(['Europe', 'The Americas', 'United Kingdom', 'Rest Of World', 'Top Leagues', 'UEFA Competitions', 'undefined', '']);
+const COUNTRY_PT = {
+  Spain: 'Espanha', England: 'Inglaterra', Italy: 'Itália', Germany: 'Alemanha', France: 'França', Netherlands: 'Holanda', Brazil: 'Brasil',
+  Scotland: 'Escócia', Wales: 'País de Gales', 'Northern Ireland': 'Irlanda do Norte', 'Republic of Ireland': 'Irlanda', Ireland: 'Irlanda',
+  Türkiye: 'Turquia', Turkey: 'Turquia', Belgium: 'Bélgica', Japan: 'Japão', 'South Korea': 'Coreia do Sul', China: 'China', Australia: 'Austrália',
+  Sweden: 'Suécia', Norway: 'Noruega', Denmark: 'Dinamarca', Finland: 'Finlândia', Iceland: 'Islândia', Poland: 'Polónia', Czechia: 'Chéquia',
+  'Czech Republic': 'Chéquia', Slovakia: 'Eslováquia', Hungary: 'Hungria', Austria: 'Áustria', Switzerland: 'Suíça', Greece: 'Grécia',
+  Romania: 'Roménia', Bulgaria: 'Bulgária', Serbia: 'Sérvia', Croatia: 'Croácia', Slovenia: 'Eslovénia', 'Bosnia & Herzegovina': 'Bósnia',
+  'North Macedonia': 'Macedónia do Norte', Albania: 'Albânia', Montenegro: 'Montenegro', Cyprus: 'Chipre', Israel: 'Israel', Ukraine: 'Ucrânia',
+  Russia: 'Rússia', Belarus: 'Bielorrússia', Estonia: 'Estónia', Latvia: 'Letónia', Lithuania: 'Lituânia', Georgia: 'Geórgia', Armenia: 'Arménia',
+  Azerbaijan: 'Azerbaijão', Kazakhstan: 'Cazaquistão', Portugal: 'Portugal', Argentina: 'Argentina', Uruguay: 'Uruguai', Paraguay: 'Paraguai',
+  Chile: 'Chile', Peru: 'Peru', Ecuador: 'Equador', Colombia: 'Colômbia', Venezuela: 'Venezuela', Bolivia: 'Bolívia', Mexico: 'México',
+  USA: 'Estados Unidos', 'United States': 'Estados Unidos', Canada: 'Canadá', 'Costa Rica': 'Costa Rica', Honduras: 'Honduras', Guatemala: 'Guatemala',
+  'El Salvador': 'El Salvador', Egypt: 'Egito', Morocco: 'Marrocos', Algeria: 'Argélia', Tunisia: 'Tunísia', 'South Africa': 'África do Sul',
+  Nigeria: 'Nigéria', 'Saudi Arabia': 'Arábia Saudita', 'United Arab Emirates': 'Emirados Árabes', Qatar: 'Catar', Iran: 'Irão', Iraq: 'Iraque',
+  Jordan: 'Jordânia', India: 'Índia', Indonesia: 'Indonésia', Thailand: 'Tailândia', Vietnam: 'Vietname', Malaysia: 'Malásia', Singapore: 'Singapura',
+  'Hong Kong': 'Hong Kong', Myanmar: 'Myanmar', 'New Zealand': 'Nova Zelândia', Malta: 'Malta', Luxembourg: 'Luxemburgo', Moldova: 'Moldávia',
+};
+// liga do site para um nome da fonte (sem a criar): { key, name, country } ou null (fora: menores, virtual)
+function soccerDyn(name, region) {
+  const src = String(name || '').trim();
+  if (!src || SOCCER_SKIP.test(src)) return null;
+  let country = null, rest = src;
+  const multi = MULTI_COUNTRY.find((c) => src.startsWith(c + ' '));
+  if (multi) { country = multi; rest = src.slice(multi.length + 1); }
+  else if (INTERNATIONAL.test(src)) country = 'Internacional';
+  else {
+    const [first, ...r] = src.split(' ');
+    if (COUNTRY_PT[first] && r.length) { country = first; rest = r.join(' '); }
+    else if (!GENERIC_REGION.has(String(region))) country = String(region); // ex.: "A-League" (Austrália)
+    else country = 'Outros';
+  }
+  return { key: `fut.${slug(src)}`, name: rest || src, country: COUNTRY_PT[country] || country };
+}
+// competição a eliminar (pode ter prolongamento)
+const isCup = (name) => /\b(cup|copa|pokal|coupe|coppa|ta[cç]a|beker|trophy|shield|play-?offs?|knockout|qualif)/i.test(String(name || ''));
+function soccerLeague(name, region) {
+  const fixed = leagueOf('soccer', name);
+  if (fixed) return fixed;
+  const d = soccerDyn(name, region);
+  return d ? M.addLeague({ ...d, sport: 'soccer', order: 100 }) : null; // depois das 24 principais, por país
+}
+
 /* Futebol: mercados por código do grupo (estáveis; permitem pedir só estes, o que deixa a resposta pequena).
    main = linha principal (aparece na lista de jogos). */
 const SOCCER_GROUPS = {
@@ -90,7 +141,13 @@ async function get(pathQs) {
 
 const round2 = (n) => Math.round(n * 100) / 100;
 const parseScore = (s) => { const m = /^(\d+)\s*-\s*(\d+)$/.exec(String(s || '').trim()); return m ? [Number(m[1]), Number(m[2])] : null; };
-const num = (v) => parseFloat(String(v ?? '').replace(/[^\d.+-]/g, ''));
+// número de uma linha: "2.5", "+1.5", "Over 2.5"; linha asiática "3.0, 3.5" = 3.25 (metade da aposta em cada uma)
+const num = (v) => {
+  const t = String(v ?? '');
+  const n = t.match(/[+-]?\d+(\.\d+)?/g);
+  if (!n) return NaN;
+  return /,/.test(t) && n.length === 2 ? (Number(n[0]) + Number(n[1])) / 2 : Number(n[0]);
+};
 const pad2 = (n) => String(Math.max(0, n)).padStart(2, '0');
 
 /* Relógio da bet365: { min, sec, ticking, ref } — "ref" é quando o relógio marcava min:sec.
@@ -191,7 +248,7 @@ const EXTRA_PRE_MS = 15 * 60000, EXTRA_LIVE_MS = 60000; // depois disto: antes d
 
 // um jogo da MoviOdds → evento do site (full = a resposta trazia todos os grupos de mercados)
 function toEvent(m0, serverNow, sport, full = true) {
-  let lg = leagueOf(sport, m0.league);
+  let lg = sport === 'soccer' ? soccerLeague(m0.league, m0.region) : leagueOf(sport, m0.league);
   if (!lg || !m0.home || !m0.away) return null;
   const { quotes, ...meta } = m0;
   const prev = lastMeta.get(String(m0.id));
@@ -342,14 +399,15 @@ async function fetchSport(s, live) {
     return parseList(await get(`${q}&groups=${live ? SOCCER_LIVE : `${SOCCER_PRE},${SOCCER_LIVE}`}`), s, false);
   }
 }
-async function fetchSports(live) {
-  const res = await Promise.allSettled(SPORTS.map((s) => fetchSport(s, live)));
+async function fetchSports(live, only = null) {
+  const list = only ? SPORTS.filter((s) => only.includes(s)) : SPORTS;
+  const res = await Promise.allSettled(list.map((s) => fetchSport(s, live)));
   const events = [], ok = new Set(), errors = [];
-  res.forEach((r, i) => { if (r.status === 'fulfilled') { events.push(...r.value); ok.add(SPORTS[i]); } else errors.push(`${SPORTS[i]}: ${r.reason.message}`); });
+  res.forEach((r, i) => { if (r.status === 'fulfilled') { events.push(...r.value); ok.add(list[i]); } else errors.push(`${list[i]}: ${r.reason.message}`); });
   return { events, ok, errors };
 }
 const fetchAll = () => fetchSports(false);
-const fetchLive = () => fetchSports(true);
+const fetchLive = (only) => fetchSports(true, only); // only = só estas modalidades (ex.: confirmar uma aposta)
 
 /* Resultado de um jogo terminado. Devolve null (ainda sem resultado), { done: false, note } (parou antes do fim,
    desistência, placar por confirmar: fica para a equipa) ou { done: true, h, a, ... } (ver "R" no markets.js). */
@@ -382,7 +440,7 @@ function parseResult(r, sport) {
     // vale o tempo regulamentar (1º + 2º tempo, sem prorrogação nem pênaltis)
     const sc = per(/^(1st|2nd) Half$/).length === 2 ? sum(per(/^(1st|2nd) Half$/)) : fin;
     if (!sc) return NOPE('placar ilegível');
-    const lg = leagueOf('soccer', r.league);
+    const lg = leagueOf('soccer', r.league) || soccerDyn(r.league, r.region);
     // estatísticas por jogador (mercados de jogadores) e sinais de prolongamento na cronologia
     const players = (PLAYERS.roster(r.stats) || []).map(({ key, side, played, goals, shots, shots_on_target, assists, fouls, fouls_drawn, tackles, saves, passes, yellow_cards, red_cards }) =>
       ({ key, side, played, goals, shots, shots_on_target, assists, fouls, fouls_drawn, tackles, saves, passes, yellow_cards, red_cards }));
@@ -392,7 +450,7 @@ function parseResult(r, sport) {
       done: true, h: sc[0], a: sc[1], parts: PARTS.finishedParts('soccer', r.stats, sc, { overtime: !!r.overtime }),
       ...(players.length ? { players } : {}), ...(extraTime ? { extraTime } : {}),
       // empate aos 90' numa eliminatória: pode ter havido prolongamento → resultado da ESPN antes de liquidar jogadores
-      ...(lg && KNOCKOUT.has(lg.key) && sc[0] === sc[1] ? { needEt: true } : {}),
+      ...(lg && (KNOCKOUT.has(lg.key) || (lg.key.startsWith('fut.') && isCup(r.league))) && sc[0] === sc[1] ? { needEt: true } : {}),
       ...extra,
     };
   }
@@ -437,7 +495,7 @@ async function loadPlayerCoverage(days = 7) {
     try {
       const d = await get(`/results?sport=soccer&date=${day}&stats=1`);
       for (const r of d.results || []) {
-        const lg = r.status === 'finished' ? leagueOf('soccer', r.league) : null;
+        const lg = r.status === 'finished' ? leagueOf('soccer', r.league) || soccerDyn(r.league, r.region) : null;
         if (lg) { PLAYERS.addCoverage(lg.key, r.stats); n++; }
       }
     } catch (e) { console.warn(`[Jogadores] resultados de ${day}: ${e.message}`); }

@@ -58,6 +58,9 @@ const MAX_WIN = 50000000; // R$ 500.000 em centavos
 // mercados liquidados pela equipa (escanteios, cartões, jogadores...): aposta e prêmio máximos mais baixos
 const MANUAL_MAX_STAKE = Math.round(Number(process.env.MANUAL_MAX_STAKE || 100) * 100);
 const MANUAL_MAX_WIN = Math.round(Number(process.env.MANUAL_MAX_WIN || 5000) * 100);
+// futebol fora das 24 ligas principais (ligas "fut.*"): limites mais baixos (mais risco de jogos combinados e menos verificação)
+const MINOR_MAX_STAKE = Math.round(Number(process.env.MINOR_MAX_STAKE || 200) * 100);
+const MINOR_MAX_WIN = Math.round(Number(process.env.MINOR_MAX_WIN || 5000) * 100);
 const DAY = 24 * 3600000;
 const BR_OFFSET = 3 * 3600000; // horário de Brasília (UTC-3)
 const ADMIN_EMAILS = new Set(String(process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
@@ -69,7 +72,12 @@ const SITE = {
   supportEmail: process.env.SUPPORT_EMAIL || 'suporte@tugasbet.com',
   supportPhone: process.env.SUPPORT_PHONE || '',
   withdrawEta: process.env.WITHDRAW_ETA || 'até 24 horas',
+  // tempo real direto ao Cloud Run: o Firebase Hosting (tugasbet.com) retém respostas em fluxo e o tempo real não passava
+  streamUrl: EMULATOR ? '' : String(process.env.STREAM_URL || '').replace(/\/+$/, ''), // teste local: nunca o fluxo de produção
 };
+// sites que podem abrir o tempo real a partir de outro endereço (CORS em /api/stream)
+const STREAM_ORIGINS = new Set([process.env.SITE_URL, process.env.CANONICAL_HOST && `https://${process.env.CANONICAL_HOST}`, process.env.CANONICAL_HOST && `https://www.${process.env.CANONICAL_HOST}`]
+  .filter(Boolean).map((u) => { try { return new URL(u).origin; } catch { return null; } }).filter(Boolean));
 
 /* ---------------- utilidades ---------------- */
 const now = () => Date.now();
@@ -426,7 +434,7 @@ async function checkResults() {
   const want = new Map();
   for (const ev of events.values()) if (ev.awaiting && ev.state !== 'post') want.set(ev.id, null);
   for (const b of openBets.values()) for (const l of b.legs) {
-    if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.'))) want.set(l.evId, l);
+    if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.') || l.league?.startsWith('fut.'))) want.set(l.evId, l);
   }
   let asked = 0;
   for (const [id, leg] of want) {
@@ -538,10 +546,12 @@ function liveSnapshot(evIds) {
   return snap;
 }
 // placar e odds ao vivo mais recentes (um pedido só traz todos os jogos a decorrer)
-async function refreshLiveNow() {
+async function refreshLiveNow(evIds) {
   const t = now();
+  // só as modalidades dos jogos em causa (com centenas de jogos ao vivo, ler tudo atrasava a aprovação)
+  const only = evIds ? [...new Set([...evIds].map((id) => events.get(id)?.sport).filter(Boolean))] : null;
   try {
-    const { events: list, ok } = await FEED.fetchLive();
+    const { events: list, ok } = await FEED.fetchLive(only && only.length ? only : null);
     mergeEvents(list, t);
     markMissing(new Set(list.map((e) => e.id)), false, t, ok);
     feedVersion++; feedCache = null;
@@ -1174,7 +1184,7 @@ const routes = {
       const liveIds = new Set(parsed.flatMap((tk) => tk.keys.map((k) => String(k).split('|')[0])));
       const snap = liveSnapshot(liveIds);
       await sleep(live ? liveDelayMs([...snap.keys()].map((id) => events.get(id)?.sport)) : PRE_DELAY_MS);
-      if (snap.size) await refreshLiveNow(); // placar mais recente antes de decidir
+      if (snap.size) await refreshLiveNow(snap.keys()); // placar mais recente antes de decidir
       const liveReason = liveChanged(snap, t0);
       const placed = [], rejected = [];
       for (let i = 0; i < parsed.length; i++) {
@@ -1197,6 +1207,10 @@ const routes = {
         const odds = M.round2(legs.reduce((p, l) => p * l.odds, 1));
         const potential = Math.round(tk.stake * odds);
         if (potential > MAX_WIN) { rejected.push({ index: i, reason: 'prêmio máximo de R$ 500.000 excedido' }); continue; }
+        if (legs.some((l) => String(l.league).startsWith('fut.'))) {
+          if (tk.stake > MINOR_MAX_STAKE) { rejected.push({ index: i, reason: `aposta máxima nesta competição: ${brl(MINOR_MAX_STAKE)}` }); continue; }
+          if (potential > MINOR_MAX_WIN) { rejected.push({ index: i, reason: `prêmio máximo nesta competição: ${brl(MINOR_MAX_WIN)}` }); continue; }
+        }
         // mercados liquidados pela equipa: limites mais baixos (dependem de uma pessoa confirmar o resultado)
         if (legs.some((l) => l.market === 'x')) {
           if (tk.stake > MANUAL_MAX_STAKE) { rejected.push({ index: i, reason: `aposta máxima neste mercado: ${brl(MANUAL_MAX_STAKE)}` }); continue; }
@@ -1251,7 +1265,7 @@ const routes = {
     const snap = liveSnapshot(new Set(s.data().legs.filter((l) => !l.result).map((l) => l.evId)));
     await sleep(snap.size ? liveDelayMs([...snap.keys()].map((sid) => events.get(sid)?.sport)) : CASHOUT_DELAY_MS);
     if (snap.size) {
-      await refreshLiveNow();
+      await refreshLiveNow(snap.keys());
       const why = liveChanged(snap, t0);
       if (why) fail(409, `Cash Out recusado: ${why}.`);
     }
@@ -1586,7 +1600,11 @@ const server = http.createServer(async (req, res) => {
   }
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (req.method === 'POST' && url.pathname === '/api/webhooks/bravopay') return handleWebhook(req, res);
-  if (req.method === 'GET' && url.pathname === '/api/stream') return handleStream(req, res); // odds ao vivo empurradas
+  if (req.method === 'GET' && url.pathname === '/api/stream') { // odds ao vivo empurradas
+    const origin = String(req.headers.origin || '');
+    if (STREAM_ORIGINS.has(origin)) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin, Accept-Encoding'); }
+    return handleStream(req, res);
+  }
 
   const handler = routes[`${req.method} ${url.pathname}`];
   const cookies = [];

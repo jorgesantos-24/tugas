@@ -33,7 +33,9 @@ const SECRET_ENV = { BRAVOPAY_API_KEY: 'tugas-bravopay-key', BRAVOPAY_WEBHOOK_SE
 for (const [k, name] of Object.entries(SECRET_ENV)) if (env[k]) SECRETS[name] = env[k];
 
 // variáveis normais (sem segredos, sem vazias)
-const SKIP = new Set([...Object.keys(SECRET_ENV), 'FIREBASE_SERVICE_ACCOUNT', 'PORT', 'GOOGLE_APPLICATION_CREDENTIALS']);
+// chaves de serviços que já não se usam (API-Football, BoltOdds): não vão para o serviço
+const RETIRED = ['APIFOOTBALL_KEY', 'BOLTODDS_API_KEY'];
+const SKIP = new Set([...Object.keys(SECRET_ENV), ...RETIRED, 'FIREBASE_SERVICE_ACCOUNT', 'PORT', 'GOOGLE_APPLICATION_CREDENTIALS']);
 const plain = { ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !== '' && !SKIP.has(k))), TRUST_PROXY: '1', FIREBASE_SERVICE_ACCOUNT: '/secrets/firebase/key.json' };
 
 (async () => {
@@ -72,7 +74,7 @@ const plain = { ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !
   try {
     sh(g([
       `run deploy ${SERVICE}`, '--source=.', `--region=${REGION}`, '--allow-unauthenticated',
-      '--min-instances=1', '--max-instances=1', '--no-cpu-throttling', '--cpu=1', '--memory=512Mi',
+      '--min-instances=1', '--max-instances=1', '--no-cpu-throttling', '--cpu=1', '--memory=2Gi', // a oferta completa de futebol (~118 MB de JSON) chega a ~800 MB no pico
       // cada navegador com o tempo real aberto (GET /api/stream) ocupa uma ligação: 80 seria pouco para uma instância só
       '--concurrency=1000', '--timeout=3600', '--cpu-boost',
       `--env-vars-file="${envFile}"`, `--set-secrets="${secretFlags}"`,

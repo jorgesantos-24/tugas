@@ -13,7 +13,13 @@
    O histórico só é usado se bater certo com o placar dos sets (número de games e vencedores de cada set). */
 
 const parseScore = (s) => { const m = /^(\d+)\s*-\s*(\d+)$/.exec(String(s ?? '').trim()); return m ? [Number(m[1]), Number(m[2])] : null; };
-const num = (v) => parseFloat(String(v ?? '').replace(/[^\d.+-]/g, ''));
+// número de uma linha: "2.5", "+1.5", "Over 2.5"; linha asiática "3.0, 3.5" = 3.25 (metade da aposta em cada uma)
+const num = (v) => {
+  const t = String(v ?? '');
+  const n = t.match(/[+-]?\d+(\.\d+)?/g);
+  if (!n) return NaN;
+  return /,/.test(t) && n.length === 2 ? (Number(n[0]) + Number(n[1])) / 2 : Number(n[0]);
+};
 const stripSvr = (s) => String(s ?? '').replace(/\s*\(Svr\)\s*$/i, '').trim();
 const PTS = { love: 0, 0: 0, 15: 15, 30: 30, 40: 40 };
 const ptsOf = (s) => { const m = /(love|\d+)\s*$/i.exec(String(s ?? '').trim()); return m && m[1].toLowerCase() in PTS ? PTS[m[1].toLowerCase()] : null; };

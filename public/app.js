@@ -175,12 +175,15 @@ function mergeLight(full, light) {
     return { ...mk, sels: mk.sels.map((x) => byPick.get(`${x.pick}|${x.line ?? ''}|${x.base ?? ''}`) || x) };
   });
 }
-function startStream() {
+async function startStream() {
   if (!window.EventSource) return;
+  // no domínio do site (Firebase Hosting) o fluxo ficava retido: liga-se direto ao servidor (S.site.streamUrl)
+  try { await S.sitePromise; } catch { /* sem dados do site: fica no próprio endereço */ }
+  const base = S.site?.streamUrl && new URL(S.site.streamUrl).origin !== location.origin ? S.site.streamUrl : '';
   let es = null, raf = 0;
   const paint = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; S.keepScroll = true; safeRender(); }); };
   const connect = () => {
-    es = new EventSource('/api/stream?watch=' + encodeURIComponent(fullIds().join(',')));
+    es = new EventSource(base + '/api/stream?watch=' + encodeURIComponent(fullIds().join(',')));
     es.addEventListener('hello', (msg) => {
       let d; try { d = JSON.parse(msg.data); } catch { return; }
       S.streamSid = d.sid; S.streamAt = Date.now(); S.live = true; watchKey = '';
@@ -924,6 +927,7 @@ function renderSidebar() {
     html += `<div class="side-leagues">`;
     if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
     let circuit = null;
+    if (sk === 'soccer' && lgs.some((l) => l.dyn) && !lgs[0].dyn) html += `<div class="side-sub">Principais</div>`;
     for (const l of lgs) {
       // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
       if (l.dyn && l.country !== circuit) { circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`; }
@@ -1468,7 +1472,7 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
 (async function start() {
   renderHeader();
   await Promise.all([loadEvents(), loadAccount('first')]);
-  api('GET', '/api/site').then(({ site }) => {
+  S.sitePromise = api('GET', '/api/site').then(({ site }) => {
     S.site = site || {};
     const parts = [site.company, site.cnpj && 'CNPJ ' + site.cnpj, site.license && 'Autorização SPA/MF: ' + site.license, site.supportEmail].filter(Boolean);
     const el = $('#siteInfo'); if (el) el.textContent = parts.join(' · ');
