@@ -64,6 +64,11 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .side-sport.cur{color:var(--yellow)}
 .side-leagues{margin:2px 0 6px 18px;padding-left:8px;border-left:2px solid var(--line)}
 .side-leagues.anim{animation:sideIn .18s ease-out}
+/* futebol: países que abrem e fecham */
+.side-country{font-weight:600}
+.side-country .chev{margin-left:6px;transition:transform .15s;color:var(--muted)}
+.side-country.open .chev{transform:rotate(90deg)}
+.side-item.side-cl{padding-left:22px;font-size:12.5px}
 .side-leagues .side-item{padding:7px 10px}
 .side-sub{padding:8px 10px 2px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 @keyframes sideIn{from{opacity:0;transform:translateY(-4px)}}

@@ -13,7 +13,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 const S = {
   site: {}, // dados da empresa (/api/site): e-mail de suporte, CNPJ...
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
-  view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null,
+  view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(),
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
   acceptAnyLocal: lsGet('gl_acceptAny', true),
   user: null, bets: [], tx: [], payments: { live: false }, games: {},
@@ -943,13 +943,28 @@ function renderSidebar() {
     html += `<div class="side-leagues${S.sideAnim === sk ? ' anim' : ''}">`;
     if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
     let circuit = null;
-    if (sk === 'soccer' && lgs.some((l) => l.dyn) && !lgs[0].dyn) html += `<div class="side-sub">Principais</div>`;
+    const byCountry = sk === 'soccer' && lgs.some((l) => l.dyn); // futebol: países que abrem e fecham
+    if (byCountry && !lgs[0].dyn) html += `<div class="side-sub">Principais</div>`;
+    if (byCountry && S.view === 'league' && LEAGUE_BY_KEY[S.league]?.dyn) S.openCountries.add(LEAGUE_BY_KEY[S.league].country); // a liga aberta mostra o seu país
     for (const l of lgs) {
-      // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
-      if (l.dyn && l.country !== circuit) { circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`; }
+      if (byCountry && l.dyn) {
+        if (l.country !== circuit) {
+          circuit = l.country;
+          if (circuit !== null && !html.includes('data-countries-title')) html += `<div class="side-sub" data-countries-title>Países</div>`;
+          const cl = lgs.filter((x) => x.dyn && x.country === circuit).map((x) => x.key);
+          const ce = evs.filter((e) => cl.includes(e.league) && e.state !== 'post');
+          const clive = ce.filter((e) => e.state === 'in').length;
+          const op = S.openCountries.has(circuit);
+          html += `<button class="side-item side-country ${op ? 'open' : ''}" data-togglecountry="${esc(circuit)}">${esc(circuit)}<span class="cnt ${clive ? 'live' : ''}">${clive ? '● ' + clive : ce.length}</span><span class="chev">›</span></button>`;
+        }
+        if (!S.openCountries.has(l.country)) continue;
+      } else if (l.dyn && l.country !== circuit) {
+        // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
+        circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`;
+      }
       const le = evs.filter((e) => e.league === l.key);
       const lv = le.filter((e) => e.state === 'in').length;
-      html += `<button class="side-item ${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
+      html += `<button class="side-item ${byCountry && l.dyn ? 'side-cl ' : ''}${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
     }
     html += `</div>`;
   }
@@ -1386,6 +1401,7 @@ document.addEventListener('click', async (e) => {
   if (d.league) { e.preventDefault(); go('league', { league: d.league }); return; }
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
   if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; S.sideAnim = S.openSport; renderSidebar(); return; }
+  if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
