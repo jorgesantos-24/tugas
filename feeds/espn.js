@@ -64,10 +64,41 @@ async function extraTime(ev, reg) {
       // quem passa: jogo único, ou decidido no prolongamento/penáltis; na 1ª mão (ou 2ª mão decidida no agregado) não se sabe
       const notes = (c.notes || []).map((n) => n.headline || n.text || '').join(' ');
       const qualified = end !== 'ft' ? winner : /\bleg\b/i.test(notes) ? null : winner;
-      return { end, winner, pens, qualified, twoLegs: /leg/i.test(notes), espn: `${H.team?.displayName} ${H.score}-${A.score} ${A.team?.displayName} (${detail})` };
+      // prolongamento jogado? ("AET", "AET-Pens"; "FT-Pens" = penáltis logo a seguir aos 90 minutos)
+      const etPlayed = end === 'aet' || /AET|extra/i.test(detail);
+      const etGoals = etPlayed ? await extraTimeGoals(slug, e.id, swap, H, A, sc, reg) : null;
+      return { end, winner, pens, qualified, etPlayed, etGoals, twoLegs: /\bleg\b/i.test(notes), espn: `${H.team?.displayName} ${H.score}-${A.score} ${A.team?.displayName} (${detail})` };
     }
   }
   return null;
+}
+
+/* Gols do prolongamento, do resumo do jogo na ESPN (cada gol com período: 1-2 = 90 minutos, 3-4 = prolongamento).
+   Só vale se bater certo duas vezes: gols dos períodos 1+2 = placar dos 90 minutos (MoviOdds) e todos = placar final
+   da ESPN (um autogolo atribuído à equipa errada, ou um gol em falta, deixa de bater → null → equipa).
+   → { p3: [c, f], p4: [c, f], order: ['home', 'away', ...] } (gols do prolongamento por ordem) ou null. */
+async function extraTimeGoals(slug, id, swap, H, A, sc, reg) {
+  try {
+    const r = await fetch(`${BASE}${slug}/summary?event=${encodeURIComponent(id)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return null;
+    const s = await r.json();
+    const per = { 1: [0, 0], 2: [0, 0], 3: [0, 0], 4: [0, 0] }, order = [];
+    const goals = (s.keyEvents || []).filter((k) => k.scoringPlay && Number(k.period?.number) <= 4); // período 5 = penáltis
+    for (const k of goals) {
+      const p = Number(k.period.number), tn = k.team?.displayName;
+      const espnSide = same(tn, H.team?.displayName) ? 0 : same(tn, A.team?.displayName) ? 1 : -1;
+      if (espnSide < 0 || !per[p]) return null;
+      const side = swap ? 1 - espnSide : espnSide; // lado do jogo do site
+      per[p][side]++;
+      if (p >= 3) order.push(side === 0 ? 'home' : 'away');
+    }
+    const espnTot = swap ? [sc[1], sc[0]] : sc; // placar final no lado da ESPN → no lado do site já vem em sc
+    const all = [0, 1].map((i) => per[1][i] + per[2][i] + per[3][i] + per[4][i]);
+    if (all[0] !== sc[0] || all[1] !== sc[1]) return null;
+    if (reg && (per[1][0] + per[2][0] !== reg[0] || per[1][1] + per[2][1] !== reg[1])) return null;
+    void espnTot;
+    return { p3: per[3], p4: per[4], order };
+  } catch { return null; }
 }
 
 module.exports = { extraTime };

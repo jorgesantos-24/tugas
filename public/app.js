@@ -834,7 +834,7 @@ function streamBlock(ev) {
 }
 
 // mercado liquidado pela equipa: aviso no cabeçalho do mercado (o pagamento sai depois de a equipa confirmar)
-const manualNote = (list) => (list[0]?.manual ? '<small title="Resultado confirmado pela equipa depois do jogo; aposta máxima mais baixa">confirmado pela equipa</small>' : '');
+const manualNote = (list) => (list[0]?.manual ? '<small title="Resultado confirmado pela equipe depois do jogo; aposta máxima mais baixa">confirmado pela equipa</small>' : '');
 
 function renderEvent() {
   const ev = S.events.get(S.eventId);
@@ -1369,7 +1369,7 @@ async function doWithdraw() {
     try {
       const { user } = await api('POST', '/api/withdraw', { amount: v });
       setUser(user); render();
-      openModal(`<div class="success"><div class="ic">✓</div><h3>Pedido de saque recebido</h3><p class="sub">${money(v)} para a chave PIX ${esc(S.user.cpf)}.<br>A nossa equipa confere e envia o PIX em ${esc(S.payments.withdrawEta)}. Acompanhe no Extrato.</p><button class="btn btn-green btn-block" data-action="close-modal">OK</button></div>`);
+      openModal(`<div class="success"><div class="ic">✓</div><h3>Pedido de saque recebido</h3><p class="sub">${money(v)} para a chave PIX ${esc(S.user.cpf)}.<br>Nossa equipe confere e envia o PIX em ${esc(S.payments.withdrawEta)}. Acompanhe no Extrato.</p><button class="btn btn-green btn-block" data-action="close-modal">OK</button></div>`);
     } catch (e) { busy(btn, false); formErr(e.message); loadAccount().then(() => renderHeader()); }
   }
 }
@@ -1402,7 +1402,7 @@ async function openAccount(tab) {
       <div class="kv"><span>Membro desde</span><b>${new Date(u.createdAt).toLocaleDateString('pt-BR')}</b></div>
       <a class="acc-sac" href="/sac.html"><span class="acc-sac-ic">🎧</span><span><b>Atendimento (SAC)</b><small>Dúvidas sobre depósitos, saques e apostas</small></span><span class="acc-sac-go">›</span></a>
       <a class="acc-sac acc-sac-mail" href="mailto:${esc(S.site.supportEmail || 'suporte@tugasbet.com')}"><span class="acc-sac-ic">✉️</span><span><b>E-mail do suporte</b><small>${esc(S.site.supportEmail || 'suporte@tugasbet.com')}</small></span><span class="acc-sac-go">›</span></a>
-      ${u.isAdmin ? '<a class="btn btn-ghost btn-block" style="margin-top:16px" href="/admin">Abrir o painel da equipa</a>' : ''}
+      ${u.isAdmin ? '<a class="btn btn-ghost btn-block" style="margin-top:16px" href="/admin">Abrir o painel da equipe</a>' : ''}
       <button class="btn btn-ghost btn-block" style="margin-top:10px" data-action="logout">Sair da conta</button>`;
   } else if (accTab === 'tx') {
     body = `<div class="tx-list" id="txList"><div class="spinner"></div></div>`;

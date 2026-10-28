@@ -1,0 +1,793 @@
+{
+ "nota": "ESPN 27/10: Sestao x Espanyol (Taça do Rei, 2-2 aos 90, 4-3 AET) e Fleetwood x Arsenal (Taça da Liga, 1-1, penáltis sem prolongamento)",
+ "sestao": {
+  "scoreboard": {
+   "events": [
+    {
+     "id": "401928495",
+     "date": "2026-10-27T18:00Z",
+     "name": "Espanyol at Sestao",
+     "competitions": [
+      {
+       "date": "2026-10-27T18:00Z",
+       "status": {
+        "clock": 7200,
+        "displayClock": "120'+3'",
+        "period": 4,
+        "type": {
+         "id": "45",
+         "name": "STATUS_FINAL_AET",
+         "state": "post",
+         "completed": true,
+         "description": "Final Score - After Extra Time",
+         "detail": "AET",
+         "shortDetail": "AET"
+        }
+       },
+       "notes": [],
+       "competitors": [
+        {
+         "homeAway": "home",
+         "score": "4",
+         "winner": true,
+         "team": {
+          "displayName": "Sestao"
+         }
+        },
+        {
+         "homeAway": "away",
+         "score": "3",
+         "winner": false,
+         "team": {
+          "displayName": "Espanyol"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  "summary": {
+   "keyEvents": [
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 0,
+      "displayValue": ""
+     },
+     "type": {
+      "text": "Kickoff"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 344,
+      "displayValue": "6'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Penalty - Scored"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 455,
+      "displayValue": "8'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 976,
+      "displayValue": "17'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1073,
+      "displayValue": "18'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Goal"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1158,
+      "displayValue": "20'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1158,
+      "displayValue": "20'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1255,
+      "displayValue": "21'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1255,
+      "displayValue": "21'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 1770,
+      "displayValue": "30'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 2343,
+      "displayValue": "40'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Goal - Header"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 2488,
+      "displayValue": "42'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 1
+     },
+     "clock": {
+      "value": 2700,
+      "displayValue": "45'+3'"
+     },
+     "type": {
+      "text": "Halftime"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2700,
+      "displayValue": "45'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2700,
+      "displayValue": "45'"
+     },
+     "type": {
+      "text": "Start 2nd Half"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2930,
+      "displayValue": "49'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2930,
+      "displayValue": "49'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2941,
+      "displayValue": "50'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 2941,
+      "displayValue": "50'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 3415,
+      "displayValue": "57'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 3415,
+      "displayValue": "57'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 3800,
+      "displayValue": "64'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 3804,
+      "displayValue": "64'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 3816,
+      "displayValue": "64'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 4345,
+      "displayValue": "73'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 4356,
+      "displayValue": "73'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 4471,
+      "displayValue": "75'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 4652,
+      "displayValue": "78'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5290,
+      "displayValue": "89'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5309,
+      "displayValue": "89'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5309,
+      "displayValue": "89'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Start Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5370,
+      "displayValue": "90'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5370,
+      "displayValue": "90'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "End Delay"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5378,
+      "displayValue": "90'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Penalty - Scored"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 2
+     },
+     "clock": {
+      "value": 5400,
+      "displayValue": "90'+5'"
+     },
+     "type": {
+      "text": "End Regular Time"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "value": 5400,
+      "displayValue": "90'"
+     },
+     "type": {
+      "text": "Start Extra Time"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "value": 5717,
+      "displayValue": "96'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Goal"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "value": 5832,
+      "displayValue": "98'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Goal - Header"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "value": 6300,
+      "displayValue": "105'"
+     },
+     "type": {
+      "text": "Halftime Extra Time"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 4
+     },
+     "clock": {
+      "value": 6300,
+      "displayValue": "105'"
+     },
+     "type": {
+      "text": "Start 2nd Half Extra Time"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 4
+     },
+     "clock": {
+      "value": 6578,
+      "displayValue": "110'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Yellow Card"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 4
+     },
+     "clock": {
+      "value": 7018,
+      "displayValue": "117'"
+     },
+     "team": {
+      "displayName": "Espanyol"
+     },
+     "type": {
+      "text": "Substitution"
+     }
+    },
+    {
+     "scoringPlay": true,
+     "period": {
+      "number": 4
+     },
+     "clock": {
+      "value": 7200,
+      "displayValue": "120'+1'"
+     },
+     "team": {
+      "displayName": "Sestao"
+     },
+     "type": {
+      "text": "Goal"
+     }
+    },
+    {
+     "scoringPlay": false,
+     "period": {
+      "number": 4
+     },
+     "clock": {
+      "value": 7200,
+      "displayValue": "120'+3'"
+     },
+     "type": {
+      "text": "End Extra Time"
+     }
+    }
+   ]
+  }
+ },
+ "fleetwood": {
+  "scoreboard": {
+   "events": [
+    {
+     "id": "401921835",
+     "date": "2026-10-27T20:00Z",
+     "name": "Arsenal at Fleetwood Town",
+     "competitions": [
+      {
+       "date": "2026-10-27T20:00Z",
+       "status": {
+        "clock": 5700,
+        "displayClock": "95'",
+        "period": 5,
+        "type": {
+         "id": "47",
+         "name": "STATUS_FINAL_PEN",
+         "state": "post",
+         "completed": true,
+         "description": "Final Score - After Penalties",
+         "detail": "FT-Pens",
+         "shortDetail": "FT-Pens"
+        }
+       },
+       "notes": [
+        {
+         "text": "Fleetwood Town win 5-3 on penalties",
+         "headline": "Fleetwood Town win 5-3 on penalties",
+         "type": "event"
+        }
+       ],
+       "competitors": [
+        {
+         "homeAway": "home",
+         "score": "1",
+         "winner": true,
+         "shootoutScore": 5,
+         "team": {
+          "displayName": "Fleetwood Town"
+         }
+        },
+        {
+         "homeAway": "away",
+         "score": "1",
+         "winner": false,
+         "shootoutScore": 3,
+         "team": {
+          "displayName": "Arsenal"
+         }
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

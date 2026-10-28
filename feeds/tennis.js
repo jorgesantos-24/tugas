@@ -231,7 +231,9 @@ const sameSet = (a, b) => a.length === b.length && a.every((x) => b.includes(x))
 function guardOverround(byK) {
   for (const mk of byK.values()) {
     const byLine = new Map();
-    for (const x of mk.sels) { const k = String(x.line ?? ''); if (!byLine.has(k)) byLine.set(k, []); byLine.get(k).push(x); }
+    // handicaps: casa com linha L faz par com fora com linha -L (casa -0,25 e fora -0,25 são apostas diferentes)
+    const hcp = /spread|pspr/.test(mk.k);
+    for (const x of mk.sels) { const k = x.line == null ? '' : String(hcp && String(x.pick).startsWith('away') ? -x.line : x.line) + '|' + String(x.base ?? ''); if (!byLine.has(k)) byLine.set(k, []); byLine.get(k).push(x); }
     for (const g of byLine.values()) {
       const picks = g.map((x) => String(x.pick));
       if (!COMPLETE.some((c) => sameSet(c, picks))) continue;

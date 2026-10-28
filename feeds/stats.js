@@ -29,8 +29,8 @@ const TENNIS = [
   ['aces', 'Aces'], ['double_faults', 'Duplas faltas'], ['first_serve_win_pct', 'Pontos ganhos no 1º saque (%)', 1],
   ['second_serve_win_pct', 'Pontos ganhos no 2º saque (%)', 1], ['break_point_conversion_pct', 'Break points convertidos (%)', 1],
 ];
-const HOCKEY = [['shots', 'Remates'], ['penalties', 'Penalidades'], ['power_play_chances', 'Power plays']];
-const ESPORTS = [['maps_won', 'Mapas ganhos'], ['rounds', 'Rondas no mapa atual']];
+const HOCKEY = [['shots', 'Chutes'], ['penalties', 'Penalidades'], ['power_play_chances', 'Power plays']];
+const ESPORTS = [['maps_won', 'Mapas ganhos'], ['rounds', 'Rodadas no mapa atual']];
 
 // "Score After First Half" e afins ficam de fora; cartões e gols entram como lances (formato do app.js: ev.details)
 const TL = { goal: 'goal', yellow_card: 'yellow', red_card: 'red', penalty: 'pen' };

@@ -130,13 +130,14 @@ function quote(q, m, sport) {
   if (sport !== 'soccer' || s.k !== 'x') return s;
   /* Futebol (decisão de 2026-10-27): os mercados da equipa saem, exceto
      - jogadores: liquidados sozinhos com as estatísticas por jogador (os que não dá para liquidar não abrem);
-     - prolongamento / penáltis: abrem sempre; liquidados com a ESPN quando há regra, senão pela equipa. */
+     - prolongamento / penáltis: só os que têm regra (liquidados com a ESPN); os outros (escanteios do prolongamento,
+       handicaps/linhas do prolongamento, cada penálti, morte súbita...) não se oferecem (decisão de 2026-10-28). */
   const pp = PLAYERS.quote(q, m);
   if (pp) return { ...gen, ...pp };
   if (PLAYERS.isPlayerGroup(q.group_name) || soccerPlayer(q, m)) return null;
   const et = ET.quote(q, m);
   if (et) return { ...gen, ...et };
-  return ET.ET_GROUP.test(String(q.group_name ?? '')) ? s : null;
+  return null;
 }
 // a seleção é um jogador ("line" = jogador e "n2" = a equipa dele)?
 function soccerPlayer(q, m) {

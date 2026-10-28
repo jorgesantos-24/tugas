@@ -224,6 +224,30 @@ function petOutcome(leg, R) {
       const s = w === 'home' ? `${E.pens[0]}-${E.pens[1]}` : `${E.pens[1]}-${E.pens[0]}`;
       return W(side === w && sc === s);
     }
+    case 'mqual': { // como passa: só se se sabe quem passa
+      if (!E.qualified) return null;
+      const how = E.end === 'pens' ? 'pens' : E.end === 'aet' ? 'et' : '90';
+      return W(pk === `${E.qualified}:${how}`);
+    }
+    // ---- só o prolongamento (30 minutos): sem prolongamento → devolvida; gols por período em falta → equipa
+    case 'etres': case 'etgoals': case 'etbtts': case 'et1res': case 'et1goals': case 'etdr': case 'etcs': case 'et1cs': case 'etnth': {
+      if (E.etPlayed === false) return 0;
+      const G = E.etGoals;
+      if (!G) return null;
+      const full = [G.p3[0] + G.p4[0], G.p3[1] + G.p4[1]], half = G.p3;
+      const r = (x) => (x[0] > x[1] ? 'home' : x[0] < x[1] ? 'away' : 'draw');
+      const ouv = (v) => Math.sign(pk === 'over' ? v - leg.line : leg.line - v);
+      if (type === 'etres') return W(r(full) === pk);
+      if (type === 'et1res') return W(r(half) === pk);
+      if (type === 'etgoals') return ouv(full[0] + full[1]);
+      if (type === 'et1goals') return ouv(half[0] + half[1]);
+      if (type === 'etbtts') return W((full[0] > 0 && full[1] > 0) === yes);
+      if (type === 'etdr') return W(`${r(half)}-${r(full)}` === pk);
+      if (type === 'etcs') return W(`${full[0]}-${full[1]}` === pk);
+      if (type === 'et1cs') return W(`${half[0]}-${half[1]}` === pk);
+      const n = Number(String(leg.per).split('|')[2]); // N.º gol do prolongamento: quem marca (ou "nenhum")
+      return W((G.order[n - 1] || 'none') === pk);
+    }
     case 'shoottot': case 'shoothome': case 'shootaway': {
       if (!E.pens) return 0;
       const v = type === 'shoottot' ? E.pens[0] + E.pens[1] : type === 'shoothome' ? E.pens[0] : E.pens[1];
@@ -533,6 +557,92 @@ function esportsOutcome(leg, R) {
   return null;
 }
 
+/* Revisão final dos textos de mercados e seleções para português do Brasil (corre no servidor e no navegador).
+   A fonte é a bet365 em inglês e a tradução automática (feeds/generic.js) deixava restos em inglês e termos de
+   Portugal ("Remates", "Equipa", "guarda-redes"). Aqui:
+   1) termos de Portugal → Brasil (nome do mercado e da seleção);
+   2) inglês que sobrou → português (só no nome do mercado: o da seleção pode ter nomes de jogadores).
+   Os nomes das duas equipas do jogo nunca mudam ("Team Liquid" continua "Team Liquid"). */
+const ptBR = (function () {
+  const R = (re, to) => [re, to];
+  // 1) Portugal → Brasil (frases primeiro, depois palavras)
+  const PT = [
+    R(/Total da equipa de gols/g, 'Total de gols do time'), R(/Equipa Faixa de gols/g, 'Faixa de gols do time'),
+    R(/Remates à baliza/g, 'Chutes no gol'), R(/remates à baliza/g, 'chutes no gol'), R(/Remates on Goal/g, 'Chutes no gol'),
+    R(/\bRemates\b/g, 'Chutes'), R(/\bremates\b/g, 'chutes'), R(/\bRemate\b/g, 'Chute'), R(/\bremate\b/g, 'chute'),
+    R(/Primeira equipa/g, 'Primeiro time'), R(/primeira equipa/g, 'primeiro time'), R(/Última equipa/g, 'Último time'), R(/última equipa/g, 'último time'),
+    R(/Ambas as equipas/g, 'Ambos os times'), R(/ambas as equipas/g, 'ambos os times'), R(/As duas equipas/g, 'Os dois times'), R(/as duas equipas/g, 'os dois times'),
+    R(/Qualquer equipa/g, 'Qualquer time'), R(/qualquer equipa/g, 'qualquer time'), R(/Equipas que marcam/g, 'Times que marcam'),
+    R(/\bdas equipas\b/g, 'dos times'), R(/\bda equipa\b/g, 'do time'), R(/\ba equipa\b/g, 'o time'), R(/\bEquipas\b/g, 'Times'), R(/\bequipas\b/g, 'times'),
+    R(/\bEquipa\b/g, 'Time'), R(/\bequipa\b/g, 'time'),
+    R(/guarda-redes/g, 'goleiro'), R(/Guarda-redes/g, 'Goleiro'),
+    R(/Roubos e desarmes de lançamento/g, 'Roubos de bola e tocos'), R(/Desarmes de lançamento/g, 'Tocos'), R(/desarmes de lançamento/g, 'tocos'),
+    R(/\bRessaltos\b/g, 'Rebotes'), R(/\bressaltos\b/g, 'rebotes'), R(/\bTriplos\b/g, 'Cestas de 3'),
+    R(/\bRondas\b/g, 'Rodadas'), R(/\brondas\b/g, 'rodadas'), R(/\bRonda\b/g, 'Rodada'), R(/\bronda\b/g, 'rodada'),
+    R(/Pontapés de baliza/g, 'Tiros de meta'), R(/Foras de jogo/g, 'Impedimentos'), R(/Lançamentos laterais/g, 'Laterais'), R(/\bLivres\b/g, 'Cobranças de falta'),
+    R(/Cabeceamentos/g, 'Cabeceios'), R(/\bgolos\b/g, 'gols'), R(/\bGolos\b/g, 'Gols'), R(/\bgolo\b/g, 'gol'), R(/\bGolo\b/g, 'Gol'),
+    R(/\bpenáltis\b/g, 'pênaltis'), R(/\bPenáltis\b/g, 'Pênaltis'), R(/\bpenálti\b/g, 'pênalti'), R(/\bPenálti\b/g, 'Pênalti'),
+    R(/\bprolongamento\b/g, 'prorrogação'), R(/\bProlongamento\b/g, 'Prorrogação'), R(/Super tie-break/g, 'Super tie-break'),
+  ];
+  // 2) inglês que sobrou (só no nome do mercado)
+  const EN = [
+    // frases inteiras primeiro (prorrogação, pênaltis, hóquei, basquete, e-Sports)
+    R(/Gols da partida Range/g, 'Faixa de gols da partida'), R(/\bRange\b/g, 'Faixa'),
+    R(/^Extra Time Final Placar$/, 'Prorrogação: placar final'), R(/^Extra Time Intervalo Placar$/, 'Prorrogação: placar do intervalo'),
+    R(/^Extra Time (.+)$/, 'Prorrogação: $1'), R(/(.+) - Extra Time$/, '$1 da prorrogação'),
+    R(/Game Won In Extra Time/i, 'Jogo decidido na prorrogação'), R(/Game Won After Penalties/i, 'Jogo decidido nos pênaltis'),
+    R(/Resultado Decided on Penalties/i, 'Decidido nos pênaltis'), R(/Resultado Decided in Extra Time/i, 'Decidido na prorrogação'),
+    R(/Will (Game|Partida) go to ([^?]+)\??/i, 'Vai para $2?'), R(/When will (Game|Partida) End/i, 'Quando termina a partida'),
+    R(/Tied at End Of Regulation\?/i, 'Empatado no fim do tempo regulamentar?'), R(/Tied after Regulation/i, 'Empatado no tempo regulamentar'),
+    R(/ in Regulation\b/i, ' no tempo regulamentar'), R(/ [Ii]n Período (\d+)/g, ' no período $1'), R(/ [Ii]n (\d+º tempo)/g, ' no $1'),
+    R(/Time Scoring (\d+)(?:st|nd|rd|th|º) Wins Game/i, 'Time que marca o $1º gol vence'), R(/marca Último/g, 'marca por último'),
+    R(/Vencer The (Most|Mais) Periods/gi, 'vence mais períodos'), R(/Win The Most Periods/gi, 'vence mais períodos'),
+    R(/de mais pontos Half/g, 'Tempo com mais pontos'), R(/Highest Scoring Half/gi, 'Tempo com mais pontos'),
+    R(/ of Victory\b/gi, ' de vitória'), R(/Odd or Even/gi, 'Par ou ímpar'), R(/marca point 'X'/g, "marca o ponto 'X'"), R(/\bpoint\b/g, 'ponto'),
+    R(/(\d+) Minute\b/g, '$1 minutos'), R(/\bSaves\b/g, 'Defesas'), R(/Correct score/gi, 'Placar exato'),
+    R(/Dragon to Spawn/gi, 'dragão a nascer'), R(/Aegis Steal/gi, 'Roubo da Aegis'), R(/Vence Both/g, 'Vence as duas'), R(/ e Vence Mapa/g, ' e o mapa'),
+    R(/Best of (\d+)/gi, 'melhor de $1'), R(/\bRounds\b/g, 'Rodadas'), R(/ Scored\b/g, ''), R(/ to$/g, ''), R(/\bBoth\b/g, 'Ambos'),
+    R(/\bResults\b/g, 'Resultado'), R(/\(Incl\. Tie\)/gi, '(com empate)'), R(/Multi Marcadores/g, 'Marca mais de uma vez'),
+    R(/de mais pontos Período/g, 'Período com mais gols'), R(/Highest Scoring Period/gi, 'Período com mais gols'),
+    R(/Puck Linhas?/g, 'Puck line'), R(/Vai para Pênaltis\?/g, 'Vai para os pênaltis?'), R(/Vai para Prorrogação\?/g, 'Vai para a prorrogação?'),
+    R(/Vence (Both|Ambos) rodadas/g, 'Vence as duas rodadas'),
+    R(/\bto be Booked\b/gi, 'recebe cartão'), R(/\bon Goal\b/g, 'no gol'), R(/(\d)-Way\b/g, '($1 opções)'),
+    R(/\bTo Qualify\b/g, 'Classifica-se'), R(/\bMethod Of Qualification\b/gi, 'Forma de classificação'),
+    R(/\bPoint Spread\b/g, 'Handicap de pontos'), R(/\bDouble Double\b/g, 'Duplo-duplo'), R(/\bTriple Double\b/g, 'Triplo-duplo'),
+    R(/\bMargin \(Bands\)/g, 'Margem (faixas)'), R(/\bMargin\b/g, 'Margem'), R(/\(inc Tie\)/gi, '(com empate)'), R(/\bTo go to\b/gi, 'Vai para'),
+    R(/\bwith highest scoring quarter\b/gi, 'com o quarto de mais pontos'), R(/\bhighest scoring\b/gi, 'de mais pontos'),
+    R(/\bPartida-Ups\b/g, 'Duelos'), R(/\bMatch-Ups\b/gi, 'Duelos'), R(/\bMost Kills\b/g, 'Mais abates'), R(/\bMost Deaths\b/g, 'Mais mortes'),
+    R(/\bMost Assistências\b/g, 'Mais assistências'), R(/\bMost\b/g, 'Mais'), R(/\bKills\b/g, 'abates'), R(/\bKill\b/g, 'abate'), R(/\bDeaths\b/g, 'mortes'),
+    R(/\bBlocked\b/g, 'Bloqueados'), R(/\bEither\b/g, 'Qualquer'), R(/\bLast\b/g, 'Último'), R(/\bAlt\b/g, 'Alternativo'),
+    R(/\b[Tt]o Placar\b/g, 'marca'), R(/\bPlacar point\b/g, 'marca o ponto'), R(/\bin Game\b/g, 'no jogo'), R(/\bin Match\b/g, 'na partida'),
+    R(/\bGoals\b/g, 'Gols'), R(/\bGoal\b/g, 'Gol'), R(/\bTotals\b/g, 'Totais'), R(/\bLines\b/g, 'Linhas'), R(/\bLine\b/g, 'Linha'),
+    R(/\bWinner\b/g, 'Vencedor'), R(/\bFirst\b/g, 'Primeiro'), R(/\bSecond\b/g, 'Segundo'), R(/\bThird\b/g, 'Terceiro'), R(/\bScorer\b/g, 'Marcador'),
+    R(/\b(\d+)(st|nd|rd|th)\b/g, '$1º'), R(/ and /g, ' e '),
+    R(/^Jogador (.+)$/, '$1 do jogador'), R(/^Alternativo (.+)$/, '$1 (alternativo)'), R(/^Adicional (.+)$/, '$1 (adicional)'), R(/\bResult\b/g, 'Resultado'), R(/\bWin\b/g, 'Vence'), R(/\bTo\b/g, 'para'),
+  ];
+  const SEL = [R(/^Any other result$/i, 'Outro resultado'), R(/^Any other Score$/i, 'Outro placar'), R(/^Any Other$/i, 'Outro'), R(/^Overtime$/, 'Prorrogação'), R(/^Penalties$/, 'Pênaltis'), R(/^Regular Time$/i, 'Tempo regulamentar'), R(/ or /g, ' ou '), R(/^Over (?=\d)/, 'Mais de '), R(/^Under (?=\d)/, 'Menos de '), R(/^Exactly (?=\d)/, 'Exatamente ')];
+  const run = (t, list) => { for (const [re, to] of list) t = t.replace(re, to); return t; };
+  // protege os nomes das equipas (e devolve-os no fim)
+  function ptBR(text, names = [], market = false) {
+    let t = String(text ?? '');
+    if (!t) return t;
+    const keep = names.filter(Boolean).sort((a, b) => b.length - a.length);
+    keep.forEach((n, i) => { t = t.split(n).join(`\u0000${i}\u0000`); });
+    t = run(t, PT);
+    t = market ? run(t, EN) : run(t, SEL);
+    t = t.replace(/\s+/g, ' ').trim();
+    keep.forEach((n, i) => { t = t.split(`\u0000${i}\u0000`).join(n); });
+    return t;
+  }
+  const cache = new Map();
+  return (text, names = [], market = false) => {
+    const k = (market ? 'm|' : 's|') + names.join('|') + '|' + text;
+    let v = cache.get(k);
+    if (v === undefined) { v = ptBR(text, names, market); if (cache.size > 50000) cache.clear(); cache.set(k, v); }
+    return v;
+  };
+})();
+
 function selections(ev) {
   const out = [];
   const H = ev.home.short, A = ev.away.short, three = ev.sport === 'soccer';
@@ -576,6 +686,12 @@ function selections(ev) {
       // a linha (e o placar de referência) fazem parte da chave: se mudarem, a seleção antiga deixa de existir
       o.key = `${ev.id}|${o.market}|${o.pick}` + (o.line != null ? `|${o.line}` : '') + (o.base ? `|${o.base.join('-')}` : '') + (o.per != null ? `|p${o.per}` : '');
       if (!o.marketName) o.marketName = MARKET_NAMES[mk.k](o, ev);
+      // português do Brasil (termos de Portugal e restos em inglês da fonte); os nomes das equipas não mudam
+      const keepNames = [ev.home.name, ev.away.name, H, A];
+      const nm0 = o.name;
+      o.marketName = ptBR(o.marketName, keepNames, true);
+      if (o.name != null) o.name = ptBR(o.name, keepNames);
+      if (o.lbl === nm0) o.lbl = o.name;
       out.push(o);
     }
   }

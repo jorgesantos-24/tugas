@@ -11,6 +11,7 @@ const KEY = process.env.NO_EXTERNAL === '1' ? '' : process.env.MOVIODDS_KEY || '
 
 const M = require('../public/markets.js');
 const TEN = require('./tennis.js'); // mercados e histórico de games do ténis
+const GUARD_SOCCER = require('./guard-soccer.js'); // proteção das odds do futebol (mercados irmãos)
 const GEN = require('./generic.js'); // todos os outros mercados (liquidados pela equipa)
 const WS = require('./moviows.js'); // odds e placar ao vivo empurrados (WebSocket)
 const STATS = require('./stats.js'); // estatísticas ao vivo (página do jogo)
@@ -356,16 +357,18 @@ function toEvent(m0, serverNow, sport, full = true) {
   for (const [k, n] of Object.entries(NEED[sport] || {})) if (byK.get(k) && byK.get(k).sels.length !== n) byK.delete(k);
   // mercados com uma seleção só (a outra caiu por odd 1.00) não fazem sentido: saem, exceto os de "N ou mais" (aces...)
   if (sport === 'tennis') for (const [key, mk] of byK) if (mk.sels.length < 2 && !['tace', 'tdf'].includes(mk.k)) byK.delete(key);
-  // ténis: odds impossíveis ou que não batem com mercados irmãos saem do site (voltam quando a fonte as corrigir)
-  if (sport === 'tennis') {
-    TEN.guardTennis(byK, !!live);
+  // proteção das odds: impossíveis (lucro garantido) em todas as modalidades; ténis e futebol também cruzam mercados
+  // irmãos (feeds/tennis.js guardTennis, feeds/guard-soccer.js). As marcadas saem do site e voltam quando a fonte corrigir.
+  {
+    if (sport === 'tennis') TEN.guardTennis(byK, !!live);
+    else { TEN.guardOverround(byK); if (sport === 'soccer') GUARD_SOCCER.guardSoccer(byK); }
     for (const [key, mk] of byK) {
       const out = mk.sels.filter((x) => x.guard);
       if (!out.length) continue;
       guardRemoved.push(`${new Date(serverNow).toISOString()} [${live ? 'ao vivo' : 'pré'}] ${m.home} x ${m.away} ${mk.k}${mk.per ? ' ' + mk.per : ''}: ${out.map((x) => `${x.pick}${x.line != null ? '(' + x.line + ')' : ''}@${x.odds}`).join(' ')}`);
       if (guardRemoved.length > 300) guardRemoved.splice(0, guardRemoved.length - 300);
       mk.sels = mk.sels.filter((x) => !x.guard);
-      if (mk.sels.length < 2 && !['tace', 'tdf'].includes(mk.k)) byK.delete(key);
+      if ((mk.sels.length < 2 && !['tace', 'tdf', 'pp', 'x'].includes(mk.k)) || (mk.k === 'ml' && sport === 'soccer' && mk.sels.length !== 3)) byK.delete(key);
     }
   }
   const markets = sport === 'tennis' ? [...byK.values()].filter((mk) => mk.k !== 'x' && !M.SOURCE_KINDS.has(mk.k)).sort(TEN.marketSort)
