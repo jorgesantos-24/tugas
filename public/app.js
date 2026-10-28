@@ -15,7 +15,7 @@ const S = {
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
   view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(),
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
-  acceptAnyLocal: lsGet('gl_acceptAny', true),
+  acceptAnyLocal: lsGet('gl_acceptAny', true), streamHidden: lsGet('gl_streamHidden', false),
   user: null, bets: [], tx: [], payments: { live: false }, games: {},
   placing: false, cashoutConfirm: null, cashoutBusy: null,
   loaded: false, failed: false, lastUpdate: null, etag: null, keepScroll: false,
@@ -138,6 +138,7 @@ function syncWatch() {
 }
 function applyEvents(d, partial) {
   const offset = Date.now() - (d.now || Date.now());
+  if (d.catalog) setCatalog(d.catalog); // modalidades e campeonatos criados pela equipa (painel → Esportes e mercados)
   for (const l of d.leagues || []) addLeague(l);
   for (const e of d.events || []) if (e.removed) S.events.delete(e.id);
   const fix = (ev) => ({
@@ -393,6 +394,7 @@ function tickClocks() {
 setInterval(() => { if (!document.hidden) tickClocks(); }, 1000);
 
 function timeCell(ev) {
+  if (ev.outright) return `<b style="color:#fff">🏆</b><br>até ${ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`;
   if (ev.state === 'in') return `<span class="lv"><span class="live-dot"></span>${clockHtml(ev, 'Ao vivo')}</span>`;
   const dd = ev.date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
   if (ev.state === 'post') return `<span>${esc(ev.clock)}</span><br><span>${dd}</span>`;
@@ -412,9 +414,13 @@ function teamLine(t, ev, other) {
   return `<div class="team-line ${won ? 'won' : ''}">${crest(t)}<span class="nm">${esc(t.name)}${serve}</span>${pt}${showScore ? `<span class="sc">${t.score}</span>` : ''}</div>`;
 }
 
-// seleções que aparecem na linha do jogo: 1X2 (futebol) ou vencedor
+// seleções que aparecem na linha do jogo: 1X2 (futebol) ou vencedor; sem estes, o primeiro mercado da equipa (até 3 seleções)
 function mainSels(ev, sels) {
   const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
+  if (!by('ml', 'home')) {
+    const first = sels.find((s) => s.market === 'custom');
+    if (first) return sels.filter((s) => s.market === 'custom' && s.pick.split('.')[0] === first.pick.split('.')[0]).slice(0, 3);
+  }
   return ev.sport === 'soccer' ? [by('ml', 'home'), by('ml', 'draw'), by('ml', 'away')] : [by('ml', 'home'), by('ml', 'away')];
 }
 
@@ -423,13 +429,14 @@ function evRow(ev) {
   const by = (m, p) => sels.find((s) => s.market === m && s.pick === p);
   const main = mainSels(ev, sels);
   const tk = ev.sport === 'tennis' ? 'gtotal' : 'total'; // ténis: total de games
-  const tot = [by(tk, 'over'), by(tk, 'under')];
+  const custom = LEAGUE_BY_KEY[ev.league]?.custom; // campeonato da equipa: sem colunas de total
+  const tot = custom ? [] : [by(tk, 'over'), by(tk, 'under')];
   const goal = ev.goalAt && Date.now() - ev.goalAt < 12000;
   const oddsHtml = ev.state === 'post' ? '' :
-    main.map((s) => oddBtn(s, ev)).join('') + '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join('');
+    main.map((s) => oddBtn(s, ev)).join('') + (custom ? '' : '<span class="gap col-total"></span>' + tot.map((s) => oddBtn(s, ev, { cls: 'col-total' })).join(''));
   return `<div class="ev-row ${goal ? 'goal' : ''} ${ev.state === 'in' ? 'live' : ''}" data-ev="${ev.id}">
     <div class="ev-time">${timeCell(ev)}</div>
-    <div class="ev-teams">${teamLine(ev.home, ev, ev.away) + teamLine(ev.away, ev, ev.home)}</div>
+    <div class="ev-teams">${ev.outright ? `<div class="team-line"><span class="nm">${esc(ev.home.name)}</span></div><div class="out-close">${isSuspended(ev) ? 'Apostas encerradas' : 'Apostas até ' + dateLabel(ev.date)}</div>` : teamLine(ev.home, ev, ev.away) + teamLine(ev.away, ev, ev.home)}</div>
     <div class="ev-odds">${oddsHtml}</div>
     <div class="ev-more">${ev.state !== 'post' && sels.length ? '+' + (ev.nsel || sels.length) : ''}</div>
   </div>`;
@@ -453,7 +460,7 @@ function leagueBlocks(list, max = Infinity) {
     const allPost = evs.every((e) => e.state === 'post');
     return `<section class="league">
       <div class="league-head">${SPORTS[lg.sport].icon} ${esc(lg.name)} <span class="country">· ${esc(lg.country)}</span>
-        ${allPost ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
+        ${allPost || lg.custom ? '' : `<div class="cols">${soc ? '<span>1</span><span>X</span><span>2</span>' : '<span>Casa</span><span>Fora</span>'}<span class="gap col-total"></span><span class="col-total">Mais</span><span class="col-total">Menos</span><span style="width:44px" class="col-more"></span></div>`}
       </div>
       ${evs.map(evRow).join('')}
     </section>`;
@@ -654,9 +661,12 @@ function renderMain() {
       html += homeHero(live);
       html += homeCasino();
       html += sportTabs();
-      const featured = live.filter((e) => e.markets).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
+      const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
-      const upcoming = filtered((e) => e.state === 'pre' && (isToday(e) || isTomorrow(e)) && e.markets && !isSuspended(e));
+      const upcoming = filtered((e) => !e.outright && e.state === 'pre' && (isToday(e) || isTomorrow(e)) && (e.markets || e.cm) && !isSuspended(e));
+      // longo prazo (campeão, artilheiro...): enquanto as apostas estiverem abertas
+      const longTerm = filtered((e) => e.outright && e.cm && !isSuspended(e)).sort((a, b) => a.date - b.date);
+      if (longTerm.length) html += `<div class="section-head"><h2>🏆 Longo prazo</h2><span class="muted">${longTerm.length} mercados</span></div>` + leagueBlocks(longTerm);
       html += `<div class="section-head"><h2>Próximos jogos</h2></div>`;
       html += upcoming.length ? leagueBlocks(upcoming, S.listLimit) : `<div class="empty-state">Nenhum jogo com odds disponível hoje.</div>`;
     } else {
@@ -690,7 +700,13 @@ function renderMain() {
   // reaproveita o bloco do cassino já carregado (as imagens não piscam e a posição da fila mantém-se)
   const oldCasino = main.querySelector('#homeCasino');
   const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
-  main.innerHTML = html;
+  // mesma transmissão já na página: troca só o que está à volta do player (o vídeo continua a tocar)
+  const box = main.querySelector('#streamBox'), a = html.indexOf(STREAM_A), b = html.indexOf(STREAM_B);
+  if (box && a >= 0 && b > a && html.includes(`data-src="${esc(box.dataset.src)}"`)) {
+    for (const n of [...main.childNodes]) if (n !== box) n.remove();
+    box.insertAdjacentHTML('beforebegin', html.slice(0, a));
+    box.insertAdjacentHTML('afterend', html.slice(b + STREAM_B.length));
+  } else main.innerHTML = html;
   tickClocks();
   if (moreObs) { moreObs.disconnect(); const mb = main.querySelector('.more-games'); if (mb) moreObs.observe(mb); }
   const newCasino = main.querySelector('#homeCasino');
@@ -774,18 +790,57 @@ function sportTabsOf(ev) {
     { id: 'hcp', label: 'Handicaps e totais', has: K('spread', 'total') },
   ];
 }
+// evento de longo prazo: título, prazo de fechamento e os mercados (lista de participantes)
+function renderOutright(ev, sels) {
+  const closed = isSuspended(ev);
+  let html = `<a href="#" class="back" data-action="back">← Voltar</a>
+  <div class="ev-detail-head">
+    <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>🏆 Longo prazo</span></div>
+    <div class="out-title">${esc(ev.home.name)}</div>
+    <div class="big-clock" style="color:var(--muted);text-align:center">${closed ? 'Apostas encerradas — à espera do resultado' : 'Apostas até ' + dateLabel(ev.date)}</div>
+  </div>`;
+  const groups = {};
+  for (const s of sels) (groups[s.marketName] ||= []).push(s);
+  if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento.</div>`;
+  for (const [name, list] of Object.entries(groups)) {
+    const c = list[0].cclose;
+    html += `<div class="market"><div class="market-head">${esc(name)}${c ? `<small>${Date.now() >= c ? 'fechado' : 'até ' + dateLabel(new Date(c))}</small>` : ''}</div><div class="market-body many">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div></div>`;
+  }
+  return html;
+}
+
+// transmissão do jogo: o player fica entre as marcas STREAM_* e o renderMain nunca o recria enquanto for o mesmo (não recarrega o vídeo)
+const STREAM_A = '<!--stream-->', STREAM_B = '<!--/stream-->';
+function streamSrc(st) {
+  const h = encodeURIComponent(location.hostname || 'localhost'), id = encodeURIComponent(st.id);
+  if (st.type === 'twitch') return `https://player.twitch.tv/?channel=${id}&parent=${h}&muted=true`;
+  if (st.type === 'twitch-video') return `https://player.twitch.tv/?video=${id}&parent=${h}&muted=true`;
+  if (st.type === 'youtube') return `https://www.youtube.com/embed/${id}?autoplay=1&mute=1`;
+  if (st.type === 'youtube-channel') return `https://www.youtube.com/embed/live_stream?channel=${id}&autoplay=1&mute=1`;
+  if (st.type === 'kick') return `https://player.kick.com/${id}?muted=true`;
+  return null;
+}
+function streamBlock(ev) {
+  const src = ev.stream && ev.state !== 'post' ? streamSrc(ev.stream) : null;
+  if (!src) return '';
+  const head = `<div class="stream-head"><span>${ev.state === 'in' ? '<span class="live-dot"></span> ' : ''}📺 Transmissão</span><button class="link-btn" data-action="stream-toggle">${S.streamHidden ? 'Mostrar' : 'Esconder'}</button></div>`;
+  if (S.streamHidden) return head;
+  return head + STREAM_A + `<div class="stream-box" id="streamBox" data-src="${esc(src)}"><iframe src="${esc(src)}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" title="Transmissão"></iframe></div>` + STREAM_B;
+}
+
 // mercado liquidado pela equipa: aviso no cabeçalho do mercado (o pagamento sai depois de a equipa confirmar)
 const manualNote = (list) => (list[0]?.manual ? '<small title="Resultado confirmado pela equipa depois do jogo; aposta máxima mais baixa">confirmado pela equipa</small>' : '');
 
 function renderEvent() {
   const ev = S.events.get(S.eventId);
   if (!ev) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Evento não encontrado.</div>`;
+  if (ev.outright) return renderOutright(ev, selections(ev));
   if (ev.awaiting) return `<a href="#" class="back" data-action="back">← Voltar</a><div class="empty-state">Este jogo terminou. O resultado das suas apostas aparece em <a href="/minhas-apostas" data-view="mybets">Minhas apostas</a>.</div>`;
   const sels = selections(ev);
   const groups = {};
   for (const s of sels) (groups[s.marketName] ||= []).push(s);
   const form = (f) => (f ? `<div class="form">${f.split('').slice(-5).map((c) => `<i class="${c}">${c === 'W' ? 'V' : c === 'L' ? 'D' : 'E'}</i>`).join('')}</div>` : '');
-  const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${clockHtml(ev)}</div>`
+  const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${clockHtml(ev)}${ev.alive ? ` · 👥 ${ev.alive.h} v ${ev.alive.a}` : ''}</div>`
     : `<div class="big-clock" style="color:var(--muted)">${ev.state === 'post' ? esc(ev.clock) : dateLabel(ev.date)}</div>`;
   const score = ev.state === 'pre' ? 'vs' : `${ev.home.score ?? 0} : ${ev.away.score ?? 0}`;
   let html = `<a href="#" class="back" data-action="back">← Voltar</a>
@@ -796,7 +851,7 @@ function renderEvent() {
       <div><div class="big-score">${score}</div>${status}</div>
       <div class="hero-team">${crest(ev.away)}${esc(ev.away.name)}${form(ev.away.form)}</div>
     </div>
-  </div>`;
+  </div>${streamBlock(ev)}`;
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
@@ -807,9 +862,26 @@ function renderEvent() {
     const cur = tabs.find((t) => t.id === tab);
     if (tabs.length > 2) html += `<div class="tabs ev-tabs">${tabs.map((t) => `<button class="${t.id === tab ? 'active' : ''}" data-evtab="${t.id}">${esc(t.label)}<span class="tab-cnt">${t.id === 'all' ? Object.keys(groups).length : new Set(sels.filter((s) => t.has(s)).map((s) => s.marketName)).size}</span></button>`).join('')}</div>`;
     // totais e handicaps aparecem em tabela (uma linha por fila)
-    for (const [name, list] of Object.entries(groups)) {
-      if (!cur.has(list[0])) continue;
-      html += `<div class="market"><div class="market-head">${esc(name)}${manualNote(list) || (ev.state === 'in' ? '<small>Ao vivo</small>' : '')}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
+    let entries = Object.entries(groups).filter(([, list]) => cur.has(list[0]));
+    // mercados da equipa em melhor de 3, 5...: os da partida primeiro, depois um bloco por mapa (nome e quem o escolheu)
+    const multi = new Set(entries.map(([, l]) => l[0].cgroup).filter(Boolean)).size > 1;
+    if (multi) {
+      const gnum = (g) => (g ? parseInt(g.replace(/\D+/g, ''), 10) || 0 : -1);
+      entries = entries.map((e, i) => [e, i]).sort((x, y) => gnum(x[0][1][0].cgroup) - gnum(y[0][1][0].cgroup) || x[1] - y[1]).map(([e]) => e);
+    }
+    let lastGroup;
+    for (const [rawName, list] of entries) {
+      const g = list[0].cgroup || null;
+      if (g !== lastGroup && multi) {
+        const mi = ev.maps?.[(parseInt(String(g).replace(/\D+/g, ''), 10) || 0) - 1];
+        const extra = mi ? [mi.name, mi.pick ? `escolha de ${(mi.pick === 'h' ? ev.home : ev.away).name}` : ''].filter(Boolean).join(' · ') : '';
+        html += `<div class="map-head">${esc(g || 'Partida')}${extra ? `<small> · ${esc(extra)}</small>` : ''}</div>`;
+      }
+      lastGroup = g;
+      const name = g && rawName.startsWith(g + ' — ') ? rawName.slice(g.length + 3) : rawName;
+      const cc = list[0].cclose; // prazo de fechamento próprio do mercado
+      const note = cc ? `<small>${Date.now() >= cc ? 'fechado' : 'apostas até ' + dateLabel(new Date(cc))}</small>` : manualNote(list) || (ev.state === 'in' ? '<small>Ao vivo</small>' : '');
+      html += `<div class="market"><div class="market-head">${esc(name)}${note}</div>${linesTable(list, ev) || `<div class="market-body${list.length > 4 ? ' many' : ''}">${list.map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`}</div>`;
     }
   }
   html += statsPanel(ev);
@@ -1485,6 +1557,7 @@ document.addEventListener('click', async (e) => {
   if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.listLimit = LIST_STEP; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
+  if (d.action === 'stream-toggle') { S.streamHidden = !S.streamHidden; lsSet('gl_streamHidden', S.streamHidden); S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
   if (d.view) { e.preventDefault(); go(d.view); return; }
   if (d.ev) { S.prevView = S.view === 'event' ? S.prevView : { view: S.view, league: S.league, sport: S.sport }; go('event', { eventId: d.ev }); return; }

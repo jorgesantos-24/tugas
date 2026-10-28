@@ -68,8 +68,8 @@ function showLogin() {
 function renderTabs() {
   const s = A.summary;
   const open = s ? s.withdrawals.pending + s.withdrawals.processing : 0;
-  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Mercados por liquidar', s && s.bets ? s.bets.pendingMarkets : 0], ['aovivo', 'Ao vivo suspeitas', s ? s.liveAlerts24h || 0 : 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
-  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
+  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Mercados por liquidar', s && s.bets ? s.bets.pendingMarkets : 0], ['aovivo', 'Ao vivo suspeitas', s ? s.liveAlerts24h || 0 : 0], ['esportes', 'Esportes e mercados', 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
+  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') || (k === 'esportes' && A.view === 'esporte-ev') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
   document.title = (open ? `(${open}) ` : '') + 'Painel da equipa';
 }
 async function loadSummary() {
@@ -89,6 +89,9 @@ async function render() {
     else if (A.view === 'apostas') m.innerHTML = await viewBets();
     else if (A.view === 'mercados') m.innerHTML = await viewPendingMarkets();
     else if (A.view === 'aovivo') m.innerHTML = await viewLiveAlerts();
+    // aba "Esportes e mercados" (admin-catalog.js)
+    else if (A.view === 'esportes') m.innerHTML = await viewCatalog();
+    else if (A.view === 'esporte-ev') m.innerHTML = A.catEv ? await viewCatEvent() : await viewCatalog();
     else if (A.view === 'jogadores') m.innerHTML = await viewUsers();
     else if (A.view === 'jogador') m.innerHTML = await viewUser();
     else if (A.view === 'registo') m.innerHTML = await viewLogs();

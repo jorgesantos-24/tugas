@@ -1,0 +1,54 @@
+/* Painel → "Esportes e mercados" (admin-catalog.js) e bot da transmissão */
+.pill.REJECTED,.pill.FAILED,.pill.DUPLICATE,.pill.CHARGEBACK,.pill.REFUNDED,.pill.bad{background:#3a1218;color:var(--red)}
+/* esportes e mercados */
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.subtabs button{padding:7px 12px;border-radius:8px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font-weight:600}
+.subtabs button.active{color:var(--text);border-color:var(--yellow)}
+.mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;font-size:13px;outline:none;min-width:0;color-scheme:dark}
+.mini.odd-in{width:84px;text-align:right;font-weight:700}
+.mk-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+.mk-card.settled{opacity:.8}
+.mk-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.mk-head .grow{flex:1;min-width:180px}
+.mk-card table td{padding:6px 8px;vertical-align:middle}
+.mk-foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.rm{color:var(--red);font-size:18px;padding:0 6px}
+.tpl{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.tpl button,.icons button{padding:5px 9px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--text)}
+.icons{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.icons button{font-size:18px;padding:3px 7px}
+.ev-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+.ev-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+/* regras do jogo e placar ao vivo */
+.rules-box{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.rules-box .grid2{gap:0 12px}
+.live-card{margin-top:12px;border-color:#2b5a3d}
+.map-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px}
+.srvbot{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.srvbot .bot-opts{display:flex;gap:16px;flex-wrap:wrap;margin:6px 0}
+.srvbot .bot-opts .check{margin:0}
+.bot-state{padding:8px 10px;border-radius:8px;background:var(--panel2);font-weight:600;margin:6px 0}
+.bot-state.ok{color:#22c55e} .bot-state.warn{color:var(--yellow)} .bot-state.bad{color:#fff;background:#7f1d1d}
+.bot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0}
+.bot-grid>div{background:var(--panel2);border-radius:8px;padding:8px;font-size:13px}
+.bot-grid small{display:block;color:var(--muted);font-size:11px;margin-bottom:2px}
+.bot-prev{position:relative;max-width:640px;margin:8px 0;border-radius:8px;overflow:hidden;background:#000}
+.bot-prev img{display:block;width:100%;height:auto}
+.bot-prev .bbox{position:absolute;border:2px solid #22c55e;border-radius:2px}
+.bot-prev .bbox.r{border-color:#f59e0b}
+.bot-prev .bbox span{position:absolute;bottom:100%;left:0;font-size:10px;font-weight:700;color:#fff;background:#000a;padding:0 3px;white-space:nowrap}
+.bot-log{max-height:170px;overflow:auto;font-size:12px;color:var(--muted)}
+.bot-log div{padding:2px 0;border-bottom:1px solid var(--line)}
+.bot-log span{opacity:.7}
+.bot-log .ok{color:#86efac} .bot-log .warn{color:var(--yellow)} .bot-log .bad{color:#fca5a5}
+.map-row b{min-width:58px}
+.map-row input{flex:1;min-width:120px}
+.lv-score{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;margin:6px 0}
+.lv-num{font-size:38px;font-weight:800;min-width:120px;text-align:center;letter-spacing:1px}
+.lv-btn{display:flex;flex-direction:column;align-items:center;min-width:150px;padding:12px 16px;font-size:16px}
+.lv-btn small{font-size:12px;font-weight:600;opacity:.85;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv-btn:disabled{opacity:.4}
+.lv-maps{text-align:center;color:var(--muted);font-size:13px}
+tr.old-line td{opacity:.5}
+.map-sec{margin:18px 0 8px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--yellow)}
+textarea.inp{min-height:130px;font-family:ui-monospace,monospace;font-size:13px;resize:vertical}

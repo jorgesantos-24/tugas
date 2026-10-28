@@ -279,6 +279,7 @@ function mergeEvents(list, fetchedAt, fromWs = false) {
       // relógio ao segundo: diferenças de 1-2 s entre leituras são ruído (não reenvia o jogo por isso)
       if (ev.clockT0 && old.clockT0 && Math.abs(ev.clockT0 - old.clockT0) <= 2000) ev.clockT0 = old.clockT0;
     }
+    ev.cm = extraMarketsOf(ev.id); // mercados extra da equipa neste jogo (painel → Esportes e mercados)
     if (!old || !same(old, ev)) { changed = true; touch(ev.id); }
     events.set(ev.id, ev);
   }
@@ -387,7 +388,7 @@ const onWsDown = () => quickLiveRefresh(200);
 function wsWanted() {
   const t = now(), ids = [];
   for (const ev of events.values()) {
-    if (ev.state === 'post' || ev.awaiting) continue;
+    if (ev.state === 'post' || ev.awaiting || ev.manual) continue;
     if (ev.state === 'in' || (+ev.date - t < 15 * 60000 && t - +ev.date < 6 * 3600000)) ids.push(ev.id);
   }
   return ids;
@@ -402,7 +403,7 @@ function markMissing(seen, full, t, okSports) {
   let changed = false;
   const keep = openEvIds();
   for (const [id, ev] of events) {
-    if (seen.has(id) || ev.state === 'post' || ev.awaiting || !okSports.has(ev.sport)) continue;
+    if (ev.manual || seen.has(id) || ev.state === 'post' || ev.awaiting || !okSports.has(ev.sport)) continue; // eventos da equipa não vêm da fonte
     if (!full && ev.state !== 'in') continue;
     if (ev.state === 'pre' && +ev.date > t + 10 * 60000) {
       if (!keep.has(id)) events.delete(id); else ev.markets = null;
@@ -532,7 +533,7 @@ async function refresh(full) {
       if (await checkResults()) changed = true;
       if (await checkExtraTime()) changed = true;
       const keep = openEvIds();
-      for (const [id, ev] of events) if (t - ev.date > 36 * 3600000 && !keep.has(id)) { events.delete(id); changed = true; }
+      for (const [id, ev] of events) if (!ev.manual && t - ev.date > 36 * 3600000 && !keep.has(id)) { events.delete(id); changed = true; }
     }
     // só muda a versão (e os navegadores só voltam a descarregar tudo) quando há novidades,
     // ou a cada 30 s para o "Última atualização" do site continuar a andar
@@ -571,6 +572,7 @@ function liveChanged(snap, t0) {
     const ev = events.get(id);
     if (!ev || ev.state !== s.state) return 'o jogo mudou de estado durante a aprovação';
     if (M.GOAL_SPORTS.has(ev.sport) && (ev.home.score !== s.h || ev.away.score !== s.a || (ev.goalAt && ev.goalAt >= t0))) return 'houve gol durante a aprovação';
+    if (ev.manual && (ev.home.score !== s.h || ev.away.score !== s.a)) return 'o placar mudou durante a aprovação';
     if (M.isSuspended(ev)) return 'mercado suspenso durante a aprovação';
   }
   return null;
@@ -649,9 +651,81 @@ function feedPayload() {
     feedBuiltAt = now();
     const list = [...events.values()].map(lightEvent);
     // leagues: campeonatos criados na hora (torneios de ténis), para o navegador os conhecer
-    feedCache = lastFeed = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, leagues: M.dynLeagues(), events: list }) };
+    feedCache = lastFeed = { etag: `"v${feedVersion}"`, body: JSON.stringify({ lastFeedOk, leagues: M.dynLeagues(), catalog: catalogCache, events: list }) };
   }
   return feedCache;
+}
+
+/* ---------------- catálogo da equipa ----------------
+   Modalidades, campeonatos, eventos e mercados criados no painel /admin ("Esportes e mercados"). Ficam em memória
+   (ligação em tempo real ao Firestore) e entram no feed ao lado dos jogos da fonte. Os mercados da equipa são
+   liquidados quando a equipa (ou o bot da transmissão) marca o resultado (catalog.js). */
+const catSports = new Map(), catLeagues = new Map();
+const manualEvents = new Map();  // eventos da equipa (cada um com os seus mercados)
+const manualMarkets = new Map(); // id do jogo da fonte -> { markets } (mercados extra em jogos da fonte)
+let catalogCache = null;
+
+// o que o site vê de cada mercado: só os abertos e suspensos, sem resultados
+function pubMarkets(list) {
+  const out = (list || []).filter((m) => m.status !== 'settled')
+    .map((m) => ({ id: m.id, name: m.name, status: m.status, maxStake: m.maxStake ?? null, group: m.group || null, closesAt: m.closesAt ?? null, sels: m.sels.filter((s) => !s.hidden).map((s) => ({ id: s.id, name: s.name, odds: s.odds, ...(s.locked ? { locked: true } : {}), ...(s.side ? { side: s.side, line: s.line ?? null } : {}) })) }))
+    .filter((m) => m.sels.length); // mercado fechado na reta final: sai do site
+  return out.length ? out : null;
+}
+function extraMarketsOf(evId) { return pubMarkets(manualMarkets.get(evId)?.markets); }
+// mercados da equipa de um evento (da equipa ou da fonte), com resultados
+const teamMarkets = (evId) => (manualEvents.get(evId) || manualMarkets.get(evId))?.markets || [];
+
+function publicCatalog() {
+  const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0) || a.createdAt - b.createdAt;
+  const sports = [...catSports.values()].filter((s) => !s.hidden).sort(byOrder).map((s) => ({ key: s.id, name: s.name, icon: s.icon }));
+  const visible = (k) => (M.SPORTS[k] && !M.SPORTS[k].custom) || sports.some((s) => s.key === k);
+  const leagues = [...catLeagues.values()].filter((l) => !l.hidden && visible(l.sport)).sort(byOrder)
+    .map((l) => ({ key: l.id, name: l.name, country: l.country || '', sport: l.sport }));
+  return { sports, leagues };
+}
+
+function manualToEvent(d) {
+  const lg = M.LEAGUE_BY_KEY[d.league];
+  const side = (name, score, id) => ({ id, name, short: name, logo: '', score: d.state === 'pre' ? null : score ?? 0, form: '' });
+  return {
+    id: d.id, manual: true, league: d.league, leagueName: lg.name, country: lg.country, sport: lg.sport,
+    date: new Date(d.startsAt), state: d.state, completed: d.state === 'post', statusName: '',
+    clock: d.clock || (d.state === 'post' ? 'Encerrado' : d.state === 'in' ? 'Ao vivo' : undefined),
+    home: side(d.home, d.score?.h, 'h'), away: side(d.away, d.score?.a, 'a'), details: [], venue: '', markets: null, cm: pubMarkets(d.markets),
+    // longo prazo (campeão, artilheiro...): sem adversário; as apostas fecham na data do evento
+    ...(d.outright ? { outright: true, closesAt: d.startsAt } : {}),
+    ...(d.stream ? { stream: { type: d.stream.type, id: d.stream.id } } : {}),
+    // mapas da série (nome e quem escolheu) e jogadores vivos no round em curso
+    ...(d.live?.maps?.some((m) => m.name || m.pick) ? { maps: d.live.maps } : {}),
+    ...(d.state === 'in' && d.live?.alive && d.score && d.live.alive.x === d.score.h && d.live.alive.y === d.score.a ? { alive: { h: d.live.alive.h, a: d.live.alive.a } } : {}),
+  };
+}
+
+// reconstrói tudo o que depende do catálogo (corre a cada mudança no Firestore) e avisa os navegadores ligados
+function applyCatalog() {
+  catalogCache = publicCatalog();
+  M.setCatalog(catalogCache);
+  for (const [id, ev] of events) if (ev.manual) { events.delete(id); touch(id); }
+  for (const d of manualEvents.values()) if (!d.archived && M.LEAGUE_BY_KEY[d.league]) { events.set(d.id, manualToEvent(d)); touch(d.id); }
+  for (const ev of events.values()) {
+    if (ev.manual) continue;
+    const cm = extraMarketsOf(ev.id);
+    if (JSON.stringify(cm) !== JSON.stringify(ev.cm ?? null)) { ev.cm = cm; touch(ev.id); }
+  }
+  feedVersion++; feedCache = null;
+}
+
+// seleção de um mercado da equipa: fica decidida quando a equipa liquida o mercado
+const CUSTOM_RESULT = { won: 1, lost: -1, void: 0 };
+function settleCustomLeg(leg) {
+  const [mId, sId] = String(leg.pick).split('.');
+  const mk = teamMarkets(leg.evId).find((m) => m.id === mId);
+  if (!mk || mk.status !== 'settled') return false;
+  const r = mk.sels.find((s) => s.id === sId)?.result || 'void'; // seleção removida: devolvida
+  leg.result = r; leg.value = CUSTOM_RESULT[r] ?? 0;
+  leg.final = mk.sels.filter((s) => s.result === 'won').map((s) => s.name).join(', ') || 'anulado';
+  return true;
 }
 
 /* ---------------- liquidação ---------------- */
@@ -687,6 +761,7 @@ async function settleAll() {
       let changed = false;
       for (const leg of legs) {
         if (leg.result) continue;
+        if (leg.market === 'custom') { if (settleCustomLeg(leg)) changed = true; continue; } // mercado da equipa (painel)
         // o resultado já vem confirmado (lido duas vezes igual, ver checkResults)
         if (M.settleLeg(leg, events.get(leg.evId))) changed = true;
         else if (EARLY.check(row.id, leg)) { changed = true; console.log(`[Liquidação antecipada] aposta ${row.id}: ${leg.name} (${leg.marketName}, ${leg.event}) → ${leg.result} · ${leg.final}`); }
@@ -1239,7 +1314,7 @@ const routes = {
           if (!acceptAny && tk.seen[j] != null && Number(tk.seen[j]) !== sel.odds) { reason = 'odds alteradas'; break; }
           if (sel.maxStake && tk.stake > sel.maxStake) { reason = `aposta máxima no mercado "${sel.marketName}": ${brl(sel.maxStake)}`; break; }
           legs.push({
-            key: sel.key, evId: ev.id, feed: 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
+            key: sel.key, evId: ev.id, feed: ev.manual ? 'equipa' : 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
             name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
           });
@@ -1521,6 +1596,15 @@ const ADM = require('./admin.js')(routes, {
   requireUser, authInfo, authState, endSessions, openWithdrawals, pendingDeposits, depositWindow, ADMIN_EMAILS, BP, SITE,
   openBets, M, eventInfo: (id) => events.get(id) || null, feedName: FEED.name, settle: settleQueued, feedInfo: () => feedInfo(),
 });
+// painel → "Esportes e mercados": modalidades, campeonatos, eventos e mercados da equipa (odds automáticas por rounds)
+require('./catalog.js')(routes, {
+  col, runTx, fail, now, fromCents, toCents, M, requireAdmin: ADM.requireAdmin, log: ADM.log,
+  events, openBets, catSports, catLeagues, manualEvents, manualMarkets, applyCatalog, settle: settleQueued,
+});
+// transmissão da partida servida pelo site (para o bot ler a imagem)
+const STREAM = require('./streamsrc.js')(routes, { requireAdmin: ADM.requireAdmin, fail, manualEvents });
+// bot da transmissão no servidor: lê o placar no vídeo do link da partida e administra o jogo sozinho
+require('./streambot.js')(routes, { requireAdmin: ADM.requireAdmin, fail, manualEvents, variant: STREAM.variant, now });
 
 /* Cassino (Decola e Mines)
    - Teste local: emuladores do Firebase + CASINO_TEST=1 (saldo de teste).
@@ -1728,6 +1812,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (!ADMIN_EMAILS.size) console.warn('[Admin] Nenhum administrador definido. Ponha ADMIN_EMAILS=seu@email no .env para usar o painel /admin.');
   await Promise.all([
+    watchReady(col.catSports(), catSports, 'modalidades', applyCatalog),
+    watchReady(col.catLeagues(), catLeagues, 'campeonatos', applyCatalog),
+    watchReady(col.manualEvents(), manualEvents, 'eventos da equipa', applyCatalog),
+    watchReady(col.manualMarkets(), manualMarkets, 'mercados da equipa', applyCatalog),
     watchReady(col.openBets(), openBets, 'apostas abertas'),
     watchReady(col.deposits().where('status', '==', 'PENDING'), pendingDeposits, 'depósitos pendentes'),
     watchReady(col.withdrawals().where('status', 'in', ['PENDING', 'PROCESSING']), openWithdrawals, 'pedidos de saque'),

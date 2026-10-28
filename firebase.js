@@ -92,6 +92,11 @@ const col = {
   cpfs: () => db.collection('cpfs'),
   webhookEvents: () => db.collection('webhookEvents'),
   adminLogs: () => db.collection('adminLogs'),
+  // catálogo gerido pela equipa no painel (modalidades, campeonatos, eventos e mercados manuais)
+  catSports: () => db.collection('catalogSports'),
+  catLeagues: () => db.collection('catalogLeagues'),
+  manualEvents: () => db.collection('manualEvents'),
+  manualMarkets: () => db.collection('manualMarkets'), // mercados extra da equipa em jogos da fonte, por id do jogo
   liveAlerts: () => db.collection('liveAlerts'), // apostas ao vivo suspeitas (livewatch.js)
 };
 

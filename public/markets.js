@@ -86,6 +86,22 @@ function addLeague(l) {
 }
 const dynLeagues = () => LEAGUES.filter((l) => l.dyn).map(({ key, name, country, sport, order }) => ({ key, name, country, sport, order }));
 
+/* ---------- catálogo da equipa ----------
+   Modalidades e campeonatos criados no painel /admin ("Esportes e mercados"). Entram nos mesmos objetos
+   (SPORTS, LEAGUES, LEAGUE_BY_KEY), depois dos da fonte; os criados na hora (ténis) ficam onde estão. */
+const BUILTIN_SPORTS = new Set(Object.keys(SPORTS));
+function setCatalog(cat) {
+  for (const k of Object.keys(SPORTS)) if (!BUILTIN_SPORTS.has(k)) delete SPORTS[k];
+  for (const s of cat?.sports || []) if (!BUILTIN_SPORTS.has(s.key)) SPORTS[s.key] = { name: s.name, icon: s.icon, custom: true };
+  for (let i = LEAGUES.length - 1; i >= 0; i--) if (LEAGUES[i].custom) { delete LEAGUE_BY_KEY[LEAGUES[i].key]; LEAGUES.splice(i, 1); }
+  (cat?.leagues || []).forEach((l, i) => {
+    if (!SPORTS[l.sport] || LEAGUE_BY_KEY[l.key]) return;
+    const x = { key: l.key, name: l.name, country: l.country || '', sport: l.sport, order: 500 + i, custom: true };
+    LEAGUES.push(x); LEAGUE_BY_KEY[x.key] = x;
+  });
+  LEAGUES.sort((a, b) => a.order - b.order || (a.dyn && b.dyn ? a.country.localeCompare(b.country) || a.name.localeCompare(b.name) : 0));
+}
+
 const round2 = (n) => Math.round(n * 100) / 100;
 
 /* ---------- mercados ----------
@@ -482,14 +498,28 @@ function selections(ev) {
       out.push(o);
     }
   }
+  // mercados da equipa criados no painel ("Esportes e mercados"); suspensos aparecem com cadeado
+  for (const cm of ev.cm || []) {
+    for (const c of cm.sels) {
+      out.push({
+        market: 'custom', pick: `${cm.id}.${c.id}`, lbl: c.name, name: c.name, odds: c.odds, marketName: cm.name,
+        // fechado à mão, linha bloqueada pelo motor, ou prazo de fechamento do mercado já passou
+        locked: cm.status !== 'open' || !!c.locked || (cm.closesAt != null && Date.now() >= cm.closesAt), maxStake: cm.maxStake ?? null, key: `${ev.id}|custom|${cm.id}.${c.id}`,
+        cside: c.side || null, cline: c.line ?? null, // lado/linha (mercados automáticos): o site arruma as linhas em tabela
+        cgroup: cm.group || null, // "Mapa 1", "Mapa 2"... (melhor de 3, 5, 7)
+        cclose: cm.closesAt ?? null,
+      });
+    }
+  }
   return out.filter((s) => s.odds);
 }
 
 function isSuspended(ev, now = Date.now()) {
   // antes do jogo, depois do início já não se aposta (até o jogo aparecer ao vivo)
-  return !ev || ev.state === 'post' || !ev.markets || (ev.suspendedUntil || 0) > now || (ev.closesAt != null && now >= ev.closesAt);
+  return !ev || ev.state === 'post' || (!ev.markets && !ev.cm?.length) || (ev.suspendedUntil || 0) > now || (ev.closesAt != null && now >= ev.closesAt);
 }
-const evLabel = (ev) => `${ev.home.short} x ${ev.away.short}`;
+// nome do evento: "Casa x Fora", ou o título num evento de longo prazo ("Campeão do SIX Major")
+const evLabel = (ev) => (ev.outright ? ev.home.name : `${ev.home.short} x ${ev.away.short}`);
 
 /* ---------- liquidação ----------
    R = resultado do jogo, já validado pelo leitor da fonte de dados:
@@ -567,7 +597,7 @@ function cashoutFactor(bet, findSel, now = Date.now()) {
 }
 
 const Markets = {
-  SPORTS, GOAL_SPORTS, LEAGUES, LEAGUE_BY_KEY, addLeague, dynLeagues, round2, resultText, fmtLine, MARKET_NAMES, selections, isSuspended, evLabel,
+  SPORTS, GOAL_SPORTS, LEAGUES, LEAGUE_BY_KEY, addLeague, dynLeagues, setCatalog, round2, resultText, fmtLine, MARKET_NAMES, selections, isSuspended, evLabel,
   legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, AUTO_KINDS, SOURCE_KINDS, partOutcome, scopeOf, ppNorm, PP_FIELD, ppPlayer,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Markets;

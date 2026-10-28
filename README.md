@@ -70,6 +70,77 @@ e diz exatamente o que falta.
 - **Depósitos**: todos os PIX e os que ficaram *em revisão* (valor pago diferente do pedido) para creditar ou descartar.
 - **Jogadores**: procurar por e-mail, CPF, nome ou ID; ver saldo, extrato, apostas, depósitos e saques;
   **ajustar saldo** (com motivo) e **bloquear/desbloquear** a conta.
+- **Esportes e mercados**:
+  - *Modalidades e campeonatos* — criar modalidades novas (Tênis, MMA, eSports...) e campeonatos; ocultar/mostrar no site.
+  - *Eventos da equipa* — criar um evento num campeonato (da equipa ou da fonte) e atualizar à mão o estado
+    (por começar / ao vivo / encerrado), o placar e o tempo.
+  - *Mercados em jogos reais* — acrescentar mercados próprios (escanteios, cartões...) a um jogo do fonte (MoviOdds).
+  - *Longo prazo* (em "+ Novo evento") — evento sem adversário (ex.: "Campeão do SIX Major 2026") com prazo de
+    fechamento e lista de participantes com odds. Depois do prazo as apostas fecham sozinhas; a equipa liquida
+    quando souber o resultado. Qualquer mercado (também num jogo) pode ter o seu próprio prazo ("Fecha em").
+  - *Transmissão* — no jogo, o campo "Transmissão" aceita um link da Twitch (canal ou vídeo), do YouTube (vídeo,
+    live ou `youtube.com/channel/UC...`) ou da Kick. O player aparece na página do jogo entre o placar e os mercados
+    (o jogador pode escondê-lo) e não recarrega quando as odds mudam. Some quando o jogo fica "encerrado".
+  - **Bot da transmissão no servidor** (`streambot.js` + `hudreader.js`; cartão "Placar ao vivo" → 🤖 Bot da transmissão →
+    Ligar bot) — não precisa de janela aberta nem de marcar nada. O servidor abre o vídeo do link da partida com o
+    **ffmpeg** (2 imagens por segundo, até 720p), encontra sozinho o HUD no topo do ecrã (par de números simétrico ao
+    centro = placar; par pequeno logo abaixo com 0–5 = jogadores vivos, ex.: "5 VS 3" no R6) e lê os nomes escritos
+    ao lado para saber de que lado está cada equipa (ou confirma-se no painel). Conta os rounds, manda os vivos,
+    ignora replays ("melhores momentos" mostram o HUD antigo: placar atrás do site), suspende quando tem dúvidas ou
+    quando o placar some com o jogo ao vivo (pausa técnica, câmaras) e liquida as apostas 60 s depois de o placar
+    decidir; no fim da partida desliga-se. Sem placar no ecrã, distingue: **intervalo entre mapas** (depois do fim
+    de um mapa, ou ligado com o site em 0-0) e **pausa** (etiqueta "PAUSA TÉCNICA", "TIMEOUT"... lida no ecrã) mantêm os
+    mercados abertos (o intervalo até 20 min); anúncio da Twitch ou placar a sumir sem explicação suspende. Os cartões
+    dos jogadores (CS2) dão os vivos quando o HUD não tem o "5 VS 3" escrito. O painel mostra o que o bot vê (imagem com as caixas encontradas), as
+    leituras e o registo; "Usar o placar do vídeo" acerta o site se o bot for ligado a meio de um mapa.
+    Fica gravado no evento (`live.bot`) e volta a ligar-se sozinho depois de um reinício; com várias instâncias só a
+    que tem a "posse" o corre. Precisa do ffmpeg no servidor (o Dockerfile instala-o; local: `winget install ffmpeg`)
+    e de CPU sempre ligada no Cloud Run (`--no-cpu-throttling`, já no deploy). Para testar com partidas antigas: link
+    de um vídeo gravado da Twitch com `?t=1h48m0s` (lido ao ritmo real, como se fosse ao vivo).
+  - **Bot da transmissão no browser** (`public/admin-bot.js`, "Bot no browser (manual)") — versão anterior: corre no
+    browser da equipa e abre sozinho a transmissão pelo link guardado na partida: o servidor (`streamsrc.js`) descobre o
+    vídeo HLS (Twitch ao vivo ou vídeo gravado, YouTube ao vivo, Kick), escolhe até 720p e repassa playlist e segmentos
+    pelo próprio site (só para admins e só para os servidores desses sites), para o bot poder ler a imagem. Em
+    alternativa, "Partilhar um separador". Marca-se no vídeo onde ficam os dois
+    números de rounds (fica guardado por campeonato) e o bot lê-os por OCR (Tesseract.js) a cada ~0,7 s. Só conta um
+    round depois de 3 leituras iguais seguidas e se o vídeo mostrar exatamente +1 round para uma equipa; usa o mesmo
+    "+1 round" do painel, por isso as odds mudam como se fosse à mão. Suspende os mercados abertos (e depois reabre só
+    esses) quando a leitura não bate com o site, quando o placar sai do ecrã por mais de 8 s ou quando começa um mapa novo
+    e os lados ainda não foram confirmados. Para sozinho no fim da partida. O separador do admin tem de ficar aberto.
+    **Administra as apostas**: 60 s depois de cada round sem novidades (e no fim da partida) liquida os mercados que o
+    placar já decidiu (corridas, 1º tempo, mapas, série, vencedor) e as apostas são pagas; com mercados suspensos por
+    dúvida adia. Os 60 s servem para corrigir uma leitura errada com "desfazer" antes de pagar. Pode desligar-se no painel.
+    Opcional: lê também os **jogadores vivos** — marcam-se as faixas dos 5 cartões de cada equipa e, com todos vivos,
+    "📸 Todos vivos agora"; um cartão que fica cinzento/apagado conta como morto e a odd mexe dentro do round.
+  - **Jogo do evento** (ao criar: Rainbow Six, CS2 ou Valorant) — define as regras dos rounds desse jogo (num
+    campeonato de outro jogo, ficam a margem e as linhas do campeonato). Vazio = regras do campeonato.
+  - **Mapas da série** (ao criar e no cartão ao vivo) — nome e quem escolheu cada mapa (o último é o decisivo). Quem
+    escolhe fica mais forte nesse mapa (`pickEdge`); o adversário escolhe o lado e começa no lado bom (`sideEdge`), por
+    isso o 1º tempo, as corridas e o placar do 1º tempo puxam para ele. A força é recalibrada para o Vencedor da
+    partida continuar a bater com as odds escritas. O site mostra "Mapa 1 · Clubhouse · escolha de FaZe".
+  - **Dentro do round** — jogadores vivos (5v3...), pelo bot ou à mão no cartão ao vivo (`POST /api/admin/catalog/event/alive`):
+    mudam a chance do round em curso (`aliveEdge`) e com ela todas as odds; deixam de contar quando o round é marcado.
+  - Em cada evento: criar mercados com seleções e **odds definidas pela equipa**, aposta máxima opcional, mudar odds,
+    suspender/abrir (um ou todos), ver as apostas e o valor a pagar por seleção e **liquidar** (Ganhou / Perdeu / Devolvida).
+    As apostas desse mercado são pagas logo a seguir. Mercados com apostas em aberto não podem ser apagados.
+  - **Odds automáticas ao vivo** (eSports e outros jogos por rounds, `livemodel.js`): no campeonato definem-se as
+    *regras do jogo* (rounds para ganhar um mapa, prorrogação, melhor de N mapas, margem; modelos prontos para
+    Rainbow Six, CS2 e Valorant). Cada mercado recebe um tipo (Vencedor da partida, Total/Handicap de rounds do mapa,
+    Vencedor do mapa, Total/Handicap de mapas) e o lado/linha de cada seleção é lido do nome ("Mais de 10.5", "FaZe -2.5").
+    A força das equipas é calibrada pelas odds do Vencedor; ao vivo, a equipa marca cada round (+1 / desfazer) e todas
+    as odds automáticas são recalculadas. Handicaps e totais têm **linhas móveis**: a cada round o motor oferece a
+    linha equilibrada e as vizinhas e tira do site as antigas (as apostas feitas nelas continuam valendo); linhas
+    com odd abaixo da *odd mínima* do campeonato (1.15 por defeito) ficam bloqueadas. Na *reta final* do mapa (ex.: 5 rounds no R6)
+    fica só a linha equilibrada e no match point/prorrogação os handicaps e totais do mapa saem do site. No site,
+    totais e handicaps aparecem em tabela (uma linha por fila).
+    Em **melhor de 3, 5 ou 7**, ao ligar as odds automáticas abrem-se os mercados de cada mapa (vencedor, total e
+    handicap de rounds) e os da série (total e handicap de mapas). Mapas terminados saem do site à espera de
+    liquidar; mapas que já não vão ser jogados são anulados (devolvidos). No site, os mercados vêm por blocos: Partida, Mapa 1, Mapa 2...
+    **Pacote padrão** (abre ao ligar as odds automáticas, também em melhor de 1; odds pela força das equipas):
+    ao vivo e antes do jogo — corrida a X rounds, placar exato do 1º tempo (R6: 6 rounds; fecha no intervalo),
+    placar exato da série, ambas ganham um mapa; só antes do jogo —
+    margem de vitória, placar exato do mapa e rounds de cada equipa. "Liquidar tudo pelo placar" fecha de uma vez o que o placar já decidiu. O mapa/partida fecha sozinho e
+    o resultado de cada mercado vem pré-preenchido na liquidação.
 - **Registo**: todas as ações da equipa (quem, quando, o quê).
 
 ## 5. Jogo responsável (área do jogador)
@@ -133,6 +204,10 @@ Valores em **centavos** (`11895` = R$ 118,95). As contas (e-mail/senha) ficam em
 | `server.js` | Servidor: contas, sessões, carteira, apostas, liquidação, depósitos, pedidos de saque, jogo responsável |
 | `admin.js` | API do painel da equipa |
 | `catalog.js` | API do painel: modalidades, campeonatos, eventos e mercados da equipa |
+| `livemodel.js` | Motor de odds ao vivo por rounds (R6, CS2, Valorant): mapas escolhidos, lado bom, jogadores vivos, pacote padrão |
+| `streamsrc.js` | Transmissão da partida (Twitch/Kick) servida pelo site, para o bot |
+| `streambot.js`, `hudreader.js` | Bot da transmissão no servidor: lê placar, vivos e nomes no vídeo (ffmpeg + OCR) e administra o jogo |
+| `public/admin-catalog.js`, `admin-catalog.css`, `admin-bot.js` | Painel → "Esportes e mercados" e bot da transmissão |
 | `firebase.js` | Ligação ao Firebase (Firestore + Authentication + e-mails) |
 | `bravopay.js` | Cliente da API BravoPay e verificação da assinatura dos webhooks |
 | `scripts/verificar.js` | `npm run verificar` — confere a configuração |

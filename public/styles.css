@@ -187,6 +187,11 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .market-body{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
 /* totais e handicaps em tabela: uma linha por fila */
 .lines-tbl{padding:8px 12px 12px;display:flex;flex-direction:column;gap:6px}
+/* transmissão do jogo (player da Twitch, YouTube ou Kick) */
+.stream-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px;font-weight:700;font-size:14px}
+.stream-head .link-btn{background:none;border:0;color:var(--muted);cursor:pointer;font-size:13px;text-decoration:underline}
+.stream-box{position:relative;aspect-ratio:16/9;border-radius:12px;overflow:hidden;background:#000;margin-bottom:14px;border:1px solid var(--line)}
+.stream-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .out-close{font-size:11px;color:var(--muted);margin-top:2px}
 .out-title{font-size:24px;font-weight:800;text-align:center;margin:14px 0 6px}
 .map-head{margin:18px 0 8px;font-size:13px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--yellow);border-bottom:1px solid var(--line);padding-bottom:6px}
