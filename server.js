@@ -498,30 +498,53 @@ async function checkResults() {
    mercados de prolongamento/penáltis — ou de jogadores numa eliminatória empatada aos 90' — vai-se buscar o
    resultado à ESPN (a cada 2 min, durante 6 h). Sem resultado, essas apostas ficam para a equipa no painel. */
 const etTried = new Map();
-/* Disputa de pênaltis ao vivo (cobrança a cobrança, da ESPN): jogos de futebol empatados no fim dos 90' (ou da
-   prorrogação) nas ligas com ESPN. Lida a cada 15 s enquanto decorre; fica no jogo para a página e o boletim. */
-const shootouts = new Map(); // jogo → { data, at, done }
+/* Disputa de pênaltis ao vivo, cobrança a cobrança.
+   Fonte principal: a cronologia da MoviOdds ("Liverpool - Score 1st Penalty", "Chelsea - Miss 3rd Penalty"), ao vivo e
+   em todas as ligas (28/10: à frente da ESPN). A ESPN (ligas que cobre) junta o nome de quem bateu, se as cobranças
+   baterem certo. Fica no jogo (ev.shootout) para a página e o boletim. */
+const shootouts = new Map(); // jogo → { data, at, espnAt, done }
+const PK_LINE = /^(.+?) - (Score|Miss) (\d+)(?:st|nd|rd|th) Penalty$/i;
+function shootoutFromTimeline(ev, tl) {
+  if (!tl.some((x) => /^Penalty Shoot ?out$/i.test(String(x.text || '').trim()))) return null;
+  const out = { home: [], away: [] };
+  for (const x of tl) {
+    const m = PK_LINE.exec(String(x.text || '').trim());
+    if (!m) continue;
+    const side = m[1] === ev.home.name ? 'home' : m[1] === ev.away.name ? 'away' : null;
+    if (!side) continue;
+    out[side][Number(m[3]) - 1] = { p: '', n: '', ok: /score/i.test(m[2]) };
+  }
+  for (const k of ['home', 'away']) out[k] = out[k].filter(Boolean);
+  out.score = [out.home.filter((x) => x.ok).length, out.away.filter((x) => x.ok).length];
+  out.done = ev.state === 'post';
+  return out;
+}
 async function checkShootouts() {
   const t = now();
   for (const ev of events.values()) {
     if (ev.sport !== 'soccer' || ev.manual) continue;
     const cur = shootouts.get(ev.id);
-    if (cur?.done || (cur && t - cur.at < 15000)) continue;
-    const tl = FEED.liveStats(ev.id)?.timeline || [];
-    const fin = [...tl].reverse().find((x) => /Score After (Full|Extra) Time/i.test(x.text || ''));
-    const sc = fin && /(\d+)-(\d+)\s*$/.exec(fin.text);
-    const draw = sc ? sc[1] === sc[2] : ev.state === 'post' && ev.result && ev.result.h === ev.result.a;
-    if (!draw) continue;
+    if (cur?.done) continue;
     if (ev.state === 'post' && t - (ev.result?.finishedAt || +ev.date + 2 * 3600000) > 3 * 3600000) continue;
-    try {
-      const data = await ESPN.shootout(ev);
-      shootouts.set(ev.id, { data, at: t, done: !!data?.done });
-      if (data && JSON.stringify(ev.shootout) !== JSON.stringify(data)) { ev.shootout = data; touch(ev.id); feedVersion++; feedCache = null; }
-    } catch (e) { shootouts.set(ev.id, { data: cur?.data || null, at: t, done: false }); }
+    const tl = FEED.liveStats(ev.id)?.timeline || [];
+    let data = shootoutFromTimeline(ev, tl);
+    // ESPN: nomes de quem bateu (a cada 15 s, só nas ligas que cobre); sem cronologia da MoviOdds, a ESPN é a fonte
+    let espn = cur?.espn || null;
+    if ((data || cur?.data) && (!cur || t - (cur.espnAt || 0) >= 15000)) {
+      try { espn = await ESPN.shootout(ev); } catch { /* fica o que havia */ }
+    }
+    if (!data && espn && (espn.home.length || espn.away.length)) data = espn;
+    else if (data && espn) {
+      for (const k of ['home', 'away']) data[k].forEach((x, i) => { const e = espn[k][i]; if (e && e.ok === x.ok) { x.p = e.p; x.n = e.n; } });
+      if (espn.done) data.done = true;
+    }
+    if (!data && !cur) continue;
+    shootouts.set(ev.id, { data: data || cur?.data || null, espn, at: t, espnAt: espn !== cur?.espn ? t : cur?.espnAt || 0, done: !!data?.done });
+    if (data && JSON.stringify(ev.shootout) !== JSON.stringify(data)) { ev.shootout = data; touch(ev.id); feedVersion++; feedCache = null; }
   }
   for (const [id, x] of shootouts) if (!events.has(id) || t - x.at > 6 * 3600000) shootouts.delete(id);
 }
-setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 15000);
+setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 5000);
 
 async function checkExtraTime() {
   const t = now();

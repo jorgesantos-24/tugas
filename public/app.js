@@ -1030,12 +1030,13 @@ function trackHtml(l, ev, bet) {
 /* disputa de pênaltis (ESPN): cada cobrança com ✅ (marcou) ou ❌ (errou) e o jogador; compact = linha curta do boletim */
 function shootoutHtml(ev, compact = false) {
   const so = ev?.shootout;
-  if (!so || (!so.home.length && !so.away.length)) return '';
-  const kicks = (list) => list.map((k) => `<span class="pk ${k.ok ? 'ok' : 'no'}" title="${esc(k.n)}: ${k.ok ? 'marcou' : 'errou'}">${k.ok ? '✅' : '❌'}</span>`).join('');
+  if (!so) return '';
+  if (!so.home.length && !so.away.length) return so.done ? '' : (compact ? `<div class="pk-line"><span class="live-dot"></span> Pênaltis a começar…</div>` : `<div class="pk-box"><div class="pk-title"><span class="live-dot"></span> Disputa de pênaltis a começar…</div></div>`);
+  const kicks = (list) => list.map((k) => `<span class="pk ${k.ok ? 'ok' : 'no'}" title="${esc(k.n || 'Cobrança ' + (list.indexOf(k) + 1))}: ${k.ok ? 'marcou' : 'errou'}">${k.ok ? '✅' : '❌'}</span>`).join('');
   const title = so.done ? 'Pênaltis (final)' : '<span class="live-dot"></span> Pênaltis ao vivo';
   if (compact) return `<div class="pk-line">${title} <b>${so.score[0]}-${so.score[1]}</b> · ${kicks(so.home)} <span class="muted">|</span> ${kicks(so.away)}</div>`;
   const row = (t, list, n) => `<div class="pk-row"><span class="pk-team">${esc(t.short)}</span><span class="pk-kicks">${kicks(list)}</span><b class="pk-n">${n}</b></div>
-    <div class="pk-names">${list.map((k, i) => `${i + 1}. ${esc(k.p)} ${k.ok ? '✓' : '✗'}`).join(' · ')}</div>`;
+    ${list.some((k) => k.p) ? `<div class="pk-names">${list.map((k, i) => `${i + 1}. ${esc(k.p || '—')} ${k.ok ? '✓' : '✗'}`).join(' · ')}</div>` : ''}`;
   return `<div class="pk-box"><div class="pk-title">${title}</div>${row(ev.home, so.home, so.score[0])}${row(ev.away, so.away, so.score[1])}</div>`;
 }
 function legGame(l, ev) {

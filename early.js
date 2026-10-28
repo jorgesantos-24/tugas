@@ -146,6 +146,35 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null 
     return { v: 1, sig: `${stat}:${v}`, text: `${PLAYERS.STAT_PT[stat] || stat} ${v}` };
   }
 
+  // ---- futebol: os 90 minutos acabaram (prorrogação / pênaltis a seguir) ----
+  /* A cronologia da fonte escreve "Score After Full Time - X-Y" quando acaba o tempo regulamentar: os mercados que contam
+     só os 90 minutos ficam decididos aí, sem esperar pela prorrogação e pelos pênaltis (28/10: LASK x Ried foi a
+     prolongamento e a seleção "LASK vence" ficava em aberto). Escanteios, cartões e jogadores ficam de fora (a fonte
+     pode juntar-lhes a prorrogação). */
+  const REG_KINDS = new Set(['ml', 'dc', 'dnb', 'btts', 'total', 'spread', 'cs']);
+  const scoreLine = (tl, re) => { const x = [...tl].reverse().find((t) => re.test(t.text || '')); const m = x && /(\d+)\s*-\s*(\d+)\s*$/.exec(x.text); return m ? [Number(m[1]), Number(m[2])] : null; };
+  function regulationEnd(leg, ev) {
+    if (ev.sport !== 'soccer' || ev.state !== 'in') return null;
+    const k = leg.market;
+    if (!REG_KINDS.has(k) && !M.AUTO_KINDS.has(k)) return null;
+    const tl = liveStats(ev.id)?.timeline || [];
+    const ft = scoreLine(tl, /Score After Full Time/i);
+    if (!ft) return null;
+    const [h, a] = ft;
+    let R;
+    if (REG_KINDS.has(k)) R = { h, a };
+    else {
+      const scope = M.scopeOf(leg);
+      if (scope !== 'ft' && scope !== 'h1' && scope !== 'h2') return null; // escanteios, cartões...: a fonte pode incluir a prorrogação
+      const h1 = scoreLine(tl, /Score After First Half/i);
+      if (scope !== 'ft' && (!h1 || h1[0] > h || h1[1] > a)) return null;
+      R = { h, a, parts: { ft: [h, a], ...(h1 ? { h1, h2: [h - h1[0], a - h1[1]] } : {}) } };
+    }
+    const v = M.legOutcome(leg, R);
+    if (v == null) return null;
+    return { v, sig: `ft:${h}-${a}`, text: `90 min ${h}-${a}` };
+  }
+
   // ---- ténis: sets e games terminados ----
   const okSet = ([x, y]) => { const hi = Math.max(x, y), lo = Math.min(x, y); return (hi === 6 && lo <= 4) || (hi === 7 && (lo === 5 || lo === 6)) || (hi > 7 && hi - lo === 2); };
   function tennis(leg, ev) {
@@ -272,7 +301,7 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null 
     const ev = events.get(leg.evId);
     const key = `${betId}|${leg.evId}|${leg.key}`;
     if (!ev || ev.state !== 'in') { seen.delete(key); return false; }
-    const d = mono(leg, ev) || part(leg, ev) || player(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
+    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
     if (!d) { seen.delete(key); return false; }
     const t = now();
     const sig = `${d.sig}|${d.v}`;

@@ -143,10 +143,32 @@ async function extraTime() {
   check(GEN.quote({ group_name: 'Penalty Shootout to Go to Sudden Death', label: 'Yes', group_id: '1', sel_id: '2', odds_dec: 2 }, m, 'soccer') === null, 'penálti a penálti / morte súbita não se oferecem');
 }
 
+/* ================= 90 minutos acabados (prorrogação a seguir) ================= */
+function regulation() {
+  console.log('4) mercados dos 90 minutos decididos no fim do tempo regulamentar');
+  const M = require(path.join(ROOT, 'public', 'markets.js'));
+  // cronologia como a do LASK Linz x SV Ried 28/10 (Taça da Áustria): 3-3 aos 90', LASK marca aos 111'
+  const st = { timeline: [{ text: 'Score After First Half - 0-1' }, { text: 'Score After Full Time - 3-3' }, { text: "111' - 1st Goal ET -   (LASK Linz) -" }] };
+  let T = Date.now();
+  const ev = { id: 'e1', sport: 'soccer', state: 'in', home: { name: 'LASK Linz', score: 4 }, away: { name: 'SV Ried', score: 3 }, markets: [{ k: 'ml', sels: [{ pick: 'home', odds: 1.5, lock: false }] }], clock: "112'", league: 'fut.x', leagueName: 'Cup', date: new Date(T - 9000000) };
+  const E = require(path.join(ROOT, 'early.js'))({ M, TEN: require(path.join(ROOT, 'feeds', 'tennis.js')), events: new Map([['e1', ev]]), liveStats: () => st, now: () => T });
+  let n = 0;
+  const run = (leg) => { leg = { evId: 'e1', key: `r${++n}`, ...leg }; E.tick(); E.check('b', leg); T += 200000; E.tick(); E.check('b', leg); T += 200000; return leg.result || null; };
+  check(run({ market: 'ml', pick: 'home' }) === 'lost', '90 min 3-3: "LASK vence" perde já (sem esperar pela prorrogação)');
+  check(run({ market: 'ml', pick: 'draw' }) === 'won', '90 min 3-3: "empate" ganha já');
+  check(run({ market: 'dnb', pick: 'home' }) === 'void', '90 min 3-3: "empate anula" devolvida já');
+  check(run({ market: 'total', pick: 'over', line: 5.5 }) === 'won', '90 min: 6 gols → "mais de 5.5" ganha');
+  check(run({ market: 'ptot', per: 'corners|1', pick: 'over', line: 5.5 }) === null, 'escanteios: ficam de fora (a fonte pode juntar a prorrogação)');
+  // sem a linha dos 90 minutos: nada se decide
+  st.timeline = [{ text: "88' - 12th Corner - LASK" }];
+  check(run({ market: 'ml', pick: 'draw' }) === null, 'sem "Score After Full Time": espera');
+}
+
 (async () => {
   console.log('Testes da proteção do futebol');
   cases();
   await extraTime();
+  regulation();
   await live();
   console.log(`\n  ${ok} verificações certas · ${bad} erradas`);
   process.exit(bad ? 1 : 0);
