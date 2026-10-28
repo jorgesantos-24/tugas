@@ -97,6 +97,8 @@ async function viewCatEvent() {
       <label>Placar fora${d.rules ? ` (${esc(d.rules.unit)})` : ''}<input class="mini" name="scoreA" type="number" min="0" max="999" value="${ev.score ? ev.score.a : ''}"></label>
       <label>Tempo (texto livre)<input class="mini" name="clock" value="${esc(ev.clock)}" placeholder="Ex.: 2º tempo 67'"></label>
       <label>Jogo<select class="mini" name="game">${gameOptions(ev.game, true)}</select></label>
+      <label>Emblema casa (link)<input class="mini" name="homeLogo" value="${esc(ev.logos?.h || '')}" maxlength="400" placeholder="automático (Liquipedia)"></label>
+      <label>Emblema fora (link)<input class="mini" name="awayLogo" value="${esc(ev.logos?.a || '')}" maxlength="400" placeholder="automático (Liquipedia)"></label>
       <label style="grid-column:span 2">Transmissão (link Twitch, YouTube ou Kick)<input class="mini" name="stream" value="${esc(ev.stream || '')}" placeholder="Ex.: https://www.twitch.tv/rainbow6br" maxlength="300"></label>
       <button class="btn btn-green" type="submit">Guardar evento</button>
     </form><div class="form-err" id="formErr"></div>
@@ -591,7 +593,7 @@ document.addEventListener('submit', async (e) => {
       closeModal(); toast(fd.kind === 'outright' ? 'Evento de longo prazo criado' : r.made ? `Evento criado com ${r.made} mercados automáticos` : 'Evento criado. Agora adicione os mercados.', 'ok'); return go('esporte-ev', { catEv: r.id });
     }
     if (f.id === 'evForm') {
-      await api('POST', '/api/admin/catalog/event', { id: f.dataset.id, league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: fd.state, scoreH: fd.scoreH, scoreA: fd.scoreA, mapsH: fd.mapsH, mapsA: fd.mapsA, clock: fd.clock, stream: fd.stream, game: fd.game || null });
+      await api('POST', '/api/admin/catalog/event', { id: f.dataset.id, league: fd.league, home: fd.home, away: fd.away, startsAt: new Date(fd.startsAt).getTime(), state: fd.state, scoreH: fd.scoreH, scoreA: fd.scoreA, mapsH: fd.mapsH, mapsA: fd.mapsA, clock: fd.clock, stream: fd.stream, game: fd.game || null, homeLogo: fd.homeLogo, awayLogo: fd.awayLogo });
       toast('Evento atualizado', 'ok');
     }
     if (f.id === 'newMkForm') {

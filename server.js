@@ -685,9 +685,11 @@ function publicCatalog() {
   return { sports, leagues };
 }
 
+// emblema de uma equipa de um evento da equipa: o escrito no painel, senão o da Liquipedia (pelo jogo: R6, CS2, Valorant)
+const manualLogo = (d, side, name) => d.logos?.[side] || (d.outright ? '' : LOGOS.logo('esports', name, 0, d.game || catLeagues.get(d.league)?.rules?.preset));
 function manualToEvent(d) {
   const lg = M.LEAGUE_BY_KEY[d.league];
-  const side = (name, score, id) => ({ id, name, short: name, logo: '', score: d.state === 'pre' ? null : score ?? 0, form: '' });
+  const side = (name, score, id) => ({ id, name, short: name, logo: manualLogo(d, id, name), score: d.state === 'pre' ? null : score ?? 0, form: '' });
   return {
     id: d.id, manual: true, league: d.league, leagueName: lg.name, country: lg.country, sport: lg.sport,
     date: new Date(d.startsAt), state: d.state, completed: d.state === 'post', statusName: '',
@@ -715,6 +717,19 @@ function applyCatalog() {
   }
   feedVersion++; feedCache = null;
 }
+
+setInterval(() => {
+  let n = 0;
+  for (const d of manualEvents.values()) {
+    const ev = events.get(d.id);
+    if (!ev || !ev.manual) continue;
+    for (const [k, id] of [['home', 'h'], ['away', 'a']]) {
+      const url = manualLogo(d, id, ev[k].name);
+      if (url !== ev[k].logo) { ev[k] = { ...ev[k], logo: url }; touch(ev.id); n++; }
+    }
+  }
+  if (n) { feedVersion++; feedCache = null; }
+}, 20000).unref();
 
 // seleção de um mercado da equipa: fica decidida quando a equipa liquida o mercado
 const CUSTOM_RESULT = { won: 1, lost: -1, void: 0 };

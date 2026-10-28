@@ -4,7 +4,8 @@
    2) Reserva: TheSportsDB (https://www.thesportsdb.com, plano grátis).
    O plano grátis aceita poucos pedidos por minuto, por isso cada equipa é procurada uma só vez, em segundo plano
    (uma a cada 3 s; primeiro as dos jogos ao vivo e dos mais próximos), e o resultado fica guardado em data/logos.json.
-   Só se aceita o emblema se a modalidade e o nome baterem certo; sem emblema, o site mostra as iniciais. */
+   Só se aceita o emblema se a modalidade e o nome baterem certo; sem emblema, o site mostra as iniciais.
+   3) e-Sports: Liquipedia (ver lookupEsports), pela wiki do jogo (CS2, Valorant, R6, LoL, Dota). */
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -163,8 +164,71 @@ async function stepTennis() {
   finally { tBusy = false; }
 }
 
+/* ---------- e-Sports: Liquipedia (https://liquipedia.net) ----------
+   Emblema pelo nome da equipa na wiki do jogo. Regras da Liquipedia: User-Agent identificado, um pedido de cada vez
+   e no máximo 1 a cada 2 s; cada equipa é procurada uma só vez e só o link fica guardado (data/logos.json).
+   Dos ficheiros da página da equipa escolhe o que tem o nome dela, sem "full" (nome por extenso) nem "Academy",
+   o mais recente e para fundo escuro, em miniatura de 64 px. ESPORTS_LOGOS=0 desliga. */
+const LP_ON = process.env.ESPORTS_LOGOS !== '0';
+const LP_UA = 'TUGAS-esports-logos/1.0 (suporte@tugasbet.com)';
+const LP_GAP = 2200;
+// campeonato (do site ou o jogo escolhido num evento da equipa: r6, cs2, valorant) → wiki da Liquipedia
+const lpWiki = (league) => {
+  const l = String(league || '').replace(/^es\./, ''); // campeonatos da fonte: "es.cs2-pgl-bucharest"
+  return /^(cs2|counterstrike)/.test(l) ? 'counterstrike' : /^valorant/.test(l) ? 'valorant' : /^(r6|rainbow)/.test(l) ? 'rainbowsix'
+    : /^lol/.test(l) ? 'leagueoflegends' : /^dota/.test(l) ? 'dota2' : null;
+};
+const lpNorm = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+const lpSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function lpGet(wiki, params) {
+  const r = await fetch(`https://liquipedia.net/${wiki}/api.php?` + new URLSearchParams({ format: 'json', ...params }), { headers: { 'user-agent': LP_UA, 'accept-encoding': 'gzip' }, signal: AbortSignal.timeout(15000) });
+  if (r.status === 429) { const e = new Error('limite de pedidos'); e.limit = true; throw e; }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function lookupEsports(wiki, name) {
+  const d = await lpGet(wiki, { action: 'query', titles: name, prop: 'images', imlimit: '500', redirects: '1' });
+  const pg = Object.values(d.query?.pages || {})[0];
+  if (!pg || pg.missing !== undefined) return '';
+  const title = lpNorm(pg.title), short = title.replace(/(esports|gaming|clan|team)$/, '');
+  const cands = (pg.images || []).map((i) => i.title.replace(/^File:/, '')).filter((t) => /(allmode|darkmode|lightmode)/i.test(t)).map((t) => ({
+    t, base: lpNorm(t.replace(/\s*(19|20)\d{2}.*|\s*(full\s*)?(allmode|darkmode|lightmode).*/i, '')),
+    year: Number((t.match(/\b(19|20)\d{2}\b/) || [])[0]) || 3000, full: /\bfull\b/i.test(t), academy: /academy/i.test(t) && !/academy/.test(title),
+    mode: /darkmode/i.test(t) ? 2 : /allmode/i.test(t) ? 1 : 0,
+  })).filter((c) => short && c.base.startsWith(short) && !c.academy);
+  if (!cands.length) return '';
+  cands.sort((a, b) => (b.base === title) - (a.base === title) || a.full - b.full || b.year - a.year || b.mode - a.mode);
+  await lpSleep(LP_GAP);
+  const q = await lpGet(wiki, { action: 'query', titles: 'File:' + cands[0].t, prop: 'imageinfo', iiprop: 'url', iiurlwidth: '64' });
+  const ii = Object.values(q.query?.pages || {})[0]?.imageinfo?.[0];
+  return ii?.thumburl || ii?.url || '';
+}
+const lpQueue = new Map(); // "esports:wiki|nome" → prioridade
+let lpBusy = false, lpPaused = 0;
+async function stepEsports() {
+  if (lpBusy || !lpQueue.size || Date.now() < lpPaused) return;
+  lpBusy = true;
+  const [k] = [...lpQueue].sort((a, b) => a[1] - b[1])[0];
+  lpQueue.delete(k);
+  const [sw, name] = k.split(/\|(.*)/s);
+  try { const url = await lookupEsports(sw.slice(8), name); cache.set(k, { url, at: Date.now() }); dirty = true; url ? found++ : missed++; }
+  catch (e) {
+    if (e.limit) { lpPaused = Date.now() + BACKOFF_MS; lpQueue.set(k, -1); }
+    else { cache.set(k, { url: '', at: Date.now() - RETRY_MISS_MS + 3600000 }); dirty = true; } // erro: tenta daqui a 1h
+  } finally { lpBusy = false; }
+}
+function esportsLogo(name, priority, league) {
+  const wiki = LP_ON && lpWiki(league);
+  if (!wiki) return '';
+  const k = keyOf('esports:' + wiki, name), c = cache.get(k);
+  if (c && (c.url || Date.now() - c.at < RETRY_MISS_MS)) return c.url;
+  lpQueue.set(k, Math.min(lpQueue.get(k) ?? Infinity, priority));
+  return c?.url || '';
+}
+
 function logo(sport, name, priority, league) {
   if (!name || OFF) return '';
+  if (sport === 'esports') return esportsLogo(name, priority, league);
   if (sport === 'tennis') return ESPN_ON ? tennisLogo(name, priority) : '';
   if (ESPN_ON) { const u = espnLogo(sport, name, league); if (u) return u; }
   if (!SPORT_NAME[sport]) return ''; // ténis: só ESPN
@@ -216,10 +280,10 @@ async function start() {
     setInterval(loadEspnTeams, 86400000); setInterval(loadEspnTennis, 3600000);
     setInterval(stepTennis, 1000); // bandeiras dos tenistas (Challenger/ITF), um por segundo
   }
-  timers = [setInterval(step, STEP_MS), setInterval(save, 30000)];
+  timers = [setInterval(step, STEP_MS), setInterval(save, 30000), setInterval(stepEsports, LP_GAP + 300)];
   const known = [...cache.values()].filter((v) => v.url).length;
   console.log(`[Emblemas] TheSportsDB (reserva): ${known} emblemas guardados; os que faltam são procurados em segundo plano.`);
 }
-const stats = () => ({ cached: cache.size, withLogo: [...cache.values()].filter((v) => v.url).length, queue: queue.size, found, missed });
+const stats = () => ({ cached: cache.size, withLogo: [...cache.values()].filter((v) => v.url).length, queue: queue.size + lpQueue.size, found, missed });
 
-module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE };
+module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE, lookupEsports };

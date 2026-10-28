@@ -40,6 +40,14 @@ module.exports = function catalogRoutes(routes, D) {
     if (!s) fail(400, 'Use um link da Twitch (twitch.tv/canal), do YouTube (vídeo ou youtube.com/channel/UC...) ou da Kick.');
     return s;
   };
+  // emblema de uma equipa escrito à mão no painel (vazio = automático: Liquipedia nos eSports, senão as iniciais)
+  const logoUrl = (v, who) => {
+    const s = String(v ?? '').trim();
+    if (!s) return '';
+    let u; try { u = new URL(s); } catch { fail(400, `Emblema de ${who}: link inválido.`); }
+    if (u.protocol !== 'https:' || s.length > 400) fail(400, `Emblema de ${who}: use um link https (até 400 caracteres).`);
+    return u.href;
+  };
   const slug = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'x';
   const unique = (base, taken) => { let k = base, n = 2; while (taken(k)) k = `${base}-${n++}`; return k; };
   const icon = (v) => String(v || '').replace(/[<>&"'`\s]/g, '').slice(0, 8) || '🏅';
@@ -270,7 +278,7 @@ module.exports = function catalogRoutes(routes, D) {
   /* ---------- resumos ---------- */
   const pubEventRow = (d) => ({
     id: d.id, league: d.league, leagueName: leagueName(d.league), home: d.home, away: d.away, startsAt: d.startsAt, state: d.state,
-    score: d.score || null, clock: d.clock || '', archived: !!d.archived, outright: !!d.outright, stream: d.stream?.url || '', game: d.game || null, markets: (d.markets || []).length,
+    score: d.score || null, clock: d.clock || '', archived: !!d.archived, outright: !!d.outright, stream: d.stream?.url || '', game: d.game || null, logos: d.logos || null, markets: (d.markets || []).length,
     open: (d.markets || []).filter((m) => m.status === 'open').length, toSettle: (d.markets || []).filter((m) => m.status !== 'settled').length, bets: openBetsOn(d.id),
   });
 
@@ -424,6 +432,7 @@ module.exports = function catalogRoutes(routes, D) {
           score: state === 'pre' ? null : { h: sc(b.scoreH), a: sc(b.scoreA) }, clock: text(b.clock, 30, 'o tempo', 0), updatedAt: now(),
           ...(b.stream !== undefined ? { stream: parseStream(b.stream) } : {}),
           ...(b.game !== undefined ? { game: L.PRESETS[b.game] ? String(b.game) : null } : {}),
+          ...(b.homeLogo !== undefined || b.awayLogo !== undefined ? { logos: { h: logoUrl(b.homeLogo, 'casa'), a: logoUrl(b.awayLogo, 'fora') } } : {}),
         };
       let ref;
       if (id) {
