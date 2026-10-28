@@ -208,6 +208,11 @@ const tQueue = new Map(); // nome → prioridade
 const tKey = (name) => keyOf('tennisflag', name); // chave própria: ignora as fotos guardadas antes
 function tennisLogo(name, priority) {
   if (String(name).includes('/')) return espnLogo('tennis', name); // duplas: bandeira pelo apelido
+  if (PHOTOS_ON) {
+    const p = cache.get(pKey(name));
+    if (p?.url) return p.url;
+    if (!p || Date.now() - p.at >= RETRY_MISS_MS) pQueue.set(name, Math.min(pQueue.get(name) ?? Infinity, priority));
+  }
   const c = cache.get(tKey(name));
   const known = espnPlayers.get(norm(name));
   if (c && (c.url || Date.now() - c.at < RETRY_MISS_MS)) return c.url || known?.flag || '';
@@ -239,6 +244,59 @@ async function stepTennis() {
   catch { cache.set(tKey(name), { url: '', at: Date.now() - RETRY_MISS_MS + 3600000 }); dirty = true; } // erro: tenta daqui a 1h
   finally { tBusy = false; }
 }
+
+/* ---------- Fotos dos tenistas: Wikidata + Wikimedia Commons (licenças livres) ----------
+   Procura o nome na Wikidata, aceita só quem for tenista (profissão Q10833314 ou desporto Q847) com o nome igual,
+   e usa a imagem principal (P18) do Commons em miniatura de 120 px. Guarda também o autor e a licença, que a página
+   /creditos mostra (as licenças CC pedem atribuição). Um jogador a cada 1,1 s; sem foto → bandeira.
+   TENNIS_PHOTOS=0 desliga (só bandeiras). */
+const PHOTOS_ON = process.env.TENNIS_PHOTOS !== '0';
+const WM_UA = { 'user-agent': 'TUGAS-tennis-photos/1.0 (https://tugasbet.com; suporte@tugasbet.com)' };
+const pKey = (name) => keyOf('tennisphoto', name);
+const pQueue = new Map(); // nome → prioridade
+const stripTags = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim();
+async function wmGet(host, params) {
+  const r = await fetch(`https://${host}/w/api.php?` + new URLSearchParams({ format: 'json', ...params }), { headers: WM_UA, signal: AbortSignal.timeout(15000) });
+  if (r.status === 429) { const e = new Error('limite de pedidos'); e.limit = true; throw e; }
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function lookupPhoto(name) {
+  const s = await wmGet('www.wikidata.org', { action: 'wbsearchentities', search: name, language: 'en', type: 'item', limit: '7' });
+  const ids = (s.search || []).map((x) => x.id);
+  if (!ids.length) return { url: '' };
+  const e = await wmGet('www.wikidata.org', { action: 'wbgetentities', ids: ids.join('|'), props: 'claims|labels|aliases', languages: 'en|mul' });
+  const q = norm(name);
+  const hit = ids.map((id) => e.entities?.[id]).find((it) => {
+    const c = it?.claims || {}, val = (p) => (c[p] || []).map((x) => x.mainsnak?.datavalue?.value?.id);
+    const tennis = val('P106').includes('Q10833314') || val('P641').includes('Q847');
+    // nomes em inglês e no idioma "mul" (a Wikidata passou a guardar muitos nomes de pessoas só aí)
+    const names = [it?.labels?.en?.value, it?.labels?.mul?.value, ...[...(it?.aliases?.en || []), ...(it?.aliases?.mul || [])].map((a) => a.value)].map(norm);
+    return tennis && names.includes(q); // homónimos: só o tenista com este nome
+  });
+  const file = hit?.claims?.P18?.[0]?.mainsnak?.datavalue?.value;
+  if (!file) return { url: '' };
+  const i = await wmGet('commons.wikimedia.org', { action: 'query', titles: 'File:' + file, prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '120' });
+  const ii = Object.values(i.query?.pages || {})[0]?.imageinfo?.[0];
+  if (!ii?.thumburl) return { url: '' };
+  const m = ii.extmetadata || {};
+  return { url: ii.thumburl, credit: { file, page: ii.descriptionurl, artist: stripTags(m.Artist?.value) || 'autor desconhecido', license: stripTags(m.LicenseShortName?.value), entity: hit.id } };
+}
+let pBusy = false, pPaused = 0;
+async function stepPhoto() {
+  if (pBusy || !pQueue.size || Date.now() < pPaused) return;
+  pBusy = true;
+  const [name] = [...pQueue].sort((a, b) => a[1] - b[1])[0];
+  pQueue.delete(name);
+  try { cache.set(pKey(name), { ...(await lookupPhoto(name)), at: Date.now() }); dirty = true; }
+  catch (e) {
+    if (e.limit) { pPaused = Date.now() + BACKOFF_MS; pQueue.set(name, -1); }
+    else { cache.set(pKey(name), { url: '', at: Date.now() - RETRY_MISS_MS + 3600000 }); dirty = true; } // erro: tenta daqui a 1h
+  } finally { pBusy = false; }
+}
+// para a página /creditos: uma linha por foto guardada
+const photoCredits = () => [...cache].filter(([k, v]) => k.startsWith('tennisphoto|') && v.url && v.credit).map(([k, v]) => ({ player: k.slice(12), url: v.url, ...v.credit }))
+  .sort((a, b) => a.player.localeCompare(b.player));
 
 /* ---------- e-Sports: Liquipedia (https://liquipedia.net) ----------
    Emblema pelo nome da equipa na wiki do jogo. Regras da Liquipedia: User-Agent identificado, um pedido de cada vez
@@ -305,7 +363,7 @@ function esportsLogo(name, priority, league) {
 function logo(sport, name, priority, league) {
   if (!name || OFF) return '';
   if (sport === 'esports') return esportsLogo(name, priority, league);
-  if (sport === 'tennis') return ESPN_ON ? tennisLogo(name, priority) : '';
+  if (sport === 'tennis') return ESPN_ON || PHOTOS_ON ? tennisLogo(name, priority) : '';
   if (offLeague.has(league)) { const u = listLogo(offLeague.get(league), name); if (u) return u; }
   // ligas europeias: as equipas que também jogam a Euroliga/EuroCup (a liga francesa não tem lista própria)
   if (EURO_DOMESTIC.has(league)) for (const k of ['euroleague', 'eurocup']) { const u = offLeague.has(k) && listLogo(offLeague.get(k), name, true); if (u) return u; }
@@ -362,10 +420,11 @@ async function start() {
     setInterval(loadEspnTeams, 86400000); setInterval(loadEspnTennis, 3600000);
     setInterval(stepTennis, 1000); // bandeiras dos tenistas (Challenger/ITF), um por segundo
   }
+  if (PHOTOS_ON) setInterval(stepPhoto, 1100); // fotos dos tenistas (Wikidata/Commons)
   timers = [setInterval(step, STEP_MS), setInterval(save, 30000), setInterval(stepEsports, LP_GAP + 300)];
   const known = [...cache.values()].filter((v) => v.url).length;
   console.log(`[Emblemas] TheSportsDB (reserva): ${known} emblemas guardados; os que faltam são procurados em segundo plano.`);
 }
 const stats = () => ({ cached: cache.size, withLogo: [...cache.values()].filter((v) => v.url).length, queue: queue.size + lpQueue.size, found, missed });
 
-module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE, lookupEsports };
+module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE, lookupEsports, lookupPhoto, photoCredits };

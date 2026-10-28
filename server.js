@@ -1139,6 +1139,8 @@ const routes = {
   },
 
   'GET /api/site': () => ({ site: SITE }),
+  // autores e licenças das fotos dos tenistas (Wikimedia Commons) — página /creditos
+  'GET /api/creditos': () => ({ photos: LOGOS.photoCredits() }),
 
   'POST /api/register': async (ctx) => {
     rateLimit(ctx.ip, 'reg', 20, 60 * 60000);
@@ -1803,7 +1805,7 @@ if (EMULATOR) {
 
 /* ---------------- servidor HTTP ---------------- */
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json' };
-const PAGES = { '/': '/index.html', '/admin': '/admin.html', '/termos': '/termos.html', '/privacidade': '/privacidade.html', '/jogo-responsavel': '/jogo-responsavel.html' };
+const PAGES = { '/': '/index.html', '/admin': '/admin.html', '/termos': '/termos.html', '/privacidade': '/privacidade.html', '/jogo-responsavel': '/jogo-responsavel.html', '/creditos': '/creditos.html' };
 
 function serveStatic(req, res) {
   let p;
