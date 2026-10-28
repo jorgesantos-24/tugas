@@ -293,9 +293,13 @@ async function placeBets() {
   if (S.placing) return;
   if (!S.user) { openLogin('Entre na sua conta para apostar.'); return; }
   if (isPaused()) { pausedNotice(); return; }
-  const items = slipState();
-  if (!items.length) return;
-  if (items.some((i) => i.suspended)) { toast('Remova as seleções suspensas', 'err'); return; }
+  const all = slipState();
+  if (!all.length) return;
+  // múltipla: é uma aposta só, precisa de todas as seleções abertas; simples: seguem as abertas, as suspensas ficam no boletim
+  const held = S.slipMode === 'multiple' ? [] : all.filter((i) => i.suspended && parseMoney(S.stakes[i.s.key]) >= 1);
+  if (S.slipMode === 'multiple' && all.some((i) => i.suspended)) { toast('Remova as seleções suspensas', 'err'); return; }
+  const items = S.slipMode === 'multiple' ? all : all.filter((i) => !i.suspended);
+  if (!items.length) { toast(all.length > 1 ? 'As seleções estão suspensas. Tente de novo em instantes.' : 'Esta seleção está suspensa. Tente de novo em instantes.', 'err'); return; }
   if (items.some((i) => i.changed) && !acceptAny()) { toast('As odds mudaram. Aceite as alterações.', 'err'); return; }
   let tickets;
   if (S.slipMode === 'multiple') {
@@ -310,7 +314,7 @@ async function placeBets() {
       if (stake > 0 && stake < 1) { toast('Valor mínimo: R$ 1,00', 'err'); return; }
       if (stake >= 1) tickets.push({ keys: [it.s.key], odds: [it.s.odds], stake });
     }
-    if (!tickets.length) { toast('Informe o valor da aposta', 'err'); return; }
+    if (!tickets.length) { toast(held.length ? 'As seleções com valor estão suspensas. Tente de novo em instantes.' : 'Informe o valor da aposta', 'err'); return; }
   }
   const total = tickets.reduce((a, t) => a + t.stake, 0);
   if (total > S.user.balance + 1e-9) { toast('Saldo insuficiente. Faça um depósito.', 'err'); openDeposit(); return; }
@@ -320,6 +324,7 @@ async function placeBets() {
     const res = await api('POST', '/api/bets', { tickets, acceptAny: acceptAny() });
     setUser(res.user);
     for (const r of res.rejected) toast(`Aposta recusada: ${r.reason}`, 'err');
+    if (held.length) toast(held.length > 1 ? `${held.length} apostas não enviadas: seleções suspensas (ficam no boletim)` : 'Uma aposta não foi enviada: seleção suspensa (fica no boletim)', 'err');
     if (res.placed.length) {
       const placedKeys = new Set(res.placed.flatMap((p) => p.bet.legs.map((l) => l.key)));
       S.slip = S.slip.filter((s) => !placedKeys.has(s.key));

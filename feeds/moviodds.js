@@ -294,6 +294,7 @@ function toEvent(m0, serverNow, sport, full = true) {
   const staleAll = !!m.stale || feedBad || (live && m.polled_at && serverNow - Date.parse(m.polled_at) > STALE_LIVE_MS);
   const gs = m.group_status || {};
   const byK = new Map();
+  const mainSel = new WeakSet(), conflict = new Set(); // seleções do mercado principal · com duas odds diferentes na fonte
   const specific = (q) => (sport === 'soccer' ? soccerQuote(q, m) : sport === 'tennis' ? TEN.quote(q, m) : sport === 'esports' ? esportsQuote(q, m) : namedQuote(q, m, sport));
   const ctx = `${sport}|${m.home}|${m.away}|${m.league}|${live ? 1 : 0}`;
   for (const q of m.quotes || []) {
@@ -331,11 +332,26 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (!byK.has(mkKey)) byK.set(mkKey, s.per != null ? { k: s.k, per: String(s.per), sels: [] } : { k: s.k, sels: [] });
     const mk = byK.get(mkKey);
     if (s.mname != null) { mk.name = s.mname; mk.cat = s.cat; sel.name = s.name; } // mercados da equipa e por parte do jogo
-    // a mesma linha pode vir em dois grupos (principal e alternativas): fica a principal
+    // a mesma seleção pode vir em dois grupos (principal e alternativas): fica a principal. Duas cotações com odds
+    // diferentes para a mesma seleção sem nenhuma ser a principal (ex.: 'Draw - X' a 21 e 'Tie - X' a 34): não se sabe
+    // qual está certa → a seleção sai do site
     const dup = mk.sels.findIndex((x) => x.pick === sel.pick && x.line === sel.line && String(x.base) === String(sel.base));
-    if (dup >= 0) { if (s.main) mk.sels[dup] = sel; continue; }
+    if (dup >= 0) {
+      const old = mk.sels[dup];
+      if (s.main && !mainSel.has(old)) { mk.sels[dup] = sel; mainSel.add(sel); }
+      else if (!(mainSel.has(old) && !s.main) && Math.abs(old.odds - sel.odds) > 0.001) conflict.add(old);
+      continue;
+    }
+    if (s.main) mainSel.add(sel);
     if (s.main && sel.line != null && mk.main == null) mk.main = s.k === 'spread' ? Math.abs(sel.line) : sel.line;
     mk.sels.push(sel);
+  }
+  if (conflict.size) for (const [key, mk] of byK) {
+    const out = mk.sels.filter((x) => conflict.has(x));
+    if (!out.length) continue;
+    guardRemoved.push(`${new Date(serverNow).toISOString()} [duas odds na fonte] ${m.home} x ${m.away} ${mk.k}${mk.per ? ' ' + mk.per : ''}: ${out.map((x) => `${x.pick}${x.line != null ? '(' + x.line + ')' : ''}`).join(' ')}`);
+    mk.sels = mk.sels.filter((x) => !conflict.has(x));
+    if (!mk.sels.length) byK.delete(key);
   }
   for (const [k, n] of Object.entries(NEED[sport] || {})) if (byK.get(k) && byK.get(k).sels.length !== n) byK.delete(k);
   // mercados com uma seleção só (a outra caiu por odd 1.00) não fazem sentido: saem, exceto os de "N ou mais" (aces...)
@@ -466,6 +482,25 @@ function tennisResult(r) {
   // histórico game a game, aces e duplas faltas (para os mercados de games e de saque); null se não bater certo
   return { done: true, h, a, sets, ...TEN.extras(r, sets) };
 }
+/* Partida parada antes do fim (desistência): a fonte dá status "unknown", o placar no momento e o histórico dos games
+   jogados. Vale só se: não há aviso de falha da fonte (aí o jogo pode ter acabado normalmente — fica para a equipa),
+   os sets acabados têm placar final, ninguém tinha ganho a partida e o histórico game a game bate certo com o placar.
+   Liquidação: o que ficou decidido pelo que se jogou é pago ou perdido; o resto é devolvido (markets.js tennisRetired). */
+function tennisRetired(r) {
+  if (/not seen live|service was down|not a confirmed final/i.test(String(r.note || ''))) return null;
+  const sets = String(r.final_score || '').split(',').map(parseScore);
+  if (!sets.length || sets.some((s) => !s)) return null;
+  const need = r.stats?.format === 'best_of_5' ? 3 : 2;
+  // "1-0" só é placar final no set decisivo (super tie-break); no 1º set é um game jogado
+  const okSet = ([x, y], i) => { const hi = Math.max(x, y), lo = Math.min(x, y); return (hi === 1 && lo === 0 && i === 2 * need - 2) || (hi === 6 && lo <= 4) || (hi === 7 && (lo === 5 || lo === 6)) || (hi > 7 && hi - lo === 2); };
+  const done = sets.filter((x, i) => i < sets.length - 1 || okSet(x, i));
+  if (done.length < sets.length - 1) return null;
+  const h = done.filter(([x, y]) => x > y).length, a = done.length - h;
+  if (Math.max(h, a) >= need) return null; // alguém já tinha ganho: não é desistência, fica para a equipa
+  const ex = TEN.extras(r, sets);
+  if (!ex.log) return null; // sem histórico coerente não se sabe o que se jogou
+  return { done: true, retired: true, need, h, a, sets, ...ex };
+}
 async function fetchResult(id, sport = 'soccer') {
   // stats=1: estatísticas do fim do jogo (ténis: histórico de games; outros: parciais certos, escanteios)
   const d = await get(`/results?sport=${SRC_SPORT[sport] || sport}&fi=${encodeURIComponent(id)}&stats=1`);
@@ -475,6 +510,7 @@ async function fetchResult(id, sport = 'soccer') {
 // lê um resultado já descarregado (também usado pelos testes: scripts/testar-mercados.js)
 function parseResult(r, sport) {
   const extra = { finishedAt: Date.parse(r.finished_at) || null, note: r.note || null };
+  if (sport === 'tennis' && r.status === 'unknown') { const t = tennisRetired(r); if (t) return { ...t, ...extra }; } // desistência
   if (r.status !== 'finished') return NOPE(r.note || r.status || 'sem resultado final');
   if (sport === 'tennis') { const t = tennisResult(r); return t.done ? { ...t, ...extra } : t; }
   const per = (re) => (r.periods || []).filter((p) => re.test(p.name)).map((p) => parseScore(p.score));

@@ -223,6 +223,30 @@ async function testMultiple(list) {
   }
 }
 
+async function testPartial(list) {
+  // boletim de apostas simples com uma seleção suspensa: as outras são aceites, só essa é recusada (e o saldo bate certo)
+  const api = client();
+  await api('POST', '/api/register', { name: 'Teste Parcial', email: `parc${Date.now()}@ex.com`, password: 'senha1234', birthdate: '1990-01-01', terms: true, cpf: cpf() });
+  await api('POST', '/api/dev/credit', {});
+  const start = (await api('GET', '/api/me')).user.balance;
+  const evs = list.filter((e) => e.state === 'pre' && !USED.has(e.id) && !M.isSuspended({ ...e, date: new Date(e.date) }) && new Date(e.date) - Date.now() > 3600000).slice(0, 12);
+  const { events: all } = await api('GET', `/api/events/full?ids=${evs.map((e) => e.id).join(',')}`);
+  const fulls = all.filter((f) => M.selections({ ...f, date: new Date(f.date) }).some((s) => !s.locked)).slice(0, 3); // 3 jogos com seleções abertas
+  const sels = fulls.map((f) => M.selections({ ...f, date: new Date(f.date) }).find((s) => !s.locked));
+  if (sels.length < 3) { check(false, '[parcial] sem 3 jogos disponíveis'); return; }
+  await api('POST', '/api/dev/suspend', { id: fulls[0].id, seconds: 20 });
+  const r = await api('POST', '/api/bets', { acceptAny: true, tickets: sels.map((s) => ({ keys: [s.key], stake: 2 })) });
+  check(r.placed.length === 2, `[parcial] deviam entrar 2 apostas, entraram ${r.placed.length}`);
+  check(r.rejected.length === 1 && r.rejected[0].index === 0 && /suspenso/.test(r.rejected[0].reason), `[parcial] só a do jogo suspenso devia ser recusada: ${JSON.stringify(r.rejected)}`);
+  const bal = (await api('GET', '/api/me')).user.balance;
+  check(cents(bal) === cents(start) - 400, `[parcial] saldo devia descontar só as 2 aceites (R$ 4): ${start} → ${bal}`);
+  // todas suspensas: recusado inteiro, sem descontar nada
+  const r2 = await api('POST', '/api/bets', { acceptAny: true, tickets: [{ keys: [sels[0].key], stake: 2 }] }, [200, 409]);
+  check(r2.status === 409, '[parcial] boletim só com a suspensa devia ser recusado');
+  check(cents((await api('GET', '/api/me')).user.balance) === cents(bal), '[parcial] recusa total não pode mexer no saldo');
+  console.log(`\nboletim com 1 seleção suspensa em 3: ${r.placed.length} aceites, ${r.rejected.length} recusada (${r.rejected[0]?.reason})`);
+}
+
 async function testLiveCashout(list) {
   // ao vivo (ténis): aposta e cash out com a espera de aprovação
   const api = client();
@@ -260,6 +284,7 @@ async function testLiveCashout(list) {
     try { await testSport(sport, list); } catch (e) { check(false, `[${sport}] ${e.message}`); }
   }
   try { await testMultiple(list); } catch (e) { check(false, `[múltipla] ${e.message}`); }
+  try { await testPartial(list); } catch (e) { check(false, `[parcial] ${e.message}`); }
   try { await testLiveCashout(list); } catch (e) { check(false, `[ao vivo] ${e.message}`); }
   console.log(`\n${pass} verificações certas · ${failN} erradas`);
   for (const f of fails.slice(0, 80)) console.log('  ✘ ' + f);

@@ -1,0 +1,35 @@
+{
+ "gravadoEm": "2026-10-28",
+ "nota": "Cardozo x Tobon, desistência no 1º set a 3-1 (status unknown)",
+ "resultado": {
+  "fixture_id": "203637454",
+  "home": "Joaquin A Cardozo",
+  "away": "Miguel Tobon",
+  "league": "Challenger Guayaquil",
+  "final_score": "3-1",
+  "status": "unknown",
+  "stats": {
+   "format": "best_of_3",
+   "summary": [
+    "Game 1 - Miguel Tobon - holds to 30",
+    "Game 2 - Joaquin A Cardozo - holds to love",
+    "Game 3 - Joaquin A Cardozo - breaks to 40",
+    "Game 4 - Joaquin A Cardozo - holds to 30"
+   ],
+   "home": {
+    "sets": [
+     3
+    ],
+    "aces": 1,
+    "double_faults": 0
+   },
+   "away": {
+    "sets": [
+     1
+    ],
+    "aces": 1,
+    "double_faults": 2
+   }
+  }
+ }
+}

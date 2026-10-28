@@ -7,7 +7,8 @@
    4) proteção: bloqueia odds impossíveis, lados trocados e cotações paradas; não bloqueia odds boas
    5) gravação real (28/10, 57 jogos, 1708 placares) confrontada com o resumo oficial de cada jogo
    6) oferta atual da MoviOdds: todas as cotações de ténis lidas, nenhuma odd boa bloqueada, trocas apanhadas
-   7) mercados da partida pagos antes do fim (ex.: 1-1 em sets: "3 sets" ganha), melhor de 5 e desistência entre sets */
+   7) mercados da partida pagos antes do fim (ex.: 1-1 em sets: "3 sets" ganha), melhor de 5 e desistência entre sets
+   8) desistência: o que se jogou é pago ou perdido, o resto devolvido (jogo real de 28/10 + casos à mão) */
 
 const path = require('path');
 const fs = require('fs');
@@ -249,6 +250,7 @@ async function live() {
       if (!['ml', 'tsw', 'tgw', 'tg1p'].includes(x.k) || x.sels.length !== 2) continue;
       const partner = x.k === 'ml' ? 'sets' : x.k === 'tsw' ? `tscs|${x.per}` : x.k === 'tgw' ? `tgs|${x.per}` : `tgpb|${x.per}`;
       if (!base.has(partner)) continue;
+      if (x.k === 'tg1p' && base.get(partner).sels.filter((s) => s.line === 1).length !== 2) continue; // sem o ponto 1 ao lado não há com que comparar
       const pr = (1 / x.sels.find((s) => s.pick === 'home').odds) / x.sels.reduce((q, s) => q + 1 / s.odds, 0);
       const copy = new Map([...base].map(([k, v]) => [k, { ...v, sels: v.sels.map((s) => ({ ...s, lock: false, guard: false })) }]));
       copy.get(key).sels.forEach((s) => { s.pick = s.pick === 'home' ? 'away' : 'home'; });
@@ -334,9 +336,53 @@ function earlyMatch() {
   check(locked(b.get('tsets')), 'melhor de 5: total de sets trocado (3 ↔ 5) sai');
 }
 
+/* ================= 8) desistência: o que se jogou é liquidado, o resto devolvido ================= */
+function retirement() {
+  console.log('8) desistência');
+  const F = require(path.join(ROOT, 'feeds', 'moviodds.js'));
+  // jogo real: Cardozo x Tobon 28/10, parou no 1º set a 3-1 (Tobon segura, Cardozo segura, Cardozo quebra, Cardozo segura)
+  const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'dados', 'tenis-desistencia-28-10.json'), 'utf8'));
+  const R = F.parseResult(d.resultado, 'tennis');
+  eq([R.done, R.retired, M.resultText(R)], [true, true, '3-1 (desistência)'], 'desistência real reconhecida');
+  const L = (market, pick, extra = {}) => M.legOutcome({ market, pick, ...extra }, { ...R, pts: {} });
+  eq(L('tsbrk', 'home:yes', { per: '1' }), 1, 'já tinha quebrado o saque: "quebra: Sim" ganha');
+  eq(L('tsbrk', 'away:yes', { per: '1' }), 0, 'Tobon não quebrou mas ainda podia: devolvida');
+  eq(L('tslead', 'draw', { per: '1:4' }), -1, 'lidera após 4 games (estava 3-1): "empate" perde');
+  eq(L('tsafter', '3-1', { per: '1:4' }), 1, 'placar após 4 games 3-1: ganha');
+  eq(L('tslead', 'home', { per: '1:6' }), 0, 'lidera após 6 games: não se jogaram 6 → devolvida');
+  eq(L('tsrace', 'away', { per: '1:2' }), -1, 'primeiro a 2 games: Cardozo chegou primeiro → Tobon perde');
+  eq(L('tsrace', 'home', { per: '1:4' }), 0, 'primeiro a 4 games: ninguém chegou → devolvida');
+  eq(L('tgw', 'home', { per: '1/3' }), 1, 'game 3 (jogado): vencedor ganha');
+  eq(L('tgw', 'home', { per: '1/5' }), 0, 'game 5 (não acabou): devolvida');
+  eq(L('tgtp', '4', { per: '1/2' }), 1, 'game 2 a zero: 4 pontos');
+  eq(L('tsw', 'home', { per: '1' }), 0, 'vencedor do 1º set (a meio): devolvida');
+  eq(L('ml', 'home'), 0, 'vencedor da partida: devolvida');
+  eq(L('sets', '2-0'), 0, 'placar em sets: devolvida');
+  eq(L('tsgt', 'over', { per: '1', line: 3.5 }), 1, 'games do 1º set: 4 jogados → "mais de 3,5" ganha');
+  eq(L('tsgt', 'under', { per: '1', line: 7.5 }), 0, 'games do 1º set "menos de 7,5": ainda podia passar → devolvida');
+  eq(L('gtotal', 'under', { line: 3.5 }), -1, 'total de games "menos de 3,5": já eram 4 → perde');
+  eq(L('toe', 'odd'), 0, 'par/ímpar: devolvida');
+  // melhor de 5 parado entre sets a 2-1: mercados da partida que já não mudam
+  const R5 = { retired: true, need: 3, h: 2, a: 1, sets: [[6, 4], [3, 6], [6, 2]], log: [], pts: {} };
+  eq(M.legOutcome({ market: 'tstraight', pick: 'yes' }, R5), -1, 'melhor de 5 a 2-1: "sem perder set" já perdeu');
+  eq(M.legOutcome({ market: 'tsets', pick: '3' }, R5), -1, 'melhor de 5 a 2-1: "3 sets" já perdeu');
+  eq(M.legOutcome({ market: 'tsets', pick: '4' }, R5), 0, 'melhor de 5 a 2-1: "4 sets" em aberto → devolvida');
+  eq(M.legOutcome({ market: 'tpto', pick: 'aset:yes', per: 'away' }, R5), 1, '"ganha pelo menos um set": já ganhou → ganha');
+  eq(M.legOutcome({ market: 'tsw', pick: 'home', per: '3' }, R5), 1, 'set 3 acabado: vencedor ganha');
+  // não é desistência: aviso de falha da fonte, ou alguém já tinha ganho
+  const base = { ...d.resultado };
+  eq(F.parseResult({ ...base, note: 'not seen live after 2026-10-27T22:27:26Z: the service was down when this match ended, so the score is the last one seen, not a confirmed final' }, 'tennis').done, false, 'fonte em baixo no fim: não conta como desistência (equipa)');
+  eq(F.parseResult({ ...base, final_score: '6-3,6-4', stats: { ...base.stats, summary: [] } }, 'tennis').done, false, 'alguém já tinha ganho mas status desconhecido: equipa');
+  eq(F.parseResult({ ...base, stats: { ...base.stats, summary: base.stats.summary.slice(0, 3) } }, 'tennis').done, false, 'histórico incoerente com o placar: equipa');
+  // "1-0" no 1º set = 1 game jogado (não é super tie-break)
+  const R1 = F.parseResult({ ...base, final_score: '1-0', stats: { ...base.stats, summary: [base.stats.summary[1].replace('Game 2', 'Game 1')], home: { sets: [1] }, away: { sets: [0] } } }, 'tennis');
+  eq([R1.done, M.legOutcome({ market: 'tsw', pick: 'home', per: '1' }, R1)], [true, 0], '"1-0" no 1º set: set a meio, vencedor do set devolvido');
+  eq(M.legOutcome({ market: 'sets', pick: '2-0' }, { retired: true, need: 2, h: 0, a: 1, sets: [[3, 6], [2, 0]], log: [], pts: {} }), -1, 'perdeu o 1º set: "2-0 para a casa" já impossível → perde');
+}
+
 (async () => {
   console.log('Testes do ténis');
-  points(); markets(); quotes(); guard(); recording(); earlyMatch();
+  points(); markets(); quotes(); guard(); recording(); earlyMatch(); retirement();
   await live();
   console.log(`\n  ${ok} verificações certas · ${bad} erradas`);
   process.exit(bad ? 1 : 0);

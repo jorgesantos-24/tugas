@@ -293,7 +293,7 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
 async function realTennis() {
   const F = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));
   const day = (d) => new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
-  let n = 0, withLog = 0, retired = 0;
+  let n = 0, withLog = 0, retired = 0, retAuto = 0;
   for (const d of [1, 2]) {
     const r = await (await fetch(`https://moviodds.com/results?sport=tennis&stats=1&date=${day(d)}`, { signal: AbortSignal.timeout(60000) })).json();
     for (const x of (r.results || []).filter((y) => !/^(UTR|Esports|E-)/i.test(y.league))) {
@@ -301,11 +301,21 @@ async function realTennis() {
       let R = null;
       try { R = F.parseResult(x, 'tennis'); } catch (e) { check(false, `leitura do resultado ${x.fixture_id}: ${e.message}`); continue; }
       if (!R.done) { retired++; continue; }
+      // desistência: o que se jogou é liquidado, o resto devolvido — vencedor e placar em sets nunca se decidem aqui
+      if (R.retired) {
+        retAuto++;
+        const tag = `desistência ${x.home} x ${x.away} ${x.final_score}`;
+        check(M.legOutcome({ market: 'ml', pick: 'home' }, R) === 0 && M.legOutcome({ market: 'ml', pick: 'away' }, R) === 0, `${tag}: vencedor devolvido`);
+        const last = R.sets.length;
+        if (!(Math.max(...R.sets[last - 1]) >= 6)) check(M.legOutcome({ market: 'tsw', pick: 'home', per: String(last) }, R) === 0, `${tag}: set a meio devolvido`);
+        R.log.forEach((e) => check(M.legOutcome({ market: 'tgw', pick: e.w, per: `${e.s}/${e.g}` }, R) === 1, `${tag}: game jogado ${e.s}/${e.g} liquidado`));
+        continue;
+      }
       n++; if (R.log) withLog++;
       tennisCross(R, `real ${x.home} x ${x.away} ${x.final_score}`);
     }
   }
-  console.log(`  partidas reais: ${n} terminadas normalmente (${withLog} com histórico game a game), ${retired} paradas/desistência (ficam para a equipa)`);
+  console.log(`  partidas reais: ${n} terminadas normalmente (${withLog} com histórico game a game), ${retAuto} desistências liquidadas pelo que se jogou, ${retired} paradas sem dados seguros (ficam para a equipa)`);
   check(n > 50, `poucas partidas reais para testar (${n})`);
   check(withLog / Math.max(n, 1) > 0.9, `histórico game a game válido só em ${withLog} de ${n}`);
 }

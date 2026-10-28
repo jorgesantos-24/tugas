@@ -608,8 +608,80 @@ const evLabel = (ev) => (ev.outright ? ev.home.name : `${ev.home.short} x ${ev.a
      reg       hóquei: placar no fim do 3º período · sets: ténis, games de cada set [[6, 4], [3, 6], ...]
      alts      hóquei decidido nos pênaltis: os dois placares possíveis (a fonte não diz quem ganhou) */
 // -1 perdeu · -0.5 meia perda · 0 devolvida · 0.5 meio ganho · 1 ganhou
+/* Ténis terminado por desistência (R.retired): o que ficou decidido pelo que se jogou é pago ou perdido; o que ficou em
+   aberto é devolvido (0). R.sets = sets jogados (o último pode estar a meio), R.log = games jogados, R.need = sets para ganhar. */
+const T_GAME = new Set(['tgw', 'tgs', 'tgd', 'tgsw', 'tg1p', 'tgsa', 'tgpb', 'tgbp', 'tgtp']);
+const T_GAME2 = new Set(['tgpw', 'tgpd']);
+const T_FSRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfsa', 'tfstp', 'tfsbp']);
+const T_MATCH = new Set(['ml', 'sets', 'tsets', 'tstraight', 'tpto', 'tdr', 'tcast', 'tdist']);
+const T_SET = new Set(['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh', 'tstbw', 'tsbrk', 'tsbt', 'tslead', 'tsafter', 'tsrace', 'ttbtp', 'ttbs', 'ttblead', 'ttbsa', 'ttbpb']);
+// i = nº do set (0 = 1º), need = sets para ganhar: "1-0" só é placar final no set decisivo (super tie-break)
+const tOkSet = ([x, y], i, need = 2) => { const hi = Math.max(x, y), lo = Math.min(x, y); return (hi === 1 && lo === 0 && i === 2 * need - 2) || (hi === 6 && lo <= 4) || (hi === 7 && (lo === 5 || lo === 6)) || (hi > 7 && hi - lo === 2); };
+function tennisRetired(leg, R) {
+  const k = leg.market, sets = R.sets || [], log = R.log || null;
+  const played = { ...R, retired: false };
+  const as = (v) => (v == null ? null : v); // null = faltam dados (equipa)
+  const doneSets = sets.filter((x, i) => i < sets.length - 1 || tOkSet(x, i, R.need || 2));
+  const [a, b] = String(leg.per ?? '').split(/[:/]/);
+  const sN = Number(a);
+  const brk = (e) => e.srv && e.w !== e.srv;
+  const ou = (cur) => (cur > leg.line ? (leg.pick === 'over' ? 1 : leg.pick === 'under' ? -1 : 0) : 0); // passou a linha: decidido; senão em aberto
+  if (T_GAME.has(k) || T_GAME2.has(k)) {
+    if (!log) return null;
+    const g = Number(b), need = T_GAME2.has(k) ? [g, g + 1] : [g];
+    return need.every((n) => log.some((e) => e.s === sN && e.g === n)) ? as(legOutcome(leg, played)) : 0;
+  }
+  if (T_FSRV.has(k)) { if (!log) return null; return log.some((e) => e.srv === a && !e.tb) ? as(legOutcome(leg, played)) : 0; }
+  if (k === 'tfbrk') { if (!log) return null; return log.some(brk) ? as(legOutcome(leg, played)) : 0; }
+  if (T_SET.has(k)) {
+    if (a === 'M') return 0; // super tie-break não jogado até ao fim
+    if (sN >= 1 && sN <= doneSets.length) return as(legOutcome(leg, played)); // set acabado
+    if (sN > sets.length || !log) return sN > sets.length ? 0 : null; // set nem começado
+    const gs = log.filter((e) => e.s === sN); // set a meio: só o que já ficou decidido
+    if (k === 'tslead' || k === 'tsafter') return gs.length >= Number(b) ? as(legOutcome(leg, played)) : 0;
+    if (k === 'tsrace') { let h = 0, w = 0; for (const e of gs) { if (e.w === 'home') h++; else w++; if (h === Number(b) || w === Number(b)) return as(legOutcome(leg, played)); } return 0; }
+    if (k === 'tsbrk') { const [p1, p2] = String(leg.pick).split(':'); return gs.some((e) => brk(e) && e.w === p1) ? (p2 === 'yes' ? 1 : -1) : 0; }
+    if (k === 'tsgt') return ou(gs.length);
+    if (k === 'tsbt') return ou(gs.filter(brk).length);
+    return 0;
+  }
+  if (T_MATCH.has(k)) {
+    // pago só se qualquer final possível da partida desse o mesmo resultado
+    const need = R.need || 2;
+    const hw = doneSets.filter(([x, y]) => x > y).length, aw = doneSets.length - hw;
+    const outs = new Set();
+    const rec = (h, w, extra) => {
+      if (outs.size > 1) return;
+      if (h === need || w === need) { outs.add(legOutcome(leg, { h, a: w, sets: doneSets.concat(extra.map((x) => (x === 'home' ? [6, 0] : [0, 6]))) })); return; }
+      rec(h + 1, w, [...extra, 'home']); rec(h, w + 1, [...extra, 'away']);
+    };
+    rec(hw, aw, []);
+    const v = outs.size === 1 ? [...outs][0] : 0;
+    return v == null ? 0 : v;
+  }
+  // contagens que só sobem: "mais de" ganha / "menos de" perde se já passou a linha; senão em aberto
+  if (k === 'gtotal') return ou(sets.reduce((q, x) => q + x[0] + x[1], 0));
+  if (k === 'tpgw') return ou(sets.reduce((q, x) => q + x[a === 'home' ? 0 : 1], 0));
+  if (k === 'ttb') return ou(doneSets.filter((x) => Math.max(...x) === 7 && Math.min(...x) === 6).length);
+  if (k === 'tbrk') return log ? ou(log.filter(brk).length) : null;
+  if (k === 'tpbrk') {
+    if (!log) return null;
+    const si = Number(b) || 0;
+    if (si && si <= doneSets.length) return as(legOutcome(leg, played));
+    return ou(log.filter((e) => brk(e) && e.w === a && (!si || e.s === si)).length);
+  }
+  if (k === 'tace' || k === 'tdf') {
+    const v = k === 'tace' ? R.aces : R.dfs;
+    if (!v) return 0;
+    const cur = a === 'all' ? v[0] + v[1] : v[a === 'home' ? 0 : 1];
+    return cur >= leg.line ? 1 : 0; // "N ou mais" já atingido: ganha; senão em aberto
+  }
+  return 0; // par/ímpar, handicaps, vencedor + total...: em aberto
+}
+
 function legOutcome(leg, R) {
   if (leg.market === 'x') return null; // mercado da equipa: liquidado no painel
+  if (R.retired) return tennisRetired(leg, R); // ténis: partida terminada por desistência
   if (AUTO_KINDS.has(leg.market)) return partOutcome(leg, R);
   if (leg.market === 'pp') return ppOutcome(leg, R);
   if (leg.market === 'pet') return petOutcome(leg, R);
@@ -644,7 +716,7 @@ function legOutcome(leg, R) {
 }
 const outcomeFactor = (v, o) => (v === 1 ? o : v === 0.5 ? (1 + o) / 2 : v === 0 ? 1 : v === -0.5 ? 0.5 : 0);
 const outcomeLabel = (v) => (v === 1 ? 'won' : v === 0.5 ? 'halfwon' : v === 0 ? 'void' : v === -0.5 ? 'halflost' : 'lost');
-const resultText = (R) => (R.sets ? R.sets.map((s) => s.join('-')).join(' ') : `${R.h} x ${R.a}`);
+const resultText = (R) => (R.sets ? R.sets.map((s) => s.join('-')).join(' ') + (R.retired ? ' (desistência)' : '') : `${R.h} x ${R.a}`);
 
 // tenta liquidar uma seleção com o evento; devolve true se mudou
 function settleLeg(leg, ev) {

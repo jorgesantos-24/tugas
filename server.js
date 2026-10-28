@@ -1302,20 +1302,25 @@ const routes = {
       if (new Set(evIds).size !== evIds.length) fail(400, 'Seleções do mesmo jogo não podem ser combinadas.');
       return { keys: tk.keys.map(String), seen: Array.isArray(tk.odds) ? tk.odds : [], stake };
     });
-    const total = parsed.reduce((a, tk) => a + tk.stake, 0);
+    // apostas com alguma seleção suspensa: recusadas uma a uma (as outras do boletim seguem); todas suspensas → erro
+    const preRejected = new Map(); // índice → motivo
+    parsed.forEach((tk, i) => {
+      for (const k of tk.keys) {
+        const { ev, sel } = findSel(k);
+        if (!sel || sel.locked || M.isSuspended(ev)) { preRejected.set(i, `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`); return; }
+      }
+    });
+    if (preRejected.size === parsed.length) fail(409, parsed.length > 1 ? 'As seleções estão suspensas. Tente de novo em instantes.' : 'Uma das seleções está suspensa. Remova-a do boletim.');
+    const total = parsed.reduce((a, tk, i) => a + (preRejected.has(i) ? 0 : tk.stake), 0);
     if (total > u.balance) fail(400, 'Saldo insuficiente. Faça um depósito.');
     let live = false;
-    for (const tk of parsed) for (const k of tk.keys) {
-      const { ev, sel } = findSel(k);
-      if (!sel || sel.locked || M.isSuspended(ev)) fail(409, 'Uma das seleções está suspensa. Remova-a do boletim.');
-      if (ev.state === 'in') live = true;
-    }
+    parsed.forEach((tk, i) => { if (!preRejected.has(i)) for (const k of tk.keys) if (findSel(k).ev?.state === 'in') live = true; });
     if (userLocks.has(u.id)) fail(429, 'Aguarde a confirmação da aposta anterior.');
     userLocks.add(u.id);
     try {
       // atraso de aceitação (como as casas reais fazem, sobretudo ao vivo) e revalidação
       const t0 = now();
-      const liveIds = new Set(parsed.flatMap((tk) => tk.keys.map((k) => String(k).split('|')[0])));
+      const liveIds = new Set(parsed.flatMap((tk, i) => (preRejected.has(i) ? [] : tk.keys.map((k) => String(k).split('|')[0]))));
       const snap = liveSnapshot(liveIds);
       await sleep(live ? liveDelayMs([...snap.keys()].map((id) => events.get(id)?.sport)) : PRE_DELAY_MS);
       if (snap.size) await refreshLiveNow(snap.keys()); // placar mais recente antes de decidir
@@ -1325,6 +1330,7 @@ const routes = {
         const tk = parsed[i];
         const legs = [];
         let reason = null;
+        if (preRejected.has(i)) { rejected.push({ index: i, reason: preRejected.get(i) }); continue; }
         if (liveReason && tk.keys.some((k) => snap.has(String(k).split('|')[0]))) { rejected.push({ index: i, reason: liveReason }); continue; }
         for (let j = 0; j < tk.keys.length; j++) {
           const { ev, sel } = findSel(tk.keys[j]);
