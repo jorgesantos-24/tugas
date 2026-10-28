@@ -1040,7 +1040,9 @@ function shootoutHtml(ev, compact = false) {
 }
 function legGame(l, ev) {
   const [hn, an] = String(l.event || '').split(' x ');
-  const h = ev?.home || { name: hn || '', short: hn || '' }, a = ev?.away || { name: an || '', short: an || '' };
+  // jogo já fora da lista: os emblemas vêm com a aposta (l.logos)
+  const h = ev?.home?.logo ? ev.home : { ...(ev?.home || { name: hn || '', short: hn || '' }), logo: ev?.home?.logo || l.logos?.[0] || '' };
+  const a = ev?.away?.logo ? ev.away : { ...(ev?.away || { name: an || '', short: an || '' }), logo: ev?.away?.logo || l.logos?.[1] || '' };
   const live = ev && ev.state === 'in' && !ev.awaiting;
   const score = ev && ev.state !== 'pre' && Number.isFinite(ev.home.score) ? `<b class="bg-score${live ? ' live' : ''}">${ev.home.score}-${ev.away.score}</b>` : '<span class="bg-x">x</span>';
   const sub = !ev ? esc(l.leagueName || '') : ev.awaiting ? 'Jogo terminado · aguardando resultado' : live ? `<span class="ls">● ${clockHtml(ev)}</span> · ${esc(ev.leagueName)}`

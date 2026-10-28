@@ -160,7 +160,12 @@ function publicUser(u, extra = {}) {
 function publicBet(b) {
   return {
     id: b.id, type: b.type, stake: fromCents(b.stake), odds: b.odds, potential: fromCents(b.potential), status: b.status,
-    payout: fromCents(b.payout), placedAt: b.placedAt, settledAt: b.settledAt, legs: b.legs,
+    payout: fromCents(b.payout), placedAt: b.placedAt, settledAt: b.settledAt,
+    // emblemas das equipas de cada seleção: o site mostra-os mesmo depois de o jogo sair da lista
+    legs: (b.legs || []).map((l) => {
+      const [h, a] = String(l.event || '').split(' x ');
+      return { ...l, logos: [LOGOS.logo(l.sport || 'soccer', h, 2e14, l.league) || '', LOGOS.logo(l.sport || 'soccer', a, 2e14, l.league) || ''] };
+    }),
   };
 }
 
@@ -430,7 +435,8 @@ function stubFromLeg(l) {
   // torneio de ténis que já saiu da lista (ex.: o servidor reiniciou): volta a existir para a aposta aparecer e ser paga
   if (!M.LEAGUE_BY_KEY[l.league]) M.addLeague({ key: l.league, name: l.leagueName, country: '', sport: l.sport || 'tennis', order: 999 });
   const [h, a] = String(l.event).split(' x ');
-  const team = (name, id) => ({ id, name, short: name, logo: '', score: null, form: '' });
+  // emblemas da cache (o jogo já saiu da lista, mas a aposta continua a mostrá-los)
+  const team = (name, id) => ({ id, name, short: name, logo: LOGOS.logo(l.sport || 'soccer', name, 2e14, l.league) || '', score: null, form: '' });
   return {
     id: l.evId, league: l.league, leagueName: l.leagueName, country: M.LEAGUE_BY_KEY[l.league]?.country || '', sport: l.sport || 'soccer',
     date: new Date(l.startsAt), state: 'in', completed: false, statusName: '', clock: 'Aguardando resultado',
