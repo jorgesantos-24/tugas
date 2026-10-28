@@ -314,7 +314,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     const s = c.s;
     if (!s) continue;
     // jogadores: só abre se a fonte traz essa estatística nesta liga (ou, sem histórico, se o jogo ao vivo já traz jogadores)
-    if (s.k === 'pp' && !PLAYERS.covered(lg.key, s.per.split('|')[0]) && !(live && (WS.stats(m.id)?.players || []).length)) continue;
+    // ao vivo numa liga sem cobertura: só se os jogadores ao vivo trazem titular/entrou (senão não se sabe quem jogou)
+    if (s.k === 'pp' && !PLAYERS.covered(lg.key, s.per.split('|')[0]) && !(live && PLAYERS.hasLineup(WS.stats(m.id)?.players || []))) continue;
     // escanteios, cartões e 1º/2º tempo: só abre se a fonte costuma trazer esse dado nesta liga (ou o jogo ao vivo já o traz)
     if (sport === 'soccer' && s.k !== 'pp') {
       const need = statNeed(s);

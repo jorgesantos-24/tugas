@@ -282,6 +282,7 @@ function mergeEvents(list, fetchedAt, fromWs = false) {
       if (ev.clockT0 && old.clockT0 && Math.abs(ev.clockT0 - old.clockT0) <= 2000) ev.clockT0 = old.clockT0;
     }
     ev.cm = extraMarketsOf(ev.id); // mercados extra da equipa neste jogo (painel → Esportes e mercados)
+    if (shootouts.has(ev.id)) ev.shootout = shootouts.get(ev.id).data; // pênaltis cobrança a cobrança (ESPN)
     if (!old || !same(old, ev)) { changed = true; touch(ev.id); }
     events.set(ev.id, ev);
   }
@@ -485,6 +486,31 @@ async function checkResults() {
    mercados de prolongamento/penáltis — ou de jogadores numa eliminatória empatada aos 90' — vai-se buscar o
    resultado à ESPN (a cada 2 min, durante 6 h). Sem resultado, essas apostas ficam para a equipa no painel. */
 const etTried = new Map();
+/* Disputa de pênaltis ao vivo (cobrança a cobrança, da ESPN): jogos de futebol empatados no fim dos 90' (ou da
+   prorrogação) nas ligas com ESPN. Lida a cada 15 s enquanto decorre; fica no jogo para a página e o boletim. */
+const shootouts = new Map(); // jogo → { data, at, done }
+async function checkShootouts() {
+  const t = now();
+  for (const ev of events.values()) {
+    if (ev.sport !== 'soccer' || ev.manual) continue;
+    const cur = shootouts.get(ev.id);
+    if (cur?.done || (cur && t - cur.at < 15000)) continue;
+    const tl = FEED.liveStats(ev.id)?.timeline || [];
+    const fin = [...tl].reverse().find((x) => /Score After (Full|Extra) Time/i.test(x.text || ''));
+    const sc = fin && /(\d+)-(\d+)\s*$/.exec(fin.text);
+    const draw = sc ? sc[1] === sc[2] : ev.state === 'post' && ev.result && ev.result.h === ev.result.a;
+    if (!draw) continue;
+    if (ev.state === 'post' && t - (ev.result?.finishedAt || +ev.date + 2 * 3600000) > 3 * 3600000) continue;
+    try {
+      const data = await ESPN.shootout(ev);
+      shootouts.set(ev.id, { data, at: t, done: !!data?.done });
+      if (data && JSON.stringify(ev.shootout) !== JSON.stringify(data)) { ev.shootout = data; touch(ev.id); feedVersion++; feedCache = null; }
+    } catch (e) { shootouts.set(ev.id, { data: cur?.data || null, at: t, done: false }); }
+  }
+  for (const [id, x] of shootouts) if (!events.has(id) || t - x.at > 6 * 3600000) shootouts.delete(id);
+}
+setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 15000);
+
 async function checkExtraTime() {
   const t = now();
   const want = new Map(); // jogo → precisa (pet = prolongamento/penáltis; pp = jogadores à espera)

@@ -101,4 +101,46 @@ async function extraTimeGoals(slug, id, swap, H, A, sc, reg) {
   } catch { return null; }
 }
 
-module.exports = { extraTime };
+/* Disputa de pênaltis cobrança a cobrança (ao vivo e no fim), do resumo do jogo na ESPN ("shootout").
+   → { home: [{ p: 'Foden', ok: true }, ...], away: [...], score: [c, f], done } no lado do jogo do site, ou null. */
+async function shootout(ev) {
+  if (OFF) return null;
+  const slug = ESPN_LEAGUE[ev.league];
+  if (!slug || !slug.startsWith('soccer/')) return null;
+  const t = +ev.date;
+  for (const day of [0, 1, -1].map((d) => new Date(t + d * 86400000).toISOString().slice(0, 10).replace(/-/g, ''))) {
+    let list;
+    try {
+      const r = await fetch(`${BASE}${slug}/scoreboard?dates=${day}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) continue;
+      list = (await r.json()).events || [];
+    } catch { continue; }
+    for (const e of list) {
+      const c = e.competitions?.[0];
+      if (!c || Math.abs(Date.parse(c.date || e.date) - t) > 6 * 3600000) continue;
+      const H = c.competitors?.find((x) => x.homeAway === 'home'), A = c.competitors?.find((x) => x.homeAway === 'away');
+      if (!H || !A) continue;
+      let swap;
+      if (same(ev.home.name, H.team?.displayName) && same(ev.away.name, A.team?.displayName)) swap = false;
+      else if (same(ev.home.name, A.team?.displayName) && same(ev.away.name, H.team?.displayName)) swap = true;
+      else continue;
+      const st = c.status?.type || {};
+      if (!/SHOOTOUT|PEN/i.test(`${st.name} ${st.detail}`)) return null; // ainda sem pênaltis
+      const r = await fetch(`${BASE}${slug}/summary?event=${encodeURIComponent(e.id)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return null;
+      const so = (await r.json()).shootout || [];
+      const side = (name) => (same(name, H.team?.displayName) ? (swap ? 'away' : 'home') : same(name, A.team?.displayName) ? (swap ? 'home' : 'away') : null);
+      const out = { home: [], away: [], done: !!st.completed };
+      for (const tm of so) {
+        const sd = side(tm.team);
+        if (!sd) return null;
+        out[sd] = (tm.shots || []).slice().sort((a, b) => a.shotNumber - b.shotNumber).map((x) => ({ p: String(x.player || '').split(' ').slice(-1)[0], n: x.player || '', ok: !!x.didScore }));
+      }
+      out.score = [out.home.filter((x) => x.ok).length, out.away.filter((x) => x.ok).length];
+      return out;
+    }
+  }
+  return null;
+}
+
+module.exports = { extraTime, shootout };

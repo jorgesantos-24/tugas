@@ -14,7 +14,7 @@ const PHRASES = [
   ['Match Corners', 'Total de escanteios'], ['Asian Corners', 'Escanteios asiáticos'], ['2-Way Corners', 'Total de escanteios (2 opções)'],
   ['Number Of Cards In Match', 'Total de cartões'], ['Number of Cards', 'Total de cartões'], ['Asian Total Cards', 'Total de cartões asiático'],
   ['Asian Handicap Cards', 'Handicap asiático de cartões'], ['Team Cards', 'Cartões da equipa'],
-  ['Double Chance', 'Dupla Chance'], ['Draw No Bet', 'Empate Anula'], ['Full Time Result', 'Resultado Final'], ['Fulltime Result', 'Resultado Final'],
+  ['Double Chance', 'Dupla Chance'], ['Draw No Bet', 'Empate Anula'], ['Full Time Result', 'Vitória no tempo regulamentar'], ['Fulltime Result', 'Vitória no tempo regulamentar'],
   ['Half Time/Full Time', 'Intervalo/Final'], ['Half Time Result', 'Resultado do 1º tempo'], ['Half Time Correct Score', 'Placar exato do 1º tempo'],
   ['Half Time Double Chance', 'Dupla chance do 1º tempo'], ['Correct Score', 'Placar exato'], ['Correct Round Score', 'Placar exato de rondas'],
   ['Correct Map Score', 'Placar exato de mapas'], ['Asian Handicap', 'Handicap asiático'], ['Handicap Result', 'Resultado com handicap'],

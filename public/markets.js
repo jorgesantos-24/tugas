@@ -114,7 +114,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
      line: linha do total/handicap · base: placar de referência do handicap ao vivo do futebol ([casa, fora]; só contam os gols depois) */
 const fmtLine = (l) => (l > 0 ? '+' + l : String(l));
 const MARKET_NAMES = {
-  ml: (s, ev) => ({ soccer: 'Resultado Final', basketball: 'Vencedor (incl. prorrogação)', hockey: 'Vencedor (incl. prorrogação e pênaltis)', tennis: 'Vencedor da partida', esports: 'Vencedor da partida' }[ev.sport]),
+  ml: (s, ev) => ({ soccer: 'Vitória no tempo regulamentar', basketball: 'Vencedor (incl. prorrogação)', hockey: 'Vencedor (incl. prorrogação e pênaltis)', tennis: 'Vencedor da partida', esports: 'Vencedor da partida' }[ev.sport]),
   // e-Sports
   ecs: () => 'Placar exato (mapas)',
   emh: () => 'Handicap de mapas',
@@ -193,6 +193,7 @@ function ppOutcome(leg, R) {
   const get = PP_FIELD[String(leg.per ?? '').split('|')[0]];
   const p = get && R.players ? ppPlayer(leg, R.players) : null;
   if (!p) return null; // jogador não encontrado: a equipa confere
+  if (p.played === null) return null; // a fonte não diz se jogou (sem titular/entrou e a zeros): não se adivinha
   if (!p.played) return 0; // não jogou: devolvida
   const v = get(p);
   if (!Number.isFinite(v)) return null;

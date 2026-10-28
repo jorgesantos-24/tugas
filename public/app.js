@@ -913,7 +913,7 @@ function renderEvent() {
     <div class="hero-top"><span>${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(ev.country)}</span><span>${esc(ev.venue)}</span></div>
     <div class="ev-detail-teams">
       <div class="hero-team">${crest(ev.home)}${esc(ev.home.name)}${form(ev.home.form)}</div>
-      <div><div class="big-score">${score}</div>${status}</div>
+      <div><div class="big-score">${score}</div>${status}${shootoutHtml(ev)}</div>
       <div class="hero-team">${crest(ev.away)}${esc(ev.away.name)}${form(ev.away.form)}</div>
     </div>
   </div>${streamBlock(ev)}`;
@@ -1027,6 +1027,17 @@ function trackHtml(l, ev, bet) {
 }
 
 // o jogo da seleção: emblemas e nomes (do jogo em memória; senão, do nome guardado na aposta "Casa x Fora")
+/* disputa de pênaltis (ESPN): cada cobrança com ✅ (marcou) ou ❌ (errou) e o jogador; compact = linha curta do boletim */
+function shootoutHtml(ev, compact = false) {
+  const so = ev?.shootout;
+  if (!so || (!so.home.length && !so.away.length)) return '';
+  const kicks = (list) => list.map((k) => `<span class="pk ${k.ok ? 'ok' : 'no'}" title="${esc(k.n)}: ${k.ok ? 'marcou' : 'errou'}">${k.ok ? '✅' : '❌'}</span>`).join('');
+  const title = so.done ? 'Pênaltis (final)' : '<span class="live-dot"></span> Pênaltis ao vivo';
+  if (compact) return `<div class="pk-line">${title} <b>${so.score[0]}-${so.score[1]}</b> · ${kicks(so.home)} <span class="muted">|</span> ${kicks(so.away)}</div>`;
+  const row = (t, list, n) => `<div class="pk-row"><span class="pk-team">${esc(t.short)}</span><span class="pk-kicks">${kicks(list)}</span><b class="pk-n">${n}</b></div>
+    <div class="pk-names">${list.map((k, i) => `${i + 1}. ${esc(k.p)} ${k.ok ? '✓' : '✗'}`).join(' · ')}</div>`;
+  return `<div class="pk-box"><div class="pk-title">${title}</div>${row(ev.home, so.home, so.score[0])}${row(ev.away, so.away, so.score[1])}</div>`;
+}
 function legGame(l, ev) {
   const [hn, an] = String(l.event || '').split(' x ');
   const h = ev?.home || { name: hn || '', short: hn || '' }, a = ev?.away || { name: an || '', short: an || '' };
@@ -1035,7 +1046,7 @@ function legGame(l, ev) {
   const sub = !ev ? esc(l.leagueName || '') : ev.awaiting ? 'Jogo terminado · aguardando resultado' : live ? `<span class="ls">● ${clockHtml(ev)}</span> · ${esc(ev.leagueName)}`
     : ev.state === 'pre' ? `${dateLabel(ev.date)} · ${esc(ev.leagueName)}` : `Encerrado · ${esc(ev.leagueName)}`;
   return `<div class="bet-game"><span class="bg-team">${crest(h)}<span>${esc(h.name)}</span></span>${score}<span class="bg-team away"><span>${esc(a.name)}</span>${crest(a)}</span></div>
-    <div class="bg-sub">${sub}</div>`;
+    <div class="bg-sub">${sub}</div>${shootoutHtml(ev, true)}`;
 }
 
 function betCard(bet) {

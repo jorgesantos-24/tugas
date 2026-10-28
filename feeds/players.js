@@ -47,11 +47,19 @@ const UNSETTLED = /player|scorer|either to|assist|goalkeeper|saves|headed|booked
 const isPlayerGroup = (g) => UNSETTLED.test(String(g ?? ''));
 
 /* Jogadores do fim do jogo (estatísticas): [{ key, side, played, ...campos }] ou null.
-   played = titular ou entrou; quem está na lista sem um dos dois não jogou. */
+   played = titular, entrou, ou tem algum número acima de zero (quem marcou jogou de certeza — 28/10, London City x
+   Crystal Palace: a fonte trouxe só nome e gols, sem titular/entrou, e Isobel Goodwin com 3 gols contava como "não jogou").
+   Se a fonte não traz titular/entrou para ninguém nesse jogo e a pessoa está a zeros: played = null (não se sabe). */
+const hasLineup = (list) => list.some((p) => p && (p.starter != null || p.subbed_on != null));
 function roster(st) {
   const list = st?.players;
   if (!Array.isArray(list) || !list.length) return null;
-  return list.filter((p) => p && p.name).map((p) => ({ ...p, key: norm(p.name), side: p.team === 'home' || p.team === 'away' ? p.team : '', played: !!p.starter || p.subbed_on != null }));
+  const lineup = hasLineup(list);
+  return list.filter((p) => p && p.name).map((p) => {
+    const any = Object.entries(p).some(([k, v]) => typeof v === 'number' && v > 0 && k !== 'id' && k !== 'subbed_on' && k !== 'shirt' && k !== 'number');
+    const played = !!p.starter || p.subbed_on != null || any ? true : lineup ? false : null;
+    return { ...p, key: norm(p.name), side: p.team === 'home' || p.team === 'away' ? p.team : '', played };
+  });
 }
 
 /* Cobertura por liga: de cada estatística, que parte dos jogos terminados a trazia para quem jogou.
@@ -91,4 +99,4 @@ function coveredTeam(leagueKey, kind) {
   return !!s && s.n >= 3 && s.ok / s.n >= 0.8;
 }
 
-module.exports = { quote, isPlayerGroup, roster, addCoverage, covered, coveredTeam, coverage, STAT_PT };
+module.exports = { hasLineup, quote, isPlayerGroup, roster, addCoverage, covered, coveredTeam, coverage, STAT_PT };
