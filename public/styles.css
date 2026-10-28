@@ -275,6 +275,17 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .leg .lp{font-weight:600;display:flex;justify-content:space-between;gap:8px}
 .leg .lm{color:var(--muted);font-size:12px}
 .leg .ls{color:var(--yellow);font-size:12px;font-weight:600}
+/* jogo de cada seleção na aposta: emblemas, nomes e placar */
+.bet-game{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;font-weight:700;font-size:13px}
+.bg-team{display:flex;align-items:center;gap:6px;min-width:0}
+.bg-team.away{justify-content:flex-end;text-align:right}
+.bg-team span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bg-team img,.bg-team .crest{width:22px;height:22px;flex:0 0 22px;object-fit:contain;font-size:9px}
+.bg-x{color:var(--muted);font-weight:500}
+.bg-score{background:var(--panel3);border-radius:5px;padding:1px 7px;font-variant-numeric:tabular-nums}
+.bg-score.live{color:var(--yellow)}
+.bg-sub{color:var(--muted);font-size:11px;text-align:center;margin:2px 0 6px}
+.leg + .leg{border-top:1px solid var(--line);padding-top:8px}
 /* acompanhamento da seleção (escanteios, golos, cartões, jogadores): barra até ao número que a decide */
 .trk{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12px}
 .trk-bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}

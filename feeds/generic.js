@@ -49,7 +49,7 @@ const PHRASES = [
 ];
 const WORDS = [['Over or Exactly', 'Mais ou exatamente'], ['Over', 'Mais de'], ['Under', 'Menos de'], ['Exactly', 'Exatamente'], ['Yes', 'Sim'], ['No', 'Não'],
   ['Draw', 'Empate'], ['Tie', 'Empate'], ['Odd', 'Ímpar'], ['Even', 'Par'], ['First', 'Primeiro'], ['Last', 'Último'], ['Anytime', 'A qualquer momento'],
-  ['No Goals', 'Sem gols'], ['Goals', 'gols'], ['Goal', 'gol'], ['or More', 'ou mais'], ['Any Other', 'Outro'], ['Only', 'só']];
+  ['No Goals', 'Sem gols'], ['Goals', 'gols'], ['Goal', 'gol'], ['or More', 'ou mais'], ['Any Other', 'Outro'], ['Only', 'só'], ['Booked', 'Recebe cartão']];
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const PH_RE = PHRASES.map(([en, pt]) => [new RegExp(`\\b${esc(en)}\\b`, 'g'), pt]);
 const WD_RE = WORDS.map(([en, pt]) => [new RegExp(`\\b${esc(en)}\\b`, 'g'), pt]);

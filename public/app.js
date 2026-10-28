@@ -71,16 +71,10 @@ const findSel = (key) => {
 // partial = só alguns jogos (tempo real): os outros ficam como estão
 function mergeEvents(list, partial = false) {
   const now = Date.now();
-  const watched = new Set([...S.slip.map((s) => s.evId), ...S.bets.filter((b) => b.status === 'open').flatMap((b) => b.legs.map((l) => l.evId))]);
   const seen = new Set();
   for (const ev of list) {
     seen.add(ev.id);
     const old = S.events.get(ev.id);
-    if (old) {
-      if (GOAL_SPORTS.has(ev.sport) && old.state === 'in' && ev.state === 'in' && (ev.home.score !== old.home.score || ev.away.score !== old.away.score) && watched.has(ev.id))
-        toast(`${SPORTS[ev.sport].icon} ${ev.home.short} ${ev.home.score} x ${ev.away.score} ${ev.away.short}`, 'ok');
-      if (old.state === 'pre' && ev.state === 'in' && watched.has(ev.id)) toast(`Começou: ${ev.home.short} x ${ev.away.short}`);
-    }
     for (const s of selections(ev)) {
       const prev = S.oddsCache.get(s.key);
       if (prev && prev !== s.odds) S.moves.set(s.key, { dir: s.odds > prev ? 'up' : 'down', until: now + 6000 });
@@ -265,16 +259,6 @@ async function loadAccount(silent) {
     if (payments) { S.payments = payments; document.body.classList.toggle('live-pay', !!payments.live); }
     if (user) {
       const { bets } = await api('GET', '/api/bets');
-      if (silent !== 'first') {
-        const before = new Map(S.bets.map((b) => [b.id, b.status]));
-        for (const b of bets) {
-          if (before.get(b.id) === 'open' && b.status !== 'open' && b.status !== 'cashout') {
-            if (b.status === 'won') toast(`🏆 Aposta ganha! +${money(b.payout)}`, 'ok');
-            else if (b.status === 'void') toast(`Aposta devolvida: ${money(b.payout)}`, 'ok');
-            else toast(`Aposta ${b.id} perdida`, 'err');
-          }
-        }
-      }
       S.bets = bets;
     } else S.bets = [];
   } catch { /* servidor indisponível: mantém o estado */ }
@@ -905,16 +889,27 @@ function trackHtml(l, ev, bet) {
   return `<div class="trk ${t.under ? 'u' : ''}${!t.under && t.cur >= t.need ? ' ok' : ''}"><div class="trk-bar"><i style="width:${pct}%"></i></div><b>${label}</b></div>`;
 }
 
+// o jogo da seleção: emblemas e nomes (do jogo em memória; senão, do nome guardado na aposta "Casa x Fora")
+function legGame(l, ev) {
+  const [hn, an] = String(l.event || '').split(' x ');
+  const h = ev?.home || { name: hn || '', short: hn || '' }, a = ev?.away || { name: an || '', short: an || '' };
+  const live = ev && ev.state === 'in' && !ev.awaiting;
+  const score = ev && ev.state !== 'pre' && Number.isFinite(ev.home.score) ? `<b class="bg-score${live ? ' live' : ''}">${ev.home.score}-${ev.away.score}</b>` : '<span class="bg-x">x</span>';
+  const sub = !ev ? esc(l.leagueName || '') : ev.awaiting ? 'Jogo terminado · aguardando resultado' : live ? `<span class="ls">● ${clockHtml(ev)}</span> · ${esc(ev.leagueName)}`
+    : ev.state === 'pre' ? `${dateLabel(ev.date)} · ${esc(ev.leagueName)}` : `Encerrado · ${esc(ev.leagueName)}`;
+  return `<div class="bet-game"><span class="bg-team">${crest(h)}<span>${esc(h.name)}</span></span>${score}<span class="bg-team away"><span>${esc(a.name)}</span>${crest(a)}</span></div>
+    <div class="bg-sub">${sub}</div>`;
+}
+
 function betCard(bet) {
   const legs = bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
-    let live = '';
-    if (!l.result && ev) live = ev.awaiting ? `<span class="lm">Jogo terminado · aguardando resultado</span>` : ev.state === 'in' ? `<span class="ls">● ${clockHtml(ev)} · ${ev.home.score}-${ev.away.score}</span>` : ev.state === 'pre' ? `<span class="lm">${dateLabel(ev.date)}</span>` : '';
     const cls = !l.result ? '' : l.result.includes('won') ? 'won' : l.result.includes('lost') ? 'lost' : 'void';
     return `<div class="leg ${cls}">
+      ${legGame(l, ev)}
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
-      <div class="lm">${esc(l.marketName)} · ${esc(l.event)}</div>
-      ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : live}
+      <div class="lm">${esc(l.marketName)}</div>
+      ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : ''}
       ${trackHtml(l, ev, bet)}
     </div>`;
   }).join('');
