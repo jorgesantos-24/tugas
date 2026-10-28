@@ -254,7 +254,13 @@ let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 const RESULT_CONFIRM_MS = Number(process.env.RESULT_CONFIRM_S || 0) * 1000;
 
 // jogos com apostas em aberto (não podem sair da memória)
-const openEvIds = () => new Set([...openBets.values()].flatMap((b) => b.legs.filter((l) => !l.result).map((l) => l.evId)));
+/* Apostas já fechadas (perdida, cash out) com seleções ainda por decidir: continuam a ser marcadas (ganha/perdida/
+   devolvida) com as mesmas regras, só para o cliente ver o resultado de cada uma — o pagamento e o saldo não mudam.
+   Saem da lista quando todas estão marcadas ou ao fim de 3 dias. */
+const trail = new Map(); // id da aposta → { id, userId, legs, at }
+const TRAIL_DAYS = 3;
+const pendingRows = () => [...openBets.values(), ...trail.values()];
+const openEvIds = () => new Set(pendingRows().flatMap((b) => b.legs.filter((l) => !l.result).map((l) => l.evId)));
 
 // fetchedAt = quando o pedido começou. Uma resposta mais antiga (ex.: a atualização completa,
 // que demora alguns segundos) nunca substitui um placar mais recente já recebido.
@@ -439,7 +445,7 @@ async function checkResults() {
   let changed = false;
   const want = new Map();
   for (const ev of events.values()) if (ev.awaiting && ev.state !== 'post') want.set(ev.id, null);
-  for (const b of openBets.values()) for (const l of b.legs) {
+  for (const b of pendingRows()) for (const l of b.legs) {
     if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.') || l.league?.startsWith('fut.'))) want.set(l.evId, l);
   }
   // primeiro os jogos com apostas em aberto, depois os que foram perguntados há mais tempo
@@ -514,7 +520,7 @@ setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e
 async function checkExtraTime() {
   const t = now();
   const want = new Map(); // jogo → precisa (pet = prolongamento/penáltis; pp = jogadores à espera)
-  for (const b of openBets.values()) for (const l of b.legs) if (!l.result && (l.market === 'pet' || l.market === 'pp')) want.set(l.evId, want.get(l.evId) === 'pet' ? 'pet' : l.market);
+  for (const b of pendingRows()) for (const l of b.legs) if (!l.result && (l.market === 'pet' || l.market === 'pp')) want.set(l.evId, want.get(l.evId) === 'pet' ? 'pet' : l.market);
   let changed = false;
   for (const [id, kind] of want) {
     const ev = events.get(id);
@@ -786,8 +792,54 @@ async function closeBet(bet, status, payout, legs, txType) {
     }
     return true;
   });
-  if (ok) openBets.delete(bet.id);
+  if (ok) {
+    openBets.delete(bet.id);
+    if (legs.some((l) => !l.result)) addTrail({ id: bet.id, userId: bet.userId, legs, at: now() }).catch((e) => console.error('[Seleções por marcar]', e.message));
+  }
   return ok;
+}
+async function addTrail(row) {
+  trail.set(row.id, row);
+  await col.trailBets().doc(row.id).set(row);
+}
+// marca as seleções que faltam nas apostas fechadas (mesmas regras); grava só as seleções
+async function settleTrail() {
+  const t = now();
+  for (const row of [...trail.values()]) {
+    try {
+      if (t - row.at > TRAIL_DAYS * DAY) { trail.delete(row.id); await col.trailBets().doc(row.id).delete(); continue; }
+      const legs = structuredClone(row.legs);
+      let changed = false;
+      for (const leg of legs) {
+        if (leg.result || leg.market === 'custom') continue;
+        if (M.settleLeg(leg, events.get(leg.evId))) changed = true;
+        else if (EARLY.check('trail|' + row.id, leg)) changed = true;
+      }
+      if (!changed) continue;
+      await col.bets(row.userId).doc(row.id).update({ legs }); // só as seleções: estado, pagamento e saldo ficam
+      const done = legs.every((l) => l.result || l.market === 'custom');
+      if (done) { trail.delete(row.id); await col.trailBets().doc(row.id).delete(); }
+      else { trail.set(row.id, { ...row, legs }); await col.trailBets().doc(row.id).update({ legs }); }
+      dirty(row.userId);
+    } catch (e) { console.error(`Seleções por marcar da aposta ${row.id}:`, e.message); }
+  }
+}
+/* ao arrancar: lista guardada + apostas fechadas dos últimos 3 dias que ficaram com seleções por marcar
+   (as fechadas antes desta mudança, ex.: múltipla perdida no 1º jogo com os outros ainda a decorrer) */
+async function loadTrail() {
+  for (const d of (await col.trailBets().get()).docs) trail.set(d.id, d.data());
+  const since = now() - TRAIL_DAYS * DAY;
+  let found = 0;
+  for (const u of (await col.users().get()).docs) {
+    const qs = await col.bets(u.id).where('placedAt', '>=', since).get();
+    for (const b of qs.docs) {
+      const x = b.data();
+      if (x.status === 'open' || trail.has(b.id) || !Array.isArray(x.legs) || !x.legs.some((l) => !l.result && l.market !== 'custom')) continue;
+      await addTrail({ id: b.id, userId: u.id, legs: x.legs, at: x.settledAt || now() });
+      found++;
+    }
+  }
+  if (trail.size) console.log(`[Seleções por marcar] ${trail.size} apostas fechadas com seleções ainda a acompanhar (${found} encontradas agora)`);
 }
 
 // as duas atualizações chamam isto: se já estiver a correr, a próxima (daqui a 5 s) apanha o que faltar
@@ -828,6 +880,7 @@ async function settleAll() {
       }
     } catch (e) { console.error(`Erro ao liquidar aposta ${row.id}:`, e.message); }
   }
+  await settleTrail();
 }
 // uma liquidação de cada vez (o feed e o painel podem pedir ao mesmo tempo)
 let settleRun = Promise.resolve();
@@ -1451,7 +1504,10 @@ const routes = {
       t.update(col.user(u.id), { balance: inc(value), [`daily.${dayKey()}.returned`]: inc(value) });
       addTx(t, u.id, 'Cash Out', value, id);
     });
+    const cashLegs = openBets.get(id)?.legs;
     openBets.delete(id);
+    // cash out: as seleções que faltam continuam a ser marcadas (só para mostrar o resultado de cada uma)
+    if (cashLegs?.some((l) => !l.result)) addTrail({ id, userId: u.id, legs: cashLegs, at: now() }).catch((e) => console.error('[Seleções por marcar]', e.message));
     return { value: fromCents(value), user: await meUser(u.id) };
   },
 
@@ -1875,6 +1931,7 @@ const server = http.createServer(async (req, res) => {
   await LOGOS.start(); // emblemas (listas da ESPN) antes dos jogos, para já virem com imagem
   console.log(`A carregar jogos e odds ao vivo (${FEED.name})...`);
   // ténis: pontos guardados (sobrevivem a um reinício) e gravação de cada placar que chega
+  await loadTrail().catch((e) => console.error('[Seleções por marcar] não carregou:', e.message));
   await POINTS.init({
     load: async (since) => (await col.pointLogs().where('at', '>=', since).get()).docs.map((d) => [d.id, d.data()]),
     save: (id, data) => col.pointLogs().doc(id).set(data),

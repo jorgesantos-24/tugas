@@ -220,6 +220,19 @@ async function testMultiple(list) {
     const b = (await api2('GET', '/api/bets')).bets.find((x) => x.id === r2.placed[0].bet.id);
     check(b.status === 'lost' && cents(b.payout || 0) === 0, `[múltipla] perdida no 1º jogo devia fechar logo: ${b.status}`);
     console.log(`múltipla perdida no 1º jogo: ${b.status} (prémio ${b.payout})`);
+    // a 2ª seleção continua a ser marcada quando o jogo dela acaba (só para mostrar; saldo e estado não mudam)
+    const bal1 = (await api2('GET', '/api/me')).user.balance;
+    await api2('POST', '/api/dev/finish', { id: k2[1].key.split('|')[0], result: { h: 0, a: 2 } });
+    let b2 = null;
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      b2 = (await api2('GET', '/api/bets')).bets.find((x) => x.id === r2.placed[0].bet.id);
+      if (b2?.legs?.[1]?.result) break;
+    }
+    check(b2?.legs?.[1]?.result === 'won', `[múltipla] 2ª seleção da múltipla já perdida devia ficar marcada "ganha": ${b2?.legs?.[1]?.result}`);
+    check(b2?.status === 'lost' && cents(b2.payout || 0) === 0, `[múltipla] estado e prémio não podem mudar: ${b2?.status} ${b2?.payout}`);
+    check(cents((await api2('GET', '/api/me')).user.balance) === cents(bal1), '[múltipla] marcar a seleção não pode mexer no saldo');
+    console.log(`  2ª seleção marcada depois: ${b2?.legs?.[1]?.result} · aposta continua ${b2?.status}`);
   }
 }
 
