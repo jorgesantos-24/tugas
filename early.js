@@ -30,7 +30,7 @@ const TENNIS_FIRST_SRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd']);
 
 const PARTS = require('./feeds/parts.js');
 const PLAYERS = require('./feeds/players.js');
-const SCOPE_PT = (s) => ({ ft: 'jogo', h1: '1º tempo', h2: '2º tempo', corners: 'escanteios' }[s]
+const SCOPE_PT = (s) => ({ ft: 'jogo', h1: '1º tempo', h2: '2º tempo', corners: 'escanteios', cards: 'cartões' }[s]
   || (/^q(\d)$/.exec(s) ? `${s.slice(1)}º quarto` : /^p(\d)$/.exec(s) ? `${s.slice(1)}º período` : /^map(\d+)$/.exec(s) ? `mapa ${s.slice(3)}` : s));
 /* futebol: só no tempo regulamentar (um gol no prolongamento não conta para os mercados).
    A fonte mostra "90'+" tanto nos descontos como no prolongamento, por isso os descontos do 2º tempo só contam nas
@@ -111,6 +111,8 @@ module.exports = function early({ M, TEN, events, liveStats, now }) {
     let cur = null;
     if (scope === 'ft') cur = ev.sport === 'soccer' || ev.sport === 'basketball' ? score : null;
     else if (scope === 'corners') cur = ev.sport === 'soccer' && Number.isFinite(st.home?.corners) && Number.isFinite(st.away?.corners) ? [st.home.corners, st.away.corners] : null;
+    // cartões: os amarelos são o mínimo certo (um vermelho só pode somar) → "mais de" ganha / "menos de" perde
+    else if (scope === 'cards') cur = ev.sport === 'soccer' ? PARTS.soccerCards(st)?.lo || null : null;
     else { const c = PARTS.currentPart(ev.sport, st, score); if (c && c.scope === scope) cur = c.score; }
     if (!cur || !cur.every((x) => Number.isFinite(x) && x >= 0)) return null;
     const out = (x, y) => M.legOutcome(leg, { h: x, a: y, parts: { [scope]: [x, y] } });

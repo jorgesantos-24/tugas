@@ -219,6 +219,14 @@ function petOutcome(leg, R) {
 
 function partOutcome(leg, R) {
   const scope = scopeOf(leg), W = (c) => (c ? 1 : -1);
+  // cartões com vermelhos: o total certo está entre o mínimo (cards) e o máximo (cardsHi) — só vale se der igual
+  if (scope === 'cards' && Array.isArray(R.parts?.cardsHi)) {
+    const lo = R.parts.cards, hi = R.parts.cardsHi;
+    if (!Array.isArray(lo)) return null;
+    const vals = [[lo[0], lo[1]], [hi[0], lo[1]], [lo[0], hi[1]], [hi[0], hi[1]]]
+      .map(([x, y]) => partOutcome(leg, { ...R, parts: { ...R.parts, cards: [x, y], cardsHi: null } }));
+    return vals.every((v) => v != null && v === vals[0]) ? vals[0] : null;
+  }
   const res = (x) => (x[0] > x[1] ? 'home' : x[0] < x[1] ? 'away' : 'draw');
   if (leg.market === 'phtft') { // intervalo / final: "home-draw"
     const ht = partScore(R, 'h1'), ft = partScore(R, 'ft');
@@ -521,7 +529,7 @@ function legOutcome(leg, R) {
       return base(L);
     }
   }
-  return 0;
+  return null; // mercado sem regra conhecida: fica para a equipa (antes era devolvida sozinha)
 }
 const outcomeFactor = (v, o) => (v === 1 ? o : v === 0.5 ? (1 + o) / 2 : v === 0 ? 1 : v === -0.5 ? 0.5 : 0);
 const outcomeLabel = (v) => (v === 1 ? 'won' : v === 0.5 ? 'halfwon' : v === 0 ? 'void' : v === -0.5 ? 'halflost' : 'lost');

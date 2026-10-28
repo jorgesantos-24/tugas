@@ -275,6 +275,15 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .leg .lp{font-weight:600;display:flex;justify-content:space-between;gap:8px}
 .leg .lm{color:var(--muted);font-size:12px}
 .leg .ls{color:var(--yellow);font-size:12px;font-weight:600}
+/* acompanhamento da seleção (escanteios, golos, cartões, jogadores): barra até ao número que a decide */
+.trk{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12px}
+.trk-bar{flex:1;height:6px;border-radius:3px;background:var(--line);overflow:hidden}
+.trk-bar i{display:block;height:100%;background:var(--green2);transition:width .5s ease}
+.trk.ok .trk-bar i{background:var(--green)}
+.trk.u .trk-bar i{background:var(--yellow)}
+.trk b{min-width:46px;text-align:right;font-variant-numeric:tabular-nums}
+.trk.ok b{color:var(--green)}
+.trk small{color:var(--muted);font-weight:500}
 .bet-foot{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
 .bet-foot b{color:var(--text);font-size:13px}
 .cashout-btn{width:100%;margin-top:10px;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font-weight:800;border-radius:8px;padding:10px}

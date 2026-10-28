@@ -309,6 +309,11 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (!s) continue;
     // jogadores: só abre se a fonte traz essa estatística nesta liga (ou, sem histórico, se o jogo ao vivo já traz jogadores)
     if (s.k === 'pp' && !PLAYERS.covered(lg.key, s.per.split('|')[0]) && !(live && (WS.stats(m.id)?.players || []).length)) continue;
+    // escanteios, cartões e 1º/2º tempo: só abre se a fonte costuma trazer esse dado nesta liga (ou o jogo ao vivo já o traz)
+    if (sport === 'soccer' && s.k !== 'pp') {
+      const need = statNeed(s);
+      if (need && !PLAYERS.coveredTeam(lg.key, need) && !(live && liveHas(WS.stats(m.id) || m.stats, need))) continue;
+    }
     const odds = round2(Number(q.odds_dec));
     if (!(odds >= 1.01)) continue;
     // mercado sem confirmação recente: antes do jogo sai do site; ao vivo fica bloqueado (quem o tem no boletim vê o cadeado)
@@ -458,16 +463,28 @@ function parseResult(r, sport) {
   const fin = parseScore(r.final_score);
   if (sport === 'soccer') {
     // vale o tempo regulamentar (1º + 2º tempo, sem prorrogação nem pênaltis)
-    const sc = per(/^(1st|2nd) Half$/).length === 2 ? sum(per(/^(1st|2nd) Half$/)) : fin;
+    /* Placar dos 90 minutos: a linha "Score After Full Time - X-Y" da cronologia manda. Os "periods" põem os gols do
+       prolongamento no 2º tempo (Recreativo Huelva x Rayo 27/10: 1-1 aos 90', periods davam 2-3). */
+    const ftLine = (r.stats?.timeline || []).find((t) => /Score After Full Time/i.test(t.text || ''));
+    const ft = ftLine ? parseScore(String(ftLine.text).split(' - ').pop()) : null;
+    const sc = ft || (per(/^(1st|2nd) Half$/).length === 2 ? sum(per(/^(1st|2nd) Half$/)) : fin);
     if (!sc) return NOPE('placar ilegível');
     const lg = leagueOf('soccer', r.league) || soccerDyn(r.league, r.region);
     // estatísticas por jogador (mercados de jogadores) e sinais de prolongamento na cronologia
     const players = (PLAYERS.roster(r.stats) || []).map(({ key, side, played, goals, shots, shots_on_target, assists, fouls, fouls_drawn, tackles, saves, passes, yellow_cards, red_cards }) =>
       ({ key, side, played, goals, shots, shots_on_target, assists, fouls, fouls_drawn, tackles, saves, passes, yellow_cards, red_cards }));
     const tl = r.stats?.timeline || [];
-    const extraTime = !!r.overtime || tl.some((t) => (t.minute > 90 && !t.stoppage) || /extra time/i.test(t.text || ''));
+    /* Houve prolongamento? Só por sinais fiáveis: a fonte diz (overtime / "extra time" / desempate por penáltis), há
+       partes além dos dois tempos, ou o placar final não é a soma dos dois tempos. Um lance "95'" sem marca de
+       descontos só conta nas taças: nos campeonatos a fonte às vezes escreve assim os descontos (Ceará x Goiás 28/10). */
+    const cupLike = !!(lg && (KNOCKOUT.has(lg.key) || (lg.key.startsWith('fut.') && isCup(r.league))));
+    const extraTime = !!r.overtime || tl.some((t) => /_et$/.test(t.type || '') || /extra time|penalty shoot-?out|penalties/i.test(t.text || ''))
+      || (r.periods || []).some((p) => !/^(1st|2nd) Half$/.test(p.name))
+      || (fin && (fin[0] !== sc[0] || fin[1] !== sc[1]))
+      || (cupLike && tl.some((t) => t.minute > 90 && !t.stoppage));
     return {
-      done: true, h: sc[0], a: sc[1], parts: PARTS.finishedParts('soccer', r.stats, sc, { overtime: !!r.overtime }),
+      // escanteios e cartões: com prolongamento (ou eliminatória empatada aos 90') as estatísticas podem incluí-lo → equipa
+      done: true, h: sc[0], a: sc[1], parts: PARTS.finishedParts('soccer', r.stats, sc, { overtime: extraTime || !!(lg && (KNOCKOUT.has(lg.key) || (lg.key.startsWith('fut.') && isCup(r.league))) && sc[0] === sc[1]) }),
       ...(players.length ? { players } : {}), ...(extraTime ? { extraTime } : {}),
       // empate aos 90' numa eliminatória: pode ter havido prolongamento → resultado da ESPN antes de liquidar jogadores
       ...(lg && (KNOCKOUT.has(lg.key) || (lg.key.startsWith('fut.') && isCup(r.league))) && sc[0] === sc[1] ? { needEt: true } : {}),
@@ -506,22 +523,45 @@ function parseResult(r, sport) {
   return NOPE('modalidade sem regras de liquidação');
 }
 
+// que dado da fonte o mercado precisa para ser liquidado sozinho (null = só o placar)
+function statNeed(s) {
+  const scope = String(s.per ?? '').split('|')[0];
+  if (scope === 'corners') return 'corners';
+  if (scope === 'cards') return 'cards';
+  if (scope === 'h1' || scope === 'h2' || s.k === 'phtft') return 'ht';
+  return null;
+}
+const liveHas = (st, need) => !!st && (need === 'corners' ? Number.isFinite(st.home?.corners) && Number.isFinite(st.away?.corners)
+  : need === 'cards' ? !!PARTS.soccerCards(st) : Array.isArray(st.timeline));
+
 /* Cobertura das estatísticas por jogador nas ligas do site (últimos dias de resultados): decide que mercados de
    jogadores abrem. Corre no arranque e a cada 12 h; até terminar, os mercados de jogadores ficam fechados. */
 async function loadPlayerCoverage(days = 7) {
   let n = 0;
+  const fresh = new Map();
   for (let i = 1; i <= days; i++) {
     const day = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
     try {
       const d = await get(`/results?sport=soccer&date=${day}&stats=1`);
       for (const r of d.results || []) {
         const lg = r.status === 'finished' ? leagueOf('soccer', r.league) || soccerDyn(r.league, r.region) : null;
-        if (lg) { PLAYERS.addCoverage(lg.key, r.stats); n++; }
+        if (lg) { PLAYERS.addCoverage(lg.key, r.stats, fresh); n++; }
       }
     } catch (e) { console.warn(`[Jogadores] resultados de ${day}: ${e.message}`); }
   }
-  const open = [...PLAYERS.coverage.keys()].filter((k) => PLAYERS.covered(k, 'shots'));
-  console.log(`[Jogadores] estatísticas por jogador em ${n} jogos recentes · mercados de jogadores abertos em ${open.length} ligas`);
+  const withStats = [...fresh.values()].filter((c) => (c.team.corners?.ok || 0) > 0).length;
+  if (!withStats) { // a fonte respondeu sem estatísticas (falha deles): fica a cobertura anterior e tenta daqui a 15 min
+    console.warn(`[Cobertura] resultados sem estatísticas (${n} jogos): mantém a cobertura anterior e tenta de novo em 15 min`);
+    setTimeout(() => loadPlayerCoverage(days).catch(() => {}), 15 * 60000).unref?.();
+    return;
+  }
+  PLAYERS.coverage.clear();
+  for (const [k, v] of fresh) PLAYERS.coverage.set(k, v);
+  // a lista completa do futebol pode ter sido lida antes de haver cobertura (arranque): lê-a de novo no próximo ciclo
+  lastSoccerFull.pre = 0; lastSoccerFull.live = 0;
+  const keys = [...PLAYERS.coverage.keys()];
+  const cnt = (f) => keys.filter(f).length;
+  console.log(`[Cobertura] ${n} jogos recentes · jogadores em ${cnt((k) => PLAYERS.covered(k, 'shots'))} ligas · escanteios em ${cnt((k) => PLAYERS.coveredTeam(k, 'corners'))} · cartões em ${cnt((k) => PLAYERS.coveredTeam(k, 'cards'))} · 1º/2º tempo em ${cnt((k) => PLAYERS.coveredTeam(k, 'ht'))}`);
 }
 
 // evento atualizado a partir do WebSocket (com os dados do último pedido normal para equipas, liga e relógio)

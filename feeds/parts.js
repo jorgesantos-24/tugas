@@ -57,6 +57,22 @@ function esportsMaps(st) {
   return { list: all, done: wh + wa };
 }
 
+/* futebol: cartões { lo, hi } por equipa, ou null.
+   lo = amarelos; hi = amarelos + 2 × vermelhos. As casas contam os vermelhos de formas diferentes (1 ou 2 cartões; o
+   2º amarelo que dá vermelho conta ou não), mas qualquer regra fica entre lo e hi: com vermelhos, só se liquida
+   sozinho o que dá o mesmo resultado nos dois extremos (ver markets.js). Os amarelos da equipa têm de bater com
+   os da cronologia (99% dos jogos; os outros ficam para a equipa). */
+function soccerCards(st) {
+  const y = [st?.home?.yellow_cards, st?.away?.yellow_cards], r = [st?.home?.red_cards, st?.away?.red_cards];
+  if (![...y, ...r].every((v) => fin(v) && v >= 0)) return null;
+  const tl = st.timeline;
+  if (Array.isArray(tl) && tl.length) {
+    const ty = ['home', 'away'].map((s) => tl.filter((t) => t.type === 'yellow_card' && t.team === s).length);
+    if (ty[0] !== y[0] || ty[1] !== y[1]) return null;
+  }
+  return { lo: y, hi: [y[0] + 2 * r[0], y[1] + 2 * r[1]], reds: r[0] + r[1] };
+}
+
 /* Partes TERMINADAS de um jogo (para o resultado final, ou a meio do jogo):
    { h1, h2?, corners?, q1.., p1.., map1.. } — só entra o que está terminado e verificado.
    live = a meio do jogo (só partes terminadas); score = placar atual/final [c, f]. */
@@ -71,6 +87,9 @@ function finishedParts(sport, st, score, { live = false, overtime = false } = {}
     }
     // escanteios do jogo: só no fim (e sem prolongamento, que não conta)
     if (!live && !overtime && fin(st.home?.corners) && fin(st.away?.corners)) out.corners = [st.home.corners, st.away.corners];
+    // cartões do jogo: só no fim (e sem prolongamento); com vermelhos vai também o máximo possível (cardsHi)
+    const cards = !live && !overtime ? soccerCards(st) : null;
+    if (cards) { out.cards = cards.lo; if (cards.reds) out.cardsHi = cards.hi; }
   } else if (sport === 'basketball') {
     const q = basketQuarters(st);
     if (q) {
@@ -120,4 +139,4 @@ function currentPart(sport, st, score, clock) {
   return null;
 }
 
-module.exports = { soccerHT, basketQuarters, hockeyPeriods, esportsMaps, finishedParts, currentPart };
+module.exports = { soccerHT, soccerCards, basketQuarters, hockeyPeriods, esportsMaps, finishedParts, currentPart };

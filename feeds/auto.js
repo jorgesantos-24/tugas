@@ -3,7 +3,8 @@
    escanteios. Aparecem com o mesmo nome dos mercados da equipa (generic.js), mas com uma regra de liquidação.
 
    Cada cotação vira { k, per: '<parte>|<grupo>', pick, line? } — "parte" diz que placar usar (ver markets.js):
-     ft (jogo todo) · h1 / h2 (1º / 2º tempo) · q1..q4 (quartos) · p1..p3 (períodos) · corners (escanteios) · map1.. (rondas do mapa)
+     ft (jogo todo) · h1 / h2 (1º / 2º tempo) · q1..q4 (quartos) · p1..p3 (períodos) · corners (escanteios) · cards (cartões)
+     · map1.. (rondas do mapa)
    Tipos: p1x2 (1X2) · pdc (dupla chance) · pcs (placar exato) · ptot (total) · pspr (handicap) · pbtts (ambas marcam)
           phtft (intervalo/final) · pteam (total de uma equipa) · pcln (sem sofrer) · pmost (quem tem mais)
           poe (par/ímpar) · pml2 (vencedor a 2: empate = devolvida) · pot (mapa vai a prolongamento) */
@@ -72,7 +73,9 @@ function rule(q, m, sport) {
     if (g === 'Team Goals Range') { const w = who(q.line), r = range(q.handicap), y = yn(q.side); return y && (w === 'home' || w === 'away') ? cond('ft', [r && `t${w[0]}=in:${r}`], y === 'no') : null; }
     if (g === 'Results/Goals Range') { const w = who(q.line), r = range(q.handicap), y = yn(q.side); return y ? cond('ft', [w && `res=${w}`, r && `tot=in:${r}`], y === 'no') : null; }
     if (g === 'Double Chance/Goals Range') { const d = dcOf(q.line), r = range(q.handicap), y = yn(q.side); return y ? cond('ft', [d && `dc=${d}`, r && `tot=in:${r}`], y === 'no') : null; }
-    if (g === 'Alternative Corners') { const n = Number(q.handicap ?? q.line), s = String(q.side ?? '').toLowerCase(); const op = { over: 'gt', under: 'lt', exactly: 'eq' }[s]; return op && Number.isInteger(n) ? cond('corners', [`tot=${op}:${n}`]) : null; }
+    // ao vivo a bet365 usa outros nomes: "Match Corners" (= Alternative Corners), "Asian Corners" e "2-Way Corners" (= totais)
+    if (g === 'Asian Corners' || g === '2-Way Corners') return { k: 'ptot', scope: 'corners', pick: ou(q.side), line: lineOf(q) };
+    if (g === 'Alternative Corners' || g === 'Match Corners') { const n = Number(q.handicap ?? q.line), s = String(q.side ?? '').toLowerCase(); const op = { over: 'gt', under: 'lt', exactly: 'eq' }[s]; return op && Number.isInteger(n) ? cond('corners', [`tot=${op}:${n}`]) : null; }
     if (g === 'Total Corners') { const r = range(q.label); return r ? cond('corners', [`tot=in:${r}`]) : null; }
     if (g === 'Half Time Result') return { k: 'p1x2', scope: 'h1', pick: res3() };
     if (g === 'Half Time Double Chance') return { k: 'pdc', scope: 'h1', pick: { '1X': 'hd', 12: 'ha', X2: 'da', '2X': 'da' }[q.n2] };
@@ -86,6 +89,15 @@ function rule(q, m, sport) {
     if (g === 'Corners 2-Way' || g === 'Asian Total Corners') return { k: 'ptot', scope: 'corners', pick: ou(q.side), line: lineOf(q) };
     if (g === 'Team Corners') { const w = who(q.side), o = ou(q.label); return w && o ? { k: 'pteam', scope: 'corners', pick: `${w}:${o}`, line: lineOf(q) } : null; }
     if (g === 'Team to Get Most' && /^corners$/i.test(q.line)) return { k: 'pmost', scope: 'corners', pick: who(q.side) };
+    // ---- cartões (amarelos e vermelhos dos jogadores; ver parts.js soccerCards e markets.js) ----
+    if (g === 'Number of Cards' || g === 'Number Of Cards In Match' || g === 'Asian Total Cards') return { k: 'ptot', scope: 'cards', pick: ou(q.side), line: lineOf(q) };
+    if (g === 'Team Cards') { const w = who(q.side), o = ou(q.label); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: 'cards', pick: `${w}:${o}`, line: lineOf(q) } : null; }
+    if (g === 'Asian Handicap Cards') { const w = who(q.side); return w === 'home' || w === 'away' ? { k: 'pspr', scope: 'cards', pick: w, line: lineOf(q) } : null; }
+    if (g === 'Both Teams to Receive Cards') {
+      const n = /^a card$/i.test(String(q.line ?? '').trim()) ? 1 : Number((/^(\d)\+ cards$/i.exec(String(q.line ?? '').trim()) || [])[1]);
+      const y = yn(q.side);
+      return y && n >= 1 ? cond('cards', [`th=gt:${n - 1}`, `ta=gt:${n - 1}`], y === 'no') : null;
+    }
     return null;
   }
   if (sport === 'basketball') {

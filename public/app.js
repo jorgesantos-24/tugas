@@ -110,7 +110,7 @@ async function loadFull(ids = fullIds()) {
     for (const f of (await r.json()).events) {
       const ev = S.events.get(f.id);
       if (!ev) continue;
-      ev.markets = f.markets; ev.stats = f.stats; ev.details = f.details || []; ev.fullAt = now;
+      ev.markets = f.markets; ev.stats = f.stats; ev.details = f.details || []; ev.track = f.track; ev.fullAt = now;
       if (f.home?.form) ev.home.form = f.home.form;
       if (f.away?.form) ev.away.form = f.away.form;
       for (const s of selections(ev)) {
@@ -154,7 +154,7 @@ function applyEvents(d, partial) {
   });
   const list = (d.events || []).filter((e) => !e.removed && LEAGUE_BY_KEY[e.league]).map(fix);
   // os mercados completos que já tínhamos não se perdem com a versão leve (só os principais)
-  for (const ev of list) { const old = S.events.get(ev.id); if (old?.fullAt && !(d.full || []).some((f) => f.id === ev.id)) { ev.markets = mergeLight(old.markets, ev.markets); ev.stats = old.stats; ev.details = old.details; ev.fullAt = old.fullAt; } }
+  for (const ev of list) { const old = S.events.get(ev.id); if (old?.fullAt && !(d.full || []).some((f) => f.id === ev.id)) { ev.markets = mergeLight(old.markets, ev.markets); ev.stats = old.stats; ev.details = old.details; ev.track = old.track; ev.fullAt = old.fullAt; } }
   for (const f of d.full || []) {
     if (!LEAGUE_BY_KEY[f.league]) continue;
     const i = list.findIndex((e) => e.id === f.id);
@@ -859,6 +859,52 @@ function statsPanel(ev) {
 }
 
 /* ---------------- render: apostas ---------------- */
+/* Acompanhamento da seleção, como na bet365: quantos já há (cur) e o número que a decide (need).
+   "Mais de 2.5 escanteios" com 1 → 1/3 (33%); "Menos de" perde ao chegar a need. null = mercado sem contagem. */
+function legTrack(l, ev) {
+  if (!ev || ev.sport !== 'soccer' || ev.state === 'pre') return null;
+  const T = ev.track || {};
+  const sc = [ev.home.score, ev.away.score];
+  if (!sc.every(Number.isFinite)) return null;
+  const firstHalf = ev.state === 'in' && !T.ht && /^(\d+)'$/.test(ev.clock || '') && parseInt(ev.clock, 10) < 45;
+  const scope = l.market === 'total' ? 'ft' : String(l.per ?? '').split('|')[0];
+  if (l.market === 'pp') {
+    const stat = scope, get = PP_FIELD[stat], need = Number(String(l.pick).split('#')[0]);
+    const p = get && T.pl ? ppPlayer(l, T.pl) : null;
+    const v = p ? get(p) : null;
+    return Number.isFinite(v) && need >= 1 ? { cur: v, need, under: false } : null;
+  }
+  const pair = scope === 'ft' ? sc : scope === 'h1' ? T.ht || (firstHalf ? sc : null) : scope === 'h2' ? (T.ht ? [sc[0] - T.ht[0], sc[1] - T.ht[1]] : firstHalf ? [0, 0] : null)
+    : scope === 'corners' ? T.c : scope === 'cards' ? T.y : null;
+  if (!Array.isArray(pair) || !pair.every(Number.isFinite)) return null;
+  // linha inteira com "exatamente" (ex.: escanteios "Mais de 8" / "Menos de 8"): pick tot=gt:N | tot=lt:N
+  const pc = l.market === 'pcond' && /^tot=(gt|lt):(\d+)$/.exec(String(l.pick));
+  if (pc) {
+    const n = Number(pc[2]), cur = pair[0] + pair[1];
+    return pc[1] === 'gt' ? { cur, need: n + 1, under: false } : { cur, need: n, under: true };
+  }
+  if (!Number.isFinite(l.line)) return null;
+  let cur;
+  if (l.market === 'total' || l.market === 'ptot') cur = pair[0] + pair[1];
+  else if (l.market === 'pteam') cur = String(l.pick).startsWith('home') ? pair[0] : pair[1];
+  else return null;
+  const under = String(l.pick).endsWith('under');
+  if (!under && !String(l.pick).endsWith('over')) return null;
+  return { cur, need: Math.floor(l.line) + 1, under };
+}
+function trackHtml(l, ev, bet) {
+  if (l.result) {
+    if (!/won/.test(l.result)) return '';
+    const paid = bet.status !== 'open' || bet.type !== 'multiple';
+    return `<div class="trk ok"><div class="trk-bar"><i style="width:100%"></i></div><b>✓ ${paid ? 'Pago' : 'Ganha'}</b></div>`;
+  }
+  const t = legTrack(l, ev);
+  if (!t) return '';
+  const pct = Math.min(100, Math.round((t.cur / t.need) * 100));
+  const label = t.under ? `${t.cur} <small>máx. ${t.need - 1}</small>` : `${t.cur}/${t.need}`;
+  return `<div class="trk ${t.under ? 'u' : ''}${!t.under && t.cur >= t.need ? ' ok' : ''}"><div class="trk-bar"><i style="width:${pct}%"></i></div><b>${label}</b></div>`;
+}
+
 function betCard(bet) {
   const legs = bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
@@ -869,6 +915,7 @@ function betCard(bet) {
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
       <div class="lm">${esc(l.marketName)} · ${esc(l.event)}</div>
       ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : live}
+      ${trackHtml(l, ev, bet)}
     </div>`;
   }).join('');
   let action = '';

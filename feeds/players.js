@@ -57,10 +57,16 @@ function roster(st) {
 /* Cobertura por liga: de cada estatística, que parte dos jogos terminados a trazia para quem jogou.
    coverage[liga][estatística] = { n, ok } — usada para decidir se o mercado abre. */
 const coverage = new Map();
-function addCoverage(leagueKey, st) {
+const PARTS = require('./parts.js');
+function addCoverage(leagueKey, st, map = coverage) {
   const ps = roster(st);
-  const c = coverage.get(leagueKey) || { games: 0, stats: {} };
+  const c = map.get(leagueKey) || { games: 0, stats: {}, team: {} };
   c.games++;
+  // estatísticas da equipa: escanteios, cartões e placar ao intervalo (mercados de escanteios, cartões e 1º/2º tempo)
+  const team = (k, ok) => { const s = c.team[k] || { n: 0, ok: 0 }; s.n++; if (ok) s.ok++; c.team[k] = s; };
+  team('corners', Number.isFinite(st?.home?.corners) && Number.isFinite(st?.away?.corners));
+  team('cards', !!PARTS.soccerCards(st));
+  team('ht', !!PARTS.soccerHT(st));
   const played = (ps || []).filter((p) => p.played);
   for (const stat of Object.keys(FIELD)) {
     const s = c.stats[stat] || { n: 0, ok: 0 };
@@ -70,12 +76,19 @@ function addCoverage(leagueKey, st) {
     if (played.length >= 18 && (stat === 'saves' ? have >= 1 : have >= played.length * 0.9)) s.ok++;
     c.stats[stat] = s;
   }
-  coverage.set(leagueKey, c);
+  map.set(leagueKey, c);
 }
-// abre o mercado? (liga com ≥3 jogos recentes e a estatística em ≥90% deles)
+// abre o mercado? (liga com ≥3 jogos recentes e a estatística em ≥80% deles; se faltar num jogo, a seleção vai para a equipa)
 function covered(leagueKey, stat) {
   const s = coverage.get(leagueKey)?.stats?.[stat];
-  return !!s && s.n >= 3 && s.ok / s.n >= 0.9;
+  return !!s && s.n >= 3 && s.ok / s.n >= 0.8;
 }
 
-module.exports = { quote, isPlayerGroup, roster, addCoverage, covered, coverage, STAT_PT };
+/* Mercados de escanteios / cartões / 1º-2º tempo: abrem se a fonte trouxe esse dado em ≥80% dos jogos recentes da
+   liga (≥3 jogos). Na liquidação, se o dado faltar num jogo, a seleção vai para a equipa. */
+function coveredTeam(leagueKey, kind) {
+  const s = coverage.get(leagueKey)?.team?.[kind];
+  return !!s && s.n >= 3 && s.ok / s.n >= 0.8;
+}
+
+module.exports = { quote, isPlayerGroup, roster, addCoverage, covered, coveredTeam, coverage, STAT_PT };

@@ -337,7 +337,7 @@ function pushNow() {
     const full = [];
     for (const id of ids) {
       if (!st.watch.has(id)) continue;
-      if (!fullJson.has(id)) { const ev = events.get(id); fullJson.set(id, ev ? JSON.stringify(publicEvent(ev)) : null); }
+      if (!fullJson.has(id)) { const ev = events.get(id); fullJson.set(id, ev ? JSON.stringify(fullEvent(ev)) : null); }
       if (fullJson.get(id)) full.push(fullJson.get(id));
     }
     if (!light.length && !full.length && !leagues) continue;
@@ -599,6 +599,32 @@ function lightMarkets(markets) {
   return out.length ? out : markets.slice(0, 1).map((mk) => ({ ...mk, sels: mk.sels.slice(0, 3) })); // sempre algo, para o jogo não parecer fechado
 }
 const publicEvent = ({ goalAt, fetchedAt, pendingResult, result, ...ev }) => ({ ...ev, goalAt: goalAt || null });
+// jogo com os mercados completos (aberto, no boletim ou com apostas): leva também o acompanhamento das apostas
+const fullEvent = (e) => {
+  const track = e.sport === 'soccer' ? trackOf(e, e.result) : null;
+  return track ? { ...publicEvent(e), track } : publicEvent(e);
+};
+/* Acompanhamento das apostas (barra de progresso, como na bet365): os números do jogo que as seleções contam.
+   c = escanteios · y = cartões (amarelos + vermelhos) · ht = placar ao intervalo · pl = jogadores
+   Ao vivo vêm das estatísticas da fonte; no fim, do resultado. Só vai nos jogos abertos (mercados completos). */
+const PARTS = require('./feeds/parts.js'), PLAYERS = require('./feeds/players.js');
+const PL_FIELDS = ['goals', 'shots', 'shots_on_target', 'assists', 'fouls', 'fouls_drawn', 'tackles', 'saves', 'passes', 'yellow_cards', 'red_cards'];
+function trackOf(ev, R) {
+  const fin2 = (x) => (Array.isArray(x) && x.every(Number.isFinite) ? x : null);
+  if (ev.state === 'post' && R) {
+    const cards = fin2(R.parts?.cards), hi = fin2(R.parts?.cardsHi);
+    return { c: fin2(R.parts?.corners), y: cards && hi ? [cards[0] + (hi[0] - cards[0]) / 2, cards[1] + (hi[1] - cards[1]) / 2] : cards, ht: fin2(R.parts?.h1), pl: R.players || null };
+  }
+  const st = ev.state === 'in' ? FEED.liveStats(ev.id) : null;
+  if (!st) return null;
+  const cards = PARTS.soccerCards(st);
+  const pl = (PLAYERS.roster(st) || []).map((p) => { const o = { key: p.key, side: p.side, played: p.played }; for (const f of PL_FIELDS) if (Number.isFinite(p[f])) o[f] = p[f]; return o; });
+  return {
+    c: Number.isFinite(st.home?.corners) && Number.isFinite(st.away?.corners) ? [st.home.corners, st.away.corners] : null,
+    y: cards ? [cards.lo[0] + (cards.hi[0] - cards.lo[0]) / 2, cards.lo[1] + (cards.hi[1] - cards.lo[1]) / 2] : null,
+    ht: PARTS.soccerHT(st), pl: pl.length ? pl : null,
+  };
+}
 // versão para a lista de jogos: só os mercados da linha do jogo + o número de seleções
 function lightEvent(e) {
   const { stats, details, ...ev } = publicEvent(e); // estatísticas e lances só na página do jogo
@@ -900,7 +926,7 @@ const routes = {
   'GET /api/events/full': (ctx) => {
     const ids = String(new URL(ctx.req.url, 'http://x').searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 40);
     ctx.res.setHeader('X-Server-Now', String(now()));
-    return { events: ids.map((id) => events.get(id)).filter(Boolean).map(publicEvent) };
+    return { events: ids.map((id) => events.get(id)).filter(Boolean).map(fullEvent) };
   },
 
   // jogos abertos neste navegador (página do jogo, boletim, apostas): recebem os mercados completos pelo fluxo
