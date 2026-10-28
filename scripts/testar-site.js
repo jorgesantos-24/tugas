@@ -41,7 +41,21 @@ function tennisResult() {
     if (q.tb) { const w = q.tb[0] > q.tb[1] ? 'home' : 'away'; sc[w === 'home' ? 0 : 1]++; log.push({ s: si + 1, g: q.wins.length + 1, w, tb: true, tbScore: q.tb }); srv = srv === 'home' ? 'away' : 'home'; }
     sets.push(sc);
   });
-  return { h: 2, a: 1, sets, log, aces: [6, 2], dfs: [1, 3] };
+  // pontos de cada game (como os gravados ao vivo): sequência completa coerente com o placar, para os mercados de pontos
+  const P = require(path.join(__dirname, '..', 'feeds', 'points.js'));
+  const V = ['0', '15', '30', '40'], pts = {};
+  log.forEach((e) => {
+    const w = e.w, l = w === 'home' ? 'away' : 'home';
+    const seq = e.tb ? [...Array(Math.min(...e.tbScore))].flatMap(() => [w, l]).concat([...Array(Math.max(...e.tbScore) - Math.min(...e.tbScore))].map(() => w))
+      : e.lp === 40 ? [l, w, l, w, l, w, w, w] /* 40-40, vantagem, game */ : [...Array(e.lp / 15)].map(() => l).concat([w, w, w, w]);
+    let h = 0, a = 0; const o = [{ h: '0', a: '0', t: 0, t2: 0 }];
+    seq.slice(0, -1).forEach((x, j) => { if (x === 'home') h++; else a++; const t = (j + 1) * 5000;
+      if (e.tb) o.push({ h: String(h), a: String(a), t, t2: t });
+      else { const d = h >= 3 && a >= 3; o.push({ h: d ? (h > a ? 'A' : '40') : V[h], a: d ? (a > h ? 'A' : '40') : V[a], t, t2: t }); } });
+    const r = e.tb ? P.resolveTb(e, o) : P.resolveGame(e, o, seq.length * 5000);
+    if (r) pts[`${e.s}/${e.g}`] = { ...r, tb: !!e.tb };
+  });
+  return { h: 2, a: 1, sets, log, aces: [6, 2], dfs: [1, 3], pts };
 }
 const RESULTS = {
   // parts = placar de cada parte (tempos, quartos, períodos, escanteios, mapas): os mercados por parte liquidam-se sozinhos

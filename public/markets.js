@@ -293,9 +293,10 @@ const byPick = (a, b) => pickRank(a) - pickRank(b) || (a.line ?? 0) - (b.line ??
 /* ---------- ténis: mercados de sets, games e saque ----------
    (leitura em feeds/tennis.js; "per" diz a parte do jogo: "2" = 2º set, "1/9" = 1º set game 9,
    "1:4" = 1º set após 4 games, "home" = jogador da casa, "home:2" = jogador da casa no 2º set, "home:0" = partida) */
-const TENNIS_OU = new Set(['tsgt', 'ttb', 'tpgw', 'tpbrk', 'tbrk']);
+const TENNIS_OU = new Set(['tsgt', 'ttb', 'tpgw', 'tpbrk', 'tbrk', 'ttbtp', 'tsbt']);
 const TENNIS_KINDS = new Set(['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh', 'tslead', 'tsafter', 'tsrace', 'tstbw', 'tsbrk', 'tgw', 'tgs', 'tgd', 'tgsw',
-  'tgpw', 'tgpd', 'tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfbrk', 'tpbrk', 'tbrk', 'tstraight', 'tdist', 'tpto', 'tdr', 'tcast', 'tmrt', 'tpgw', 'toe', 'ttb', 'tace', 'tdf']);
+  'tgpw', 'tgpd', 'tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfbrk', 'tpbrk',
+  'tg1p', 'tgsa', 'tgpb', 'tgbp', 'tgtp', 'tfsa', 'tfstp', 'tfsbp', 'tsbt', 'ttbtp', 'ttblead', 'ttbsa', 'ttbpb', 'ttbs', 'tbrk', 'tstraight', 'tdist', 'tpto', 'tdr', 'tcast', 'tmrt', 'tpgw', 'toe', 'ttb', 'tace', 'tdf']);
 function tennisText(k, s, per, H, A) {
   const P = (w) => (w === 'home' ? H : w === 'away' ? A : 'Empate');
   const YN = (y) => (y === 'yes' ? 'Sim' : 'Não');
@@ -304,7 +305,11 @@ function tennisText(k, s, per, H, A) {
   const sc = (x) => x.replace('-', ' x ');
   const pts = (x) => (x === '0' ? 'zero' : x);
   const ou = () => `${s.pick === 'over' ? 'Mais' : 'Menos'} de ${s.line}`;
-  const set = `${a}º set`, game = `${a}º set · game ${b}`, srv = `1º game de serviço de ${P(a)}`;
+  const set = `${a}º set`, game = `${a}º set · game ${String(b).split(':')[0]}`, srv = `1º game de serviço de ${P(a)}`;
+  const tbName = a === 'M' ? 'Super tie-break' : `Tie-break do ${a}º set`;
+  // pontos "casa-fora" em nº de pontos (0..4) → "30 x 15" / "Vence a zero"
+  const ptsTxt = (x) => { const [h, w] = String(x).split('-').map(Number); if (h === 4 || w === 4) return `${P(h === 4 ? 'home' : 'away')} vence a zero`; const v = ['0', '15', '30', '40']; return `${v[h]} x ${v[w]}`; };
+  const totTxt = (x) => (x === 'over' ? 'Mais de 6 pontos' : `${x} pontos`);
   switch (k) {
     case 'tsw': return [`Vencedor do ${set}`, P(pk)];
     case 'tscs': return [`Placar exato do ${set}`, sc(pk)];
@@ -328,6 +333,18 @@ function tennisText(k, s, per, H, A) {
     case 'tfsw': return [`${srv}: ganha com o adversário a ${s.line} ou menos?`, YN(pk)];
     case 'tfsd': return [`${srv}: vai a deuce?`, YN(pk)];
     case 'tfbrk': return ['Primeira quebra de saque da partida', P(pk)];
+    case 'tg1p': return [`${game}: 1º ponto`, P(pk)];
+    case 'tgsa': return [`${game}: placar após ${String(per).split(':')[1]} pontos`, ptsTxt(pk)];
+    case 'tgpb': return [`${game}: ponto a ponto`, `Ponto ${s.line}: ${P(pk)}`];
+    case 'tgbp': return [`${game}: há break point?`, YN(pk)];
+    case 'tgtp': return [`${game}: total de pontos`, totTxt(pk)];
+    case 'tfsa': return [`${srv}: placar após ${b} pontos`, ptsTxt(pk)];
+    case 'tfstp': return [`${srv}: total de pontos`, totTxt(pk)];
+    case 'ttbtp': return [`${tbName}: total de pontos`, ou()];
+    case 'ttblead': return [`${tbName}: quem lidera após ${b} pontos`, P(pk)];
+    case 'ttbsa': return [`${tbName}: placar após ${b} pontos`, sc(pk)];
+    case 'ttbpb': return [`${tbName}: ponto a ponto`, `Ponto ${s.line}: ${P(pk)}`];
+    case 'ttbs': return [`${tbName}: placar exato`, sc(pk)];
     case 'tpbrk': return [`Quebras de saque de ${P(a)}${b && b !== '0' ? ` no ${b}º set` : ''}`, ou()];
     case 'tbrk': return ['Total de quebras de saque na partida', ou()];
     case 'tstraight': return ['Vencedor sem perder set?', YN(pk)];
@@ -339,10 +356,29 @@ function tennisText(k, s, per, H, A) {
     case 'tpgw': return [`Games ganhos por ${P(a)}`, ou()];
     case 'toe': return ['Total de games: par ou ímpar', pk === 'odd' ? 'Ímpar' : 'Par'];
     case 'ttb': return ['Total de tie-breaks na partida', ou()];
-    case 'tace': return [`Aces de ${P(a)}`, `${s.line} ou mais`];
-    case 'tdf': return [`Duplas faltas de ${P(a)}`, `${s.line} ou mais`];
+    case 'tace': return [a === 'all' ? 'Aces na partida (os dois)' : `Aces de ${P(a)}`, `${s.line} ou mais`];
+    case 'tdf': return [a === 'all' ? 'Duplas faltas na partida (os dois)' : `Duplas faltas de ${P(a)}`, `${s.line} ou mais`];
+    case 'tfsbp': return [`${srv}: há break point?`, YN(pk)];
+    case 'tsbt': return [`Total de quebras de saque no ${a}º set`, ou()];
   }
   return null;
+}
+
+// quem ganhou o ponto i (1, 2, ...) de um game: 'home'/'away', 'none' (o game acabou antes) ou null (não se sabe)
+function pointWinner(P, i) {
+  if (!(i >= 1)) return null;
+  if (i <= P.k && P.seq[i - 1]) return P.seq[i - 1];
+  if (P.n != null && i > P.n) return 'none';
+  return null;
+}
+// pontos de cada um após K pontos do game: [casa, fora], 'none' (acabou antes) ou null (ordem desconhecida)
+function pointsAfter(P, K) {
+  if (!(K >= 1)) return null;
+  if (P.n != null && K > P.n) return 'none';
+  if (K > P.k) return null;
+  let h = 0, a = 0;
+  for (let i = 0; i < K; i++) { const x = P.seq[i]; if (!x) return null; if (x === 'home') h++; else a++; }
+  return [h, a];
 }
 
 // resultado de um mercado de ténis (null = não dá para decidir com os dados que há → fica para a equipa)
@@ -358,6 +394,7 @@ function tennisOutcome(leg, R) {
   const won = R.h > R.a ? 'home' : 'away';
   const brk = (e) => e.srv && e.w !== e.srv; // game ganho por quem recebia
   const inSet = (si) => (log ? log.filter((e) => e.s === si) : null);
+  const unk = R.pts ? 0 : null; // mercados de pontos sem forma de decidir (ver abaixo)
   switch (leg.market) {
     case 'tsw': return set ? W(winOf(set) === pk) : 0; // set não jogado: devolvida
     case 'tscs': return set ? W(`${set[0]}-${set[1]}` === pk) : 0;
@@ -414,6 +451,49 @@ function tennisOutcome(leg, R) {
     case 'tfbrk': { if (!log) return null; const e = log.find(brk); return e ? W(e.w === pk) : 0; }
     case 'tpbrk': { if (!log) return null; const si = Number(b) || 0; if (si && !sets[si - 1]) return 0; return ouRes((si ? inSet(si) : log).filter((e) => brk(e) && e.w === a).length); }
     case 'tbrk': return log ? ouRes(log.filter(brk).length) : null;
+    /* ---- pontos: R.pts["set/game"] = { seq, k, n, bp } (feeds/points.js).
+       Com os pontos já calculados (R.pts) e mesmo assim sem forma de decidir (game sem gravação, ordem dos pontos
+       desconhecida no deuce): devolvida — a equipa não teria dados melhores. Sem R.pts (ainda não calculados): espera. */
+    case 'tg1p': case 'tgsa': case 'tgpb': case 'tgbp': case 'tgtp': case 'tfsa': case 'tfstp': case 'tfsbp': {
+      let e;
+      if (leg.market === 'tfsa' || leg.market === 'tfstp' || leg.market === 'tfsbp') { if (!log) return null; e = log.find((x) => x.srv === a && !x.tb); if (!e) return 0; }
+      else { if (!set) return 0; const gs = inSet(sN); if (!gs) return null; e = gs[N - 1]; if (!e) return 0; }
+      if (leg.market === 'tgtp' || leg.market === 'tfstp') { // total de pontos: basta o "holds/breaks to 30" do histórico
+        if (e.lp == null) return null;
+        return W((e.lp === 40 ? 'over' : String(4 + e.lp / 15)) === pk);
+      }
+      const P = R.pts?.[`${e.s}/${e.g}`];
+      if (!P) return unk;
+      if (leg.market === 'tgbp' || leg.market === 'tfsbp') return P.bp == null ? unk : W(P.bp === (pk === 'yes'));
+      if (leg.market === 'tg1p' || leg.market === 'tgpb') {
+        const x = pointWinner(P, leg.market === 'tg1p' ? 1 : Number(leg.line));
+        return x == null ? unk : x === 'none' ? 0 : W(x === pk);
+      }
+      const K = Number(String(leg.per).split(':').pop());
+      const c = pointsAfter(P, K);
+      return c == null ? unk : c === 'none' ? 0 : W(`${Math.min(c[0], 4)}-${Math.min(c[1], 4)}` === pk);
+    }
+    case 'ttbtp': case 'ttbs': case 'ttblead': case 'ttbsa': case 'ttbpb': {
+      // set do tie-break: "M" = super tie-break (set decisivo "1-0"); set sem tie-break → devolvida
+      const si = a === 'M' ? sets.findIndex((x) => Math.max(...x) === 1 && Math.min(...x) === 0) : sN - 1;
+      const st = sets[si];
+      if (!st) return 0;
+      if (a !== 'M' && !isTb(st)) return 0;
+      if (!log) return null;
+      const e = log.find((x) => x.s === si + 1 && x.tb);
+      if (!e?.tbScore) return null;
+      const [th, ta] = e.tbScore;
+      if (leg.market === 'ttbtp') return ouRes(th + ta);
+      if (leg.market === 'ttbs') return W(`${th}-${ta}` === pk);
+      const P = R.pts?.[`${e.s}/${e.g}`];
+      if (!P) return unk;
+      if (leg.market === 'ttbpb') { const x = pointWinner(P, Number(leg.line)); return x == null ? unk : x === 'none' ? 0 : W(x === pk); }
+      const c = pointsAfter(P, Number(b));
+      if (c == null) return unk;
+      if (c === 'none') return 0;
+      if (leg.market === 'ttbsa') return W(`${c[0]}-${c[1]}` === pk);
+      return W((c[0] > c[1] ? 'home' : c[0] < c[1] ? 'away' : 'draw') === pk);
+    }
     case 'tstraight': return W(sets.every((x) => winOf(x) === won) === (pk === 'yes'));
     case 'tdist': return W((sets.length === Math.max(R.h, R.a) * 2 - 1) === (pk === 'yes'));
     case 'tpto': {
@@ -427,7 +507,8 @@ function tennisOutcome(leg, R) {
     case 'tpgw': return ouRes(sets.reduce((q, x) => q + x[a === 'home' ? 0 : 1], 0));
     case 'toe': return W((sets.reduce((q, x) => q + x[0] + x[1], 0) % 2 ? 'odd' : 'even') === pk);
     case 'ttb': return ouRes(sets.filter(isTb).length);
-    case 'tace': case 'tdf': { const v = leg.market === 'tace' ? R.aces : R.dfs; return v ? W(v[a === 'home' ? 0 : 1] >= leg.line) : null; }
+    case 'tace': case 'tdf': { const v = leg.market === 'tace' ? R.aces : R.dfs; return v ? W((a === 'all' ? v[0] + v[1] : v[a === 'home' ? 0 : 1]) >= leg.line) : null; }
+    case 'tsbt': { if (!set) return 0; const gs = inSet(sN); return gs ? ouRes(gs.filter(brk).length) : null; }
   }
   return null;
 }

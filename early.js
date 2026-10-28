@@ -23,10 +23,18 @@ const OFF = process.env.EARLY_SETTLE === '0';
 
 // placar → resultado: tipos em que mais gols/pontos/mapas nunca "desfazem" um resultado já decidido
 const MONO = { soccer: ['total', 'btts', 'cs'], hockey: ['total', 'btts', 'cs'], basketball: ['total'], esports: ['ecs', 'e1m'] };
-const TENNIS_SET = new Set(['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh', 'tstbw', 'tslead', 'tsafter', 'tsrace', 'tsbrk']);
-const TENNIS_GAME = new Set(['tgw', 'tgs', 'tgd', 'tgsw']);
+const TENNIS_SET = new Set(['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh', 'tstbw', 'tslead', 'tsafter', 'tsrace', 'tsbrk', 'tsbt', 'ttbtp', 'ttbs', 'ttblead', 'ttbsa', 'ttbpb']);
+const TENNIS_GAME = new Set(['tgw', 'tgs', 'tgd', 'tgsw', 'tg1p', 'tgsa', 'tgpb', 'tgbp', 'tgtp']);
 const TENNIS_GAME2 = new Set(['tgpw', 'tgpd']);
-const TENNIS_FIRST_SRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd']);
+// ténis, mercados da partida que só dependem de quem ganha cada set: decididos quando todas as maneiras possíveis
+// de acabar a partida dão o mesmo resultado (ex.: 1-1 em sets → "total de sets: 3" ganha, "vence sem perder set" perde)
+const TENNIS_MATCH = new Set(['ml', 'sets', 'tsets', 'tstraight', 'tpto', 'tdr', 'tcast', 'tdist']);
+// ténis, contagens que só sobem (games, tie-breaks, quebras, aces, duplas faltas): "mais de" ganha / "menos de" perde
+// logo que a contagem passa a linha; "N ou mais" ganha logo que chega a N
+const TENNIS_COUNT = new Set(['gtotal', 'ttb', 'tpgw', 'tbrk', 'tpbrk', 'tace', 'tdf']);
+const TENNIS_FIRST_SRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfsa', 'tfstp', 'tfsbp']);
+// mercados de pontos: precisam dos placares gravados ao vivo (feeds/points.js)
+const TENNIS_POINTS = new Set(['tg1p', 'tgsa', 'tgpb', 'tgbp', 'tfsa', 'tfsbp', 'ttblead', 'ttbsa', 'ttbpb']);
 
 const PARTS = require('./feeds/parts.js');
 const PLAYERS = require('./feeds/players.js');
@@ -49,7 +57,7 @@ const MONO_PART = new Set(['ptot', 'pteam', 'pbtts', 'pcln', 'pot']);
 // combinações em que mais gols nunca desfazem: só ambas marcam e "mais/menos de" (sem resultado, faixas ou "exatamente")
 const monoCond = (pick) => String(pick).replace(/^!/, '').split(';').every((c) => /^(btts=(yes|no)|(tot|th|ta)=(gt|lt):[\d.]+)$/.test(c));
 
-module.exports = function early({ M, TEN, events, liveStats, now }) {
+module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null }) {
   const seen = new Map();     // aposta|seleção → { sig, since }
   const openSince = new Map(); // jogo → desde quando os mercados estão abertos (null = fechados)
 
@@ -171,10 +179,75 @@ module.exports = function early({ M, TEN, events, liveStats, now }) {
       if (i < 0) return null;
       need = log.slice(0, i + 1);
     }
-    const v = M.legOutcome(leg, { h: 0, a: 0, sets, log }); // só se chega aqui com a parte da seleção terminada
+    const pts = POINTS ? POINTS.resolve(ev.id, log) : null;
+    const v = M.legOutcome(leg, { h: 0, a: 0, sets, log, pts }); // só se chega aqui com a parte da seleção terminada
     if (v == null) return null;
     const setTxt = sets.filter((_, i) => setDone(i + 1)).map((x) => x.join('-')).join(' ');
-    return { v, sig: JSON.stringify([sets.slice(0, sN || 1), need]), text: setTxt ? `sets ${setTxt}` : `${need.length} games` };
+    // pontos: a sequência reconstruída também entra na assinatura (uma correção recomeça a contagem)
+    const ptSig = TENNIS_POINTS.has(k) ? need.map((e) => pts?.[`${e.s}/${e.g}`] || null) : null;
+    return { v, sig: JSON.stringify([sets.slice(0, sN || 1), need, ptSig]), text: setTxt ? `sets ${setTxt}` : `${need.length} games` };
+  }
+
+  // ---- ténis: mercados da partida decididos antes do fim ----
+  // nº de sets para ganhar: a fonte diz o formato ("best_of_3" / "best_of_5"); sem ele não se adianta nada
+  const setsToWin = (st) => (st?.format === 'best_of_5' ? 3 : st?.format === 'best_of_3' ? 2 : null);
+  function tennisMatch(leg, ev) {
+    const k = leg.market;
+    if (!TENNIS_MATCH.has(k) && !TENNIS_COUNT.has(k)) return null;
+    const st = liveStats(ev.id);
+    const hs = st?.home?.sets, as = st?.away?.sets;
+    if (!Array.isArray(hs) || !Array.isArray(as) || !hs.length || hs.length !== as.length) return null;
+    const sets = hs.map((x, i) => [Number(x), Number(as[i])]);
+    if (sets.some(([x, y]) => !Number.isFinite(x) || !Number.isFinite(y))) return null;
+    const need = setsToWin(st);
+    if (!need) return null;
+    // sets terminados: todos menos o atual (a não ser que o atual já tenha placar final)
+    const done = sets.filter((x, i) => i < sets.length - 1 || okSet(x));
+    if (done.some((x) => !okSet(x))) return null;
+    const hw = done.filter(([x, y]) => x > y).length, aw = done.length - hw;
+    if (hw >= need || aw >= need) return null; // acabou: fica para o resultado final
+    if (TENNIS_MATCH.has(k)) {
+      // todas as maneiras de acabar: sequências de vencedores dos sets que faltam
+      const outs = new Set();
+      const rec = (h, a, extra) => {
+        if (outs.size > 1) return;
+        if (h === need || a === need) {
+          const all = done.concat(extra.map((w) => (w === 'home' ? [6, 0] : [0, 6])));
+          outs.add(M.legOutcome(leg, { h, a, sets: all }));
+          return;
+        }
+        rec(h + 1, a, [...extra, 'home']); rec(h, a + 1, [...extra, 'away']);
+      };
+      rec(hw, aw, []);
+      if (outs.size !== 1) return null;
+      const v = [...outs][0];
+      if (v == null) return null;
+      const txt = done.map((x) => x.join('-')).join(' ');
+      return { v, sig: `sets:${txt}`, text: `sets ${txt}` };
+    }
+    // contagens que só sobem
+    const [pa, pb] = String(leg.per ?? '').split(':');
+    let cur;
+    if (k === 'gtotal') cur = sets.reduce((q, x) => q + x[0] + x[1], 0);
+    else if (k === 'tpgw') cur = sets.reduce((q, x) => q + x[pa === 'home' ? 0 : 1], 0);
+    else if (k === 'ttb') cur = done.filter((x) => Math.max(...x) === 7 && Math.min(...x) === 6).length;
+    else if (k === 'tace' || k === 'tdf') {
+      const f = k === 'tace' ? 'aces' : 'double_faults', h = Number(st.home?.[f]), a = Number(st.away?.[f]);
+      if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
+      cur = pa === 'all' ? h + a : pa === 'home' ? h : a;
+      if (cur < leg.line) return null; // "N ou mais": só se decide quando chega
+      return { v: 1, sig: `${k}:${cur}`, text: `${k === 'tace' ? 'aces' : 'duplas faltas'} ${cur}` };
+    } else {
+      const log = TEN.gameLog({ home: ev.home.name, away: ev.away.name, stats: st }, sets);
+      if (!log) return null;
+      const brk = (e) => e.srv && e.w !== e.srv;
+      if (k === 'tbrk') cur = log.filter(brk).length;
+      else { const si = Number(pb) || 0; if (si) return null; cur = log.filter((e) => brk(e) && e.w === pa).length; } // tpbrk de um set: no fim do set
+    }
+    if (!Number.isFinite(cur) || !(cur > leg.line)) return null; // ainda abaixo da linha: "mais"/"menos" por decidir
+    const v = leg.pick === 'over' ? 1 : leg.pick === 'under' ? -1 : null;
+    if (v == null) return null;
+    return { v, sig: `${k}:${cur}`, text: `${k === 'gtotal' || k === 'tpgw' ? 'games' : k === 'ttb' ? 'tie-breaks' : 'quebras'} ${cur}` };
   }
 
   // ---- e-Sports: vencedor do mapa N (CS2/Valorant: rondas de cada mapa) ----
@@ -199,7 +272,7 @@ module.exports = function early({ M, TEN, events, liveStats, now }) {
     const ev = events.get(leg.evId);
     const key = `${betId}|${leg.evId}|${leg.key}`;
     if (!ev || ev.state !== 'in') { seen.delete(key); return false; }
-    const d = mono(leg, ev) || part(leg, ev) || player(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
+    const d = mono(leg, ev) || part(leg, ev) || player(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
     if (!d) { seen.delete(key); return false; }
     const t = now();
     const sig = `${d.sig}|${d.v}`;

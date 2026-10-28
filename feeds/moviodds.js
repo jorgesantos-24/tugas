@@ -139,6 +139,8 @@ async function get(pathQs) {
   return r.json();
 }
 
+// ténis: últimas odds tiradas do site pela proteção (feeds/tennis.js guardTennis) — para o painel e os testes
+const guardRemoved = [];
 const round2 = (n) => Math.round(n * 100) / 100;
 const parseScore = (s) => { const m = /^(\d+)\s*-\s*(\d+)$/.exec(String(s || '').trim()); return m ? [Number(m[1]), Number(m[2])] : null; };
 // número de uma linha: "2.5", "+1.5", "Over 2.5"; linha asiática "3.0, 3.5" = 3.25 (metade da aposta em cada uma)
@@ -266,6 +268,7 @@ function toEvent(m0, serverNow, sport, full = true) {
   // com fotografia pelo WebSocket (ao vivo e jogos a começar): odds (todos os grupos) e frescura vêm daí
   const w = WS.get(m0.id);
   const st = m0.in_play ? WS.stats(m0.id) || m0.stats || null : null; // estatísticas ao vivo (WebSocket, ou o pedido com stats=1)
+  if (m0.in_play && m0.stats && !WS.stats(m0.id)) WS.restStats(m0.id, m0.stats); // ténis ponto a ponto (com o WebSocket em baixo)
   const sc = st ? scoreFromStats(sport, st) : null;
   let m = sc ? { ...m0, score: sc } : m0;
   if (w) {
@@ -300,7 +303,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (!c || c.ctx !== ctx) {
       let s = specific(q);
       // sem regra automática (ou cotação que a regra não aceitou): mercado da equipa
-      if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = sport === 'soccer' && SOCCER_GROUPS[q.group_id] ? null : GEN.quote(q, m, sport);
+      // ténis: só mercados com liquidação automática — o resto (próxima quebra, handicaps ao vivo, dados incompletos) não se oferece
+      if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = (sport === 'soccer' && SOCCER_GROUPS[q.group_id]) || sport === 'tennis' ? null : GEN.quote(q, m, sport);
       if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = null;
       c = { ctx, s };
       quoteCache.set(q, c);
@@ -336,6 +340,18 @@ function toEvent(m0, serverNow, sport, full = true) {
   for (const [k, n] of Object.entries(NEED[sport] || {})) if (byK.get(k) && byK.get(k).sels.length !== n) byK.delete(k);
   // mercados com uma seleção só (a outra caiu por odd 1.00) não fazem sentido: saem, exceto os de "N ou mais" (aces...)
   if (sport === 'tennis') for (const [key, mk] of byK) if (mk.sels.length < 2 && !['tace', 'tdf'].includes(mk.k)) byK.delete(key);
+  // ténis: odds impossíveis ou que não batem com mercados irmãos saem do site (voltam quando a fonte as corrigir)
+  if (sport === 'tennis') {
+    TEN.guardTennis(byK, !!live);
+    for (const [key, mk] of byK) {
+      const out = mk.sels.filter((x) => x.guard);
+      if (!out.length) continue;
+      guardRemoved.push(`${new Date(serverNow).toISOString()} [${live ? 'ao vivo' : 'pré'}] ${m.home} x ${m.away} ${mk.k}${mk.per ? ' ' + mk.per : ''}: ${out.map((x) => `${x.pick}${x.line != null ? '(' + x.line + ')' : ''}@${x.odds}`).join(' ')}`);
+      if (guardRemoved.length > 300) guardRemoved.splice(0, guardRemoved.length - 300);
+      mk.sels = mk.sels.filter((x) => !x.guard);
+      if (mk.sels.length < 2 && !['tace', 'tdf'].includes(mk.k)) byK.delete(key);
+    }
+  }
   const markets = sport === 'tennis' ? [...byK.values()].filter((mk) => mk.k !== 'x' && !M.SOURCE_KINDS.has(mk.k)).sort(TEN.marketSort)
     : [...MARKET_ORDER, 'ecs', 'emh', 'e1m', 'emw'].flatMap((k) => [...byK.values()].filter((mk) => mk.k === k));
   // mercados da equipa, por secção (no futebol vêm do último pedido completo)
@@ -443,7 +459,10 @@ function tennisResult(r) {
   const h = sets.filter(([x, y]) => x > y).length, a = sets.filter(([x, y]) => y > x).length;
   // cada set tem de estar terminado (6-4, 7-5, 7-6, 6-x com 2 de vantagem; "1-0" = super tie-break) e alguém ganhou a maioria
   const okSet = ([x, y]) => { const hi = Math.max(x, y), lo = Math.min(x, y); return (hi === 1 && lo === 0) || (hi === 6 && lo <= 4) || (hi === 7 && (lo === 5 || lo === 6)) || (hi > 7 && hi - lo === 2); };
-  if (!sets.every(okSet) || h === a || Math.max(h, a) < 2) return NOPE('partida não terminou normalmente (desistência?)');
+  // sets para ganhar: melhor de 5 (Grand Slam masculino) = 3; senão 2. Uma desistência entre sets (2-1 num melhor de 5)
+  // tem todos os sets completos — só o formato a distingue de uma partida acabada
+  const need = r.stats?.format === 'best_of_5' ? 3 : 2;
+  if (!sets.every(okSet) || h === a || Math.max(h, a) !== need) return NOPE('partida não terminou normalmente (desistência?)');
   // histórico game a game, aces e duplas faltas (para os mercados de games e de saque); null se não bater certo
   return { done: true, h, a, sets, ...TEN.extras(r, sets) };
 }
@@ -575,6 +594,6 @@ function fromWs(id) {
 module.exports = {
   name: 'MoviOdds (bet365)', SPORTS, fetchAll, fetchLive, fetchResult, parseResult, clockLabel, toEvent, tennisResult, loadPlayerCoverage,
   // WebSocket: start(cb) liga e avisa os jogos que mudaram; want(ids) diz quais seguir; fromWs(id) dá o evento atualizado
-  liveStats: (id) => WS.stats(id), // estatísticas ao vivo em bruto (histórico de games do ténis, mapas) — liquidação antecipada
-  ws: { start: (cb, down) => WS.start(cb, down), want: (ids) => WS.want(ids), info: () => ({ ...WS.info(), livePolls: { ...livePolls } }), isOpen: WS.isOpen }, fromWs,
+  guardRemoved, liveStats: (id) => WS.stats(id), // estatísticas ao vivo em bruto (histórico de games do ténis, mapas) — liquidação antecipada
+  ws: { start: (cb, down) => WS.start(cb, down), want: (ids) => WS.want(ids), onStats: (fn) => WS.onStats(fn), info: () => ({ ...WS.info(), livePolls: { ...livePolls } }), isOpen: WS.isOpen }, fromWs,
 };

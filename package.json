@@ -9,6 +9,7 @@
     "dev": "node scripts/dev.js",
     "verificar": "node scripts/verificar.js",
     "testar": "node scripts/testar-mercados.js",
+    "testar:tenis": "node scripts/testar-tenis.js",
     "deploy": "node scripts/deploy.js"
   },
   "engines": {

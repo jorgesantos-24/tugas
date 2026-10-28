@@ -246,7 +246,9 @@ const openWithdrawals = new Map(); // pedidos de saque à espera da equipa
 const events = new Map();
 const LW = require('./livewatch.js')({ col, inc, M, events, findSel, now }); // vigilância das apostas ao vivo
 // liquidação antecipada: seleções já decididas pagas 2,5 min depois (sem esperar pelo fim do jogo)
-const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now });
+// ténis ponto a ponto: placares de cada game gravados ao vivo → mercados de pontos (1º ponto, placar após N pontos...)
+const POINTS = require('./feeds/points.js');
+const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now, POINTS });
 let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 // resultado final: vale logo à primeira leitura (RESULT_CONFIRM_S > 0 obriga a lê-lo igual outra vez depois desse tempo)
 const RESULT_CONFIRM_MS = Number(process.env.RESULT_CONFIRM_S || 0) * 1000;
@@ -466,6 +468,7 @@ async function checkResults() {
       if (!p || p.sig !== sig) { ev.pendingResult = { sig, at: t }; continue; }
       if (t - p.at < RESULT_CONFIRM_MS) continue;
     }
+    if (R.log) R.pts = POINTS.resolve(id, R.log); // ténis: sequência dos pontos de cada game (mercados de pontos)
     Object.assign(ev, {
       state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado' + (R.alts ? ' (pênaltis)' : ''), pendingResult: null,
       result: R, resultNote: note || (R.alts ? 'decidido nos pênaltis: a fonte não diz quem ganhou; mercados do vencedor ficam para a equipa' : null),
@@ -1658,6 +1661,7 @@ if (EMULATOR) {
     if (!ev) fail(404, 'Jogo não encontrado.');
     const R = ctx.body.result;
     if (!R || !Number.isFinite(R.h) || !Number.isFinite(R.a)) fail(400, 'Resultado inválido.');
+    if (R.log && !R.pts) R.pts = POINTS.resolve(ev.id, R.log); // como num resultado real (checkResults)
     Object.assign(ev, { state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado', result: R, home: { ...ev.home, score: R.h }, away: { ...ev.away, score: R.a } });
     feedVersion++; feedCache = null; touch(ev.id);
     await settleQueued();
@@ -1838,6 +1842,13 @@ const server = http.createServer(async (req, res) => {
   console.log(`Firebase ligado: ${openBets.size} apostas abertas, ${pendingDeposits.size} PIX pendentes, ${openWithdrawals.size} pedidos de saque por tratar.`);
   await LOGOS.start(); // emblemas (listas da ESPN) antes dos jogos, para já virem com imagem
   console.log(`A carregar jogos e odds ao vivo (${FEED.name})...`);
+  // ténis: pontos guardados (sobrevivem a um reinício) e gravação de cada placar que chega
+  await POINTS.init({
+    load: async (since) => (await col.pointLogs().where('at', '>=', since).get()).docs.map((d) => [d.id, d.data()]),
+    save: (id, data) => col.pointLogs().doc(id).set(data),
+  });
+  FEED.ws.onStats((id, st) => POINTS.observe(id, st));
+  setInterval(() => POINTS.cleanup(), 3600000);
   FEED.ws.start(onWsChange, onWsDown); // odds e placar ao vivo empurrados pela MoviOdds
   // mercados de jogadores: que ligas trazem estatísticas por jogador (em segundo plano; até lá ficam fechados)
   FEED.loadPlayerCoverage().catch((e) => console.error('[Jogadores]', e.message));

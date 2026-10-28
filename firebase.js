@@ -97,6 +97,7 @@ const col = {
   catLeagues: () => db.collection('catalogLeagues'),
   manualEvents: () => db.collection('manualEvents'),
   manualMarkets: () => db.collection('manualMarkets'), // mercados extra da equipa em jogos da fonte, por id do jogo
+  pointLogs: () => db.collection('pointLogs'), // ténis: placares de cada game vistos ao vivo (feeds/points.js), para liquidar os mercados de pontos
   liveAlerts: () => db.collection('liveAlerts'), // apostas ao vivo suspeitas (livewatch.js)
 };
 

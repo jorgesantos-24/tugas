@@ -30,6 +30,7 @@ let retry = 0, restartRetry = 0;
 let clockOffset = 0;        // relógio da fonte − o nosso (ms)
 let health = null;          // última mensagem "feed": { sport → { live, pre_match } }
 let onChange = () => {}, onDown = () => {};
+let statsHook = null;        // cada mensagem "stats", uma a uma (ténis ponto a ponto: feeds/points.js)
 const counters = { connects: 0, msgs: 0, bytes: 0, snapshots: 0, deltas: 0, removes: 0, stats: 0, lagged: 0, resync: 0, subs: 0, since: Date.now() };
 
 const pending = new Set(), gone = new Set();
@@ -132,6 +133,7 @@ function handle(m) {
     }
     case 'stats': {
       counters.stats++;
+      if (statsHook) try { statsHook(id, m.stats); } catch (e) { console.error('[MoviOdds WS] stats:', e.message); }
       const s = state.get(id);
       if (s) { s.stats = m.stats; s.at = Date.now(); changed(id); }
       else if (wanted.has(id)) state.set(id, { quotes: new Map(), status: {}, polledAt: null, stats: m.stats, at: Date.now(), partial: true });
@@ -221,6 +223,10 @@ module.exports = {
   // estado atual de um jogo (null se não houver fotografia pelo WebSocket)
   get(id) { const s = state.get(String(id)); return open && s && !s.partial ? s : null; },
   stats(id) { return open ? state.get(String(id))?.stats || null : null; },
+  // recebe cada mensagem "stats" assim que chega (sem juntar mudanças): onStats((id, stats) => ...)
+  onStats(fn) { statsHook = fn; },
+  // estatísticas que vieram pelos pedidos normais (WebSocket em baixo): passam pelo mesmo caminho
+  restStats(id, st) { if (statsHook && st && !open) try { statsHook(String(id), st); } catch { /* */ } },
   // saúde da fonte numa modalidade (nome da MoviOdds): { live, pre } com 'ok' | 'degraded' | 'down'; null = sem informação
   health(srcSport) { return open && health ? health[srcSport] || null : null; },
   now: () => Date.now() + clockOffset, // hora da fonte (para a frescura das odds, sem confiar no nosso relógio)
