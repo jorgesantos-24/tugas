@@ -56,7 +56,7 @@ const espnLeague = new Map(); // liga do site → [{ names: [...], url }]
 const espnPlayers = new Map(); // nome do tenista (normalizado) → { id, flag } (torneios ATP/WTA da semana)
 const espnSurnames = new Map(); // apelido → bandeira (null se dois jogadores tiverem o mesmo apelido)
 // nomes da bet365 que a ESPN escreve de outra forma (já normalizados)
-const ALIAS = { 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
+const ALIAS = { 'miami florida': 'miami hurricanes', olympiakos: 'olympiacos piraeus', 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
 const teamNames = (t) => [t.displayName, t.shortDisplayName, t.name, t.location, t.nickname].map(norm).filter(Boolean);
 async function espnGet(p) {
   const r = await fetch(ESPN + p, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
@@ -100,7 +100,9 @@ function espnLogo(sport, name, league) {
     return ''; // simples: bandeira em tennisLogo (procura em segundo plano)
   }
   const list = espnLeague.get(league);
-  if (!list) return '';
+  return list ? listLogo(list, name) : '';
+}
+function listLogo(list, name) {
   const qs = [norm(expand(name)), norm(name)].filter(Boolean);
   for (const q of [...qs]) if (ALIAS[q]) qs.push(ALIAS[q]);
   // "Sport Recife" perde a palavra "sport" ao normalizar: usa também o nome sem normalizar as siglas de clube
@@ -108,7 +110,54 @@ function espnLogo(sport, name, league) {
   const exact = list.find((t) => qs.some((q) => t.names.includes(q)));
   if (exact) return exact.url;
   const near = list.filter((t) => qs.some((q) => q.length >= 4 && t.names.some((n) => n.length >= 4 && (n.includes(q) || q.includes(n)))));
-  return near.length === 1 ? near[0].url : ''; // dois parecidos na mesma liga: não arrisca
+  if (near.length === 1) return near[0].url;
+  if (near.length) return ''; // dois parecidos na mesma liga: não arrisca
+  // patrocinador no meio do nome ("Maccabi Tel Aviv" ~ "Maccabi Rapyd Tel Aviv"): todas as palavras da bet365 no nome
+  const words = list.filter((t) => qs.some((q) => q.includes(' ') && t.names.some((n) => q.split(' ').every((w) => n.split(' ').includes(w)))));
+  return words.length === 1 ? words[0].url : '';
+}
+
+/* ---------- Emblemas das próprias ligas (a ESPN tem estas equipas sem emblema) ----------
+   Euroliga e EuroCup: API oficial (api-live.euroleague.net). NBB (lnb.com.br) e Liga Nacional da Argentina
+   (laliganacional.com.ar): a lista de equipas das páginas oficiais. Um pedido por liga ao arrancar e 1x/dia. */
+const EL_COMP = { euroleague: 'E', eurocup: 'U' };
+const offLeague = new Map(); // liga do site → [{ names, url }]
+const unent = (s) => String(s).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/&amp;/g, '&');
+const SITE_CRESTS = {
+  // <a href=".../equipes/basket-osasco/"><img src="..."> Basket Osasco</a>
+  nbb: { url: 'https://lnb.com.br/nbb/equipes/', re: /<a href="https:\/\/lnb\.com\.br\/equipes\/([^"/]+)\/?">\s*<img src="([^"]+)"[^>]*>\s*([^<]+?)\s*<\/a>/g, pick: (m) => ({ img: /[^\x21-\x7e]/.test(m[2]) ? encodeURI(m[2]) : m[2], names: [m[3], m[1].replace(/-/g, ' ')] }) }, // "Sâo-José-….png"
+  // <a href="/laliga/equipo/19/114735/boca/inicio"><img src="/escudos/19/114735" title="=BOCA" />; "(C)", "(CR)" = cidade
+  'arg.lnb': { url: 'https://www.laliganacional.com.ar/', re: /<a href="\/laliga\/equipo\/\d+\/\d+\/([^/"]+)\/[^"]*">\s*<img src="(\/escudos\/[^"]+)"[^>]*title="=([^"]+)"/g, pick: (m) => ({ img: 'https://www.laliganacional.com.ar' + m[2], names: [unent(m[3]).replace(/\s*\([^)]*\)\s*$/, ''), m[1].replace(/-/g, ' ')] }) },
+};
+async function loadSiteCrests() {
+  let n = 0;
+  for (const [key, s] of Object.entries(SITE_CRESTS)) {
+    try {
+      const r = await fetch(s.url, { headers: { 'user-agent': 'Mozilla/5.0 (TUGAS emblemas)' }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const seen = new Map();
+      for (const m of (await r.text()).matchAll(s.re)) { const t = s.pick(m); if (!seen.has(t.img)) seen.set(t.img, { names: [...new Set(t.names.map(norm).filter(Boolean))], url: t.img }); }
+      if (seen.size) { offLeague.set(key, [...seen.values()]); n += seen.size; }
+      else console.warn(`[Emblemas] ${s.url}: nenhuma equipa encontrada (a página mudou?)`);
+    } catch (e) { console.warn(`[Emblemas] ${s.url}: ${e.message}`); }
+  }
+  return n;
+}
+async function loadEuroleague() {
+  const now = new Date(), season = now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1; // a época começa em setembro
+  let n = 0;
+  for (const [key, c] of Object.entries(EL_COMP)) {
+    try {
+      const r = await fetch(`https://api-live.euroleague.net/v2/competitions/${c}/seasons/${c}${season}/clubs`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const list = ((await r.json()).data || []).filter((t) => t.images?.crest).map((t) => ({
+        names: [...new Set([t.name, t.clubPermanentName, t.clubPermanentAlias, t.abbreviatedName, t.editorialName].map(norm).filter(Boolean))],
+        url: t.images.crest,
+      }));
+      if (list.length) { offLeague.set(key, list); n += list.length; }
+    } catch (e) { console.warn(`[Emblemas] Euroliga ${c}${season}: ${e.message}`); }
+  }
+  return n;
 }
 
 const cache = new Map(); // "sport|nome" → { url, at }
@@ -230,6 +279,7 @@ function logo(sport, name, priority, league) {
   if (!name || OFF) return '';
   if (sport === 'esports') return esportsLogo(name, priority, league);
   if (sport === 'tennis') return ESPN_ON ? tennisLogo(name, priority) : '';
+  if (offLeague.has(league)) { const u = listLogo(offLeague.get(league), name); if (u) return u; }
   if (ESPN_ON) { const u = espnLogo(sport, name, league); if (u) return u; }
   if (!SPORT_NAME[sport]) return ''; // ténis: só ESPN
   const k = keyOf(sport, name), c = cache.get(k);
@@ -273,6 +323,9 @@ async function step() {
 let timers = null;
 async function start() {
   if (OFF || timers) return;
+  const el = await loadEuroleague(), sc = await loadSiteCrests();
+  console.log(`[Emblemas] Das próprias ligas: Euroliga/EuroCup ${el}, NBB/Liga Nacional ${sc}.`);
+  setInterval(loadEuroleague, 86400000); setInterval(loadSiteCrests, 86400000);
   if (ESPN_ON) {
     const n = await loadEspnTeams(); await loadEspnTennis();
     console.log(`[Emblemas] ESPN (só para teste): ${n} emblemas de equipas em ${espnLeague.size} ligas, ${espnPlayers.size} tenistas com bandeira.`);

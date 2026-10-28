@@ -49,6 +49,7 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .layout{display:grid;grid-template-columns:240px minmax(0,1fr) 330px;gap:14px;max-width:1500px;margin:0 auto;padding:14px 16px}
 .sidebar{position:sticky;top:74px;align-self:start;max-height:calc(100vh - 90px);overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px}
 .side-title{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);padding:12px 10px 6px;font-weight:700}
+.side-mobile{display:none}
 .side-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:8px 10px;border-radius:8px;color:#d3e8da;font-size:13px}
 .side-item:hover{background:var(--panel2)}
 .side-item.active{background:linear-gradient(90deg,rgba(255,204,31,.16),transparent);color:#fff;box-shadow:inset 3px 0 0 var(--yellow)}
@@ -302,6 +303,19 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .trk small{color:var(--muted);font-weight:500}
 .bet-foot{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:8px;border-top:1px solid var(--line);padding-top:8px}
 .bet-foot b{color:var(--text);font-size:13px}
+.bet-sum{display:block;width:100%;text-align:left;color:inherit;font:inherit;background:none;border:0;padding:0;cursor:pointer}
+.bet-fold .bet-head{margin-bottom:6px}
+.bet-fold.open .bet-head{margin-bottom:8px}
+.bet-fold .bet-status{margin-left:auto}
+.bet-chev{color:var(--muted);font-size:18px;line-height:1;transition:transform .15s}
+.bet-fold.open .bet-chev{transform:rotate(90deg)}
+.bet-dots{display:flex;flex-wrap:wrap;gap:5px;margin:2px 0 6px}
+.bet-dots i{width:10px;height:10px;border-radius:50%;background:#55606a}
+.bet-dots i.won{background:var(--green)}.bet-dots i.lost{background:var(--red)}.bet-dots i.void{background:#999;opacity:.6}
+.bet-pick{display:block;font-weight:600;font-size:13px;margin:2px 0 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bet-line{display:block;font-size:12px;color:var(--muted)}
+.bet-line b{color:var(--text)}
+.bet-fold .cashout-btn{margin-top:10px}
 .cashout-btn{width:100%;margin-top:10px;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font-weight:800;border-radius:8px;padding:10px}
 .cashout-btn.confirm{background:#ff9f1c}
 .cashout-btn:disabled{background:#4a4330;color:#9a8f6e;cursor:not-allowed}
@@ -358,6 +372,7 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 }
 @media (max-width:900px){
   .only-mobile{display:block}
+  .side-mobile{display:block}
   .topnav,.search{display:none}
   .topbar{gap:10px}
   .wallet{margin-left:auto}

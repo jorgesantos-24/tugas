@@ -13,7 +13,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 const S = {
   site: {}, // dados da empresa (/api/site): e-mail de suporte, CNPJ...
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
-  view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(),
+  view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(), betOpen: new Set(),
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
   acceptAnyLocal: lsGet('gl_acceptAny', true), streamHidden: lsGet('gl_streamHidden', false),
   user: null, bets: [], tx: [], payments: { live: false }, games: {},
@@ -1052,10 +1052,13 @@ function legGame(l, ev) {
     <div class="bg-sub">${sub}</div>${shootoutHtml(ev, true)}`;
 }
 
-function betCard(bet) {
-  const legs = bet.legs.map((l) => {
+const legCls = (l) => !l.result ? '' : l.result.includes('won') ? 'won' : l.result.includes('lost') ? 'lost' : 'void';
+// fold = página "Minhas apostas": o cartão começa fechado e abre com um toque (S.betOpen guarda os abertos)
+function betCard(bet, fold = false) {
+  const closed = fold && !S.betOpen.has(bet.id);
+  const legs = closed ? '' : bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
-    const cls = !l.result ? '' : l.result.includes('won') ? 'won' : l.result.includes('lost') ? 'lost' : 'void';
+    const cls = legCls(l);
     return `<div class="leg ${cls}">
       ${legGame(l, ev)}
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
@@ -1071,8 +1074,25 @@ function betCard(bet) {
     else if (co) action = `<button class="cashout-btn ${S.cashoutConfirm === bet.id ? 'confirm' : ''}" data-cashout="${bet.id}">${S.cashoutConfirm === bet.id ? `Confirmar Cash Out ${money(co)}` : `Cash Out ${money(co)}`}</button>`;
     else action = `<button class="cashout-btn" disabled>Cash Out indisponível</button>`;
   }
-  return `<div class="bet-card">
-    <div class="bet-head"><span class="bet-type">${bet.type === 'multiple' ? `Múltipla (${bet.legs.length})` : 'Simples'}</span><span class="bet-status st-${bet.status}">${ST_PT[bet.status]}</span></div>
+  const type = bet.type === 'multiple' ? `Múltipla (${bet.legs.length})` : 'Simples';
+  const status = `<span class="bet-status st-${bet.status}">${ST_PT[bet.status]}</span>`;
+  const when = new Date(bet.placedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  if (closed) {
+    const what = bet.type === 'multiple'
+      ? `<span class="bet-dots">${bet.legs.map((l) => `<i class="${legCls(l)}"></i>`).join('')}</span>`
+      : `<span class="bet-pick">${esc(bet.legs[0].name)} <span style="color:var(--yellow)">@${fmtOdd(bet.legs[0].odds)}</span></span>`;
+    return `<div class="bet-card bet-fold">
+      <button class="bet-sum" data-betopen="${bet.id}">
+        <span class="bet-head"><span class="bet-type">${type}</span>${status}<span class="bet-chev">›</span></span>
+        ${what}
+        <span class="bet-line">${money(bet.stake)} · odd ${fmtOdd(bet.odds)} → <b>${money(bet.status === 'open' ? bet.potential : bet.payout)}</b> · ${when}</span>
+      </button>
+      ${action}
+    </div>`;
+  }
+  return `<div class="bet-card${fold ? ' bet-fold open' : ''}">
+    ${fold ? `<button class="bet-sum" data-betopen="${bet.id}"><span class="bet-head"><span class="bet-type">${type}</span>${status}<span class="bet-chev">›</span></span></button>`
+      : `<div class="bet-head"><span class="bet-type">${type}</span>${status}</div>`}
     ${legs}
     <div class="bet-foot"><span>Aposta<br><b>${money(bet.stake)}</b></span><span style="text-align:center">Odd<br><b>${fmtOdd(bet.odds)}</b></span>
       <span style="text-align:right">${bet.status === 'open' ? 'Retorno potencial' : 'Retorno'}<br><b>${money(bet.status === 'open' ? bet.potential : bet.payout)}</b></span></div>
@@ -1090,7 +1110,7 @@ function renderMyBetsPage() {
   return `<div class="section-head"><h2>Minhas apostas</h2></div>
     <div class="tabs"><button class="${tab === 'open' ? 'active' : ''}" data-betstab="open">Abertas (${open.length})</button><button class="${tab === 'done' ? 'active' : ''}" data-betstab="done">Encerradas (${done.length})</button></div>
     ${tab === 'done' && done.length ? `<div class="banner" style="background:var(--panel)"><p class="muted">Total apostado <b style="color:#fff">${money(staked)}</b> · Total retornado <b style="color:#fff">${money(ret)}</b> · Resultado <b style="color:${ret - staked >= 0 ? 'var(--green)' : 'var(--red)'}">${money(ret - staked)}</b></p></div>` : ''}
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">${list.map(betCard).join('') || `<div class="empty-state" style="grid-column:1/-1">Nenhuma aposta ${tab === 'open' ? 'aberta' : 'encerrada'}.</div>`}</div>`;
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px">${list.map((b) => betCard(b, true)).join('') || `<div class="empty-state" style="grid-column:1/-1">Nenhuma aposta ${tab === 'open' ? 'aberta' : 'encerrada'}.</div>`}</div>`;
 }
 
 function renderSlip() {
@@ -1102,7 +1122,7 @@ function renderSlip() {
   const body = $('#slipBody');
   if (S.slipTab === 'open') {
     morph(body, !S.user ? `<div class="slip-empty"><div class="ic">🔐</div>Entre na sua conta para ver as apostas abertas.<br><br><button class="btn btn-green" data-action="login">Entrar</button></div>`
-      : open.length ? open.map(betCard).join('') : `<div class="slip-empty"><div class="ic">🎫</div>Você não tem apostas abertas.</div>`);
+      : open.length ? open.map((b) => betCard(b)).join('') : `<div class="slip-empty"><div class="ic">🎫</div>Você não tem apostas abertas.</div>`);
     tickClocks();
     return;
   }
@@ -1159,7 +1179,11 @@ function renderSidebar() {
   const evs = listed();
   const liveN = evs.filter((e) => e.state === 'in').length;
   const item = (view, label, cnt) => `<button class="side-item ${S.view === view ? 'active' : ''}" data-view="${view}">${label}<span class="cnt ${view === 'live' && cnt ? 'live' : ''}">${cnt ?? ''}</span></button>`;
-  let html = `<div class="side-title">Esportes</div>
+  // telemóvel: o menu do topo fica escondido, então "Minhas apostas" vem aqui
+  const openN = S.user ? S.bets.filter((b) => b.status === 'open').length : 0;
+  let html = `<div class="side-mobile"><div class="side-title">Minha conta</div>
+    ${item('mybets', '🎫 Minhas Apostas', openN || '')}</div>
+    <div class="side-title">Esportes</div>
     ${item('home', '🏠 Destaques', '')}
     ${item('live', '<span class="live-dot"></span> Ao Vivo', liveN)}`;
   html += `<div class="side-title">Modalidades</div>`;
@@ -1484,6 +1508,7 @@ async function openAccount(tab) {
       <div class="kv"><span>Nascimento</span><b>${new Date(u.birthdate + 'T00:00:00').toLocaleDateString('pt-BR')}</b></div>
       ${u.cpf ? `<div class="kv"><span>CPF</span><b>${esc(u.cpf)}</b></div>` : ''}
       <div class="kv"><span>Membro desde</span><b>${new Date(u.createdAt).toLocaleDateString('pt-BR')}</b></div>
+      <a class="acc-sac" href="/minhas-apostas" data-view="mybets"><span class="acc-sac-ic">🎫</span><span><b>Minhas apostas</b><small>Apostas abertas e histórico das encerradas</small></span><span class="acc-sac-go">›</span></a>
       <a class="acc-sac" href="/sac.html"><span class="acc-sac-ic">🎧</span><span><b>Atendimento (SAC)</b><small>Dúvidas sobre depósitos, saques e apostas</small></span><span class="acc-sac-go">›</span></a>
       <a class="acc-sac acc-sac-mail" href="mailto:${esc(S.site.supportEmail || 'suporte@tugasbet.com')}"><span class="acc-sac-ic">✉️</span><span><b>E-mail do suporte</b><small>${esc(S.site.supportEmail || 'suporte@tugasbet.com')}</small></span><span class="acc-sac-go">›</span></a>
       ${u.isAdmin ? '<a class="btn btn-ghost btn-block" style="margin-top:16px" href="/admin">Abrir o painel da equipe</a>' : ''}
@@ -1617,6 +1642,7 @@ document.addEventListener('click', async (e) => {
   if (d.chip) { depState.amount = +d.chip; if ($('#depCpf')) depState.cpf = $('#depCpf').value; openDeposit(); return; }
   if (d.method) { depState.amount = parseMoney($('#depAmount').value) || depState.amount; depState.method = d.method; openDeposit(); return; }
   if (d.betstab) { S.betsTab = d.betstab; renderMain(); return; }
+  if (d.betopen) { S.betOpen.has(d.betopen) ? S.betOpen.delete(d.betopen) : S.betOpen.add(d.betopen); S.keepScroll = true; renderMain(); return; }
   if (d.acctab) { e.preventDefault(); openAccount(d.acctab); return; }
   if (d.limit) {
     const val = d.clear ? null : (parseMoney($('#lim_' + d.limit).value) || null);
@@ -1648,7 +1674,7 @@ document.addEventListener('click', async (e) => {
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.action === 'stream-toggle') { S.streamHidden = !S.streamHidden; lsSet('gl_streamHidden', S.streamHidden); S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }
-  if (d.view) { e.preventDefault(); go(d.view); return; }
+  if (d.view) { e.preventDefault(); if ($('#modal').classList.contains('show')) closeModal(); go(d.view); return; }
   if (d.ev) { S.prevView = S.view === 'event' ? S.prevView : { view: S.view, league: S.league, sport: S.sport }; go('event', { eventId: d.ev }); return; }
   if (!d.action) return;
   if (t.tagName === 'A') e.preventDefault();
