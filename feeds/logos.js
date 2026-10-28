@@ -50,7 +50,7 @@ const ESPN_LEAGUE = {
   'eng.1': 'soccer/eng.1', 'eng.2': 'soccer/eng.2', 'eng.efl': 'soccer/eng.league_cup', 'esp.1': 'soccer/esp.1', 'esp.copa': 'soccer/esp.copa_del_rey',
   'ita.1': 'soccer/ita.1', 'ger.1': 'soccer/ger.1', 'ger.copa': 'soccer/ger.dfb_pokal', 'fra.1': 'soccer/fra.1', 'por.1': 'soccer/por.1',
   'ned.1': 'soccer/ned.1', 'tur.1': 'soccer/tur.1', 'sau.1': 'soccer/ksa.1', 'arg.1': 'soccer/arg.1', 'mex.1': 'soccer/mex.1', 'usa.1': 'soccer/usa.1',
-  nba: 'basketball/nba', ncaab: 'basketball/mens-college-basketball', nhl: 'hockey/nhl',
+  nba: 'basketball/nba', wnba: 'basketball/wnba', ncaab: 'basketball/mens-college-basketball', nhl: 'hockey/nhl',
 };
 const espnLeague = new Map(); // liga do site → [{ names: [...], url }]
 const espnPlayers = new Map(); // nome do tenista (normalizado) → { id, flag } (torneios ATP/WTA da semana)

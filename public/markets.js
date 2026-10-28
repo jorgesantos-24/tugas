@@ -48,6 +48,13 @@ const LEAGUES = [
   ['Basketball Champions League', 'bcl', 'Basketball Champions League', 'Europa'],
   ['Brazil NBB', 'nbb', 'NBB', 'Brasil'],
   ['Argentina Liga Nacional', 'arg.lnb', 'Liga Nacional', 'Argentina'],
+  ['WNBA', 'wnba', 'WNBA', 'EUA'],
+  ['China CBA', 'chn.cba', 'CBA', 'China'],
+  ['Spain Liga ACB', 'esp.acb', 'Liga ACB', 'Espanha'],
+  ['Germany Bundesliga', 'ger.bbl', 'Bundesliga', 'Alemanha'],
+  ['France Ligue A', 'fra.lnb', 'Ligue A', 'França'],
+  ['Italy Lega 1', 'ita.lba', 'Serie A', 'Itália'],
+  ['Australia NBL', 'aus.nbl', 'NBL', 'Austrália'],
 ].map(([src, key, name, country]) => ({ src, key, name, country, sport: 'basketball' }))).concat([
   [/^ATP /, 'atp', 'ATP', 'Masculino'],
   [/^WTA /, 'wta', 'WTA', 'Feminino'],
