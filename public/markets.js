@@ -61,7 +61,7 @@ const LEAGUES = [
   ['Swedish Hockey League', 'shl', 'SHL', 'Suécia'],
   ['Finland SM Liiga', 'liiga', 'Liiga', 'Finlândia'],
   ['Switzerland NLA', 'nla', 'National League', 'Suíça'],
-  ['Czechia Extraliga', 'cze.hockey', 'Extraliga', 'Chéquia'],
+  ['Czechia Extraliga', 'cze.hockey', 'Extraliga', 'Tchéquia'],
   ['Germany Eishockey Liga', 'del', 'DEL', 'Alemanha'],
 ].map(([src, key, name, country]) => ({ src, key, name, country, sport: 'hockey' }))).concat([
   // e-Sports: um campeonato por jogo; cada torneio fica a seguir ao seu jogo (como no ténis)

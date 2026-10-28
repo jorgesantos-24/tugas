@@ -40,6 +40,55 @@ const dateLabel = (d) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const initials = (n) => String(n || '?').trim().split(/\s+/).map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 
+/* Atualiza um bloco da página mudando só o que mudou (em vez de apagar e desenhar tudo de novo).
+   Com innerHTML a cada atualização das odds: as filas laterais voltavam ao início, os emblemas recarregavam
+   (tudo piscava), no telemóvel a página saltava e o relógio alternava "60'" / "60:01".
+   Cada jogo/odd/bloco é reconhecido pelo id, data-ev ou data-key (mesmo que a lista mude de ordem).
+   Não mexe: no texto dos relógios (o contador é que os atualiza), no valor de um campo a ser escrito,
+   nem numa transmissão (iframe/vídeo) com o mesmo endereço. */
+const morphKey = (n) => (n.nodeType === 1 ? n.id || n.getAttribute('data-ev') || n.getAttribute('data-key') || '' : '');
+const sameKind = (a, b) => a.nodeType === b.nodeType && (a.nodeType !== 1 || a.tagName === b.tagName);
+function morphAttrs(a, b) {
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name)) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) {
+    if (a.getAttribute(name) === value) continue;
+    if (name === 'value' && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a === document.activeElement) continue;
+    a.setAttribute(name, value);
+    if (name === 'value' && 'value' in a) a.value = value;
+  }
+}
+function morphNode(a, b) {
+  if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  const clock = a.classList.contains('kclk') && a.dataset.t0 === b.dataset.t0 && a.dataset.s === b.dataset.s;
+  morphAttrs(a, b);
+  if (clock || a.tagName === 'IFRAME' || a.tagName === 'VIDEO') return;
+  morphChildren(a, b);
+}
+function morphChildren(from, to) {
+  const old = [...from.childNodes], keyed = new Map(), loose = [];
+  for (const n of old) { const k = morphKey(n); if (k && !keyed.has(k)) keyed.set(k, n); else loose.push(n); }
+  const used = new Set();
+  let li = 0, ref = from.firstChild;
+  for (const nn of [...to.childNodes]) {
+    const k = morphKey(nn);
+    let m = null;
+    if (k) { const o = keyed.get(k); if (o && !used.has(o) && sameKind(o, nn)) m = o; }
+    else { while (li < loose.length && used.has(loose[li])) li++; const o = loose[li]; if (o && sameKind(o, nn) && !morphKey(o)) { m = o; li++; } }
+    while (ref && used.has(ref)) ref = ref.nextSibling;
+    if (m) { used.add(m); morphNode(m, nn); if (m === ref) ref = ref.nextSibling; else from.insertBefore(m, ref); }
+    else from.insertBefore(nn, ref);
+  }
+  for (const n of old) if (!used.has(n) && n.parentNode === from) from.removeChild(n);
+}
+function morph(el, html) {
+  const t = document.createElement('template');
+  t.innerHTML = html;
+  morphChildren(el, t.content);
+}
+// emblemas que não carregaram: ficam com as iniciais (não se volta a tentar a cada atualização)
+const badLogos = new Set();
+window.badLogo = (img) => { badLogos.add(img.getAttribute('src')); img.outerHTML = `<i class="crest">${esc(img.dataset.ini || '?')}</i>`; };
+
 function toast(msg, kind = '') {
   const el = document.createElement('div');
   el.className = 'toast ' + kind; el.textContent = msg;
@@ -173,7 +222,7 @@ function mergeLight(full, light) {
 }
 // redesenho pelo tempo real: junta as atualizações (no máximo 1x/s) e espera que a pessoa pare de deslizar o ecrã
 let paintT = 0, lastPaint = 0, lastScroll = 0;
-addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true });
+addEventListener('scroll', () => { lastScroll = Date.now(); }, { passive: true, capture: true }); // capture: apanha também as filas laterais
 addEventListener('touchmove', () => { lastScroll = Date.now(); }, { passive: true });
 function schedulePaint() {
   if (paintT) return;
@@ -387,7 +436,8 @@ const mmss = (secs) => { secs = Math.max(0, Math.floor(secs)); return `${String(
 function clockHtml(ev, fallback = '') {
   const txt = esc(ev.clock || fallback);
   if (!SOCCER_CLOCK(ev)) return txt;
-  return ev.clockT0 ? `<span class="kclk" data-t0="${ev.clockT0}">${txt}</span>` : `<span class="kclk" data-s="${ev.clockSecs}">${txt}</span>`;
+  const now = ev.clockT0 ? mmss((Date.now() - ev.clockT0) / 1000) : mmss(Number(ev.clockSecs));
+  return ev.clockT0 ? `<span class="kclk" data-t0="${ev.clockT0}">${now}</span>` : `<span class="kclk" data-s="${ev.clockSecs}">${now}</span>`;
 }
 function tickClocks() {
   const t = Date.now();
@@ -408,7 +458,7 @@ function timeCell(ev) {
 
 // emblema da equipa; sem emblema, as iniciais num círculo (se a imagem falhar, também)
 const crestText = (t) => initials(String(t.short || t.name || '').replace(/[^\p{L}\p{N} ]/gu, '')) || '?'; // só letras/números (vai dentro do onerror)
-const crest = (t) => (t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.outerHTML='<i class=crest>${crestText(t)}</i>'">` : `<i class="crest">${crestText(t)}</i>`);
+const crest = (t) => (t.logo && !badLogos.has(t.logo) ? `<img src="${esc(t.logo)}" alt="" loading="lazy" data-ini="${esc(crestText(t))}" onerror="badLogo(this)">` : `<i class="crest">${crestText(t)}</i>`);
 function teamLine(t, ev, other) {
   const showScore = ev.state !== 'pre' && t.score != null;
   const won = ev.state === 'post' && showScore && t.score > other.score;
@@ -559,11 +609,13 @@ document.addEventListener('touchend', (e) => {
 
 function heroCard(ev) {
   const sels = mainSels(ev, selections(ev)).filter(Boolean);
+  const live = ev.state === 'in';
+  const when = live ? `<span class="live-dot"></span>${clockHtml(ev)}` : `<span style="color:var(--muted)">${esc(dateLabel(ev.date))}</span>`;
   return `<div class="hero-card" data-ev="${ev.id}">
-    <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center"><span class="live-dot"></span>${clockHtml(ev)}</span></div>
+    <div class="hero-top"><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)}${ev.stream ? ' <span class="tv" title="Com transmissão">📺</span>' : ''}</span><span style="color:var(--red);font-weight:700;display:flex;gap:5px;align-items:center">${when}</span></div>
     <div class="hero-teams">
       <div class="hero-team">${crest(ev.home)}${esc(ev.home.short)}</div>
-      <div class="hero-score">${ev.home.score ?? 0}:${ev.away.score ?? 0}</div>
+      <div class="hero-score">${live ? `${ev.home.score ?? 0}:${ev.away.score ?? 0}` : '<small style="color:var(--muted)">x</small>'}</div>
       <div class="hero-team">${crest(ev.away)}${esc(ev.away.short)}</div>
     </div>
     <div class="hero-odds">${sels.length ? sels.map((s) => oddBtn(s, ev)).join('') : '<span class="muted" style="font-size:12px">Mercados suspensos</span>'}</div>
@@ -687,6 +739,7 @@ function renderMain() {
       };
       const list = filtered(preds[v]);
       if (v === 'live' || v === 'all') html += sportTabs();
+      if (v === 'sport' || v === 'league') html += sportTop(v === 'sport' ? (e) => e.sport === S.sport : (e) => e.league === S.league);
       html += `<div class="section-head">${v === 'live' ? '<span class="live-dot"></span>' : ''}<h2>${esc(titles[v])}</h2><span class="muted">${list.length} eventos</span></div>`;
       if (v === 'league') {
         const lv = list.filter((e) => e.state === 'in'), pre = list.filter((e) => e.state === 'pre'), post = list.filter((e) => e.state === 'post');
@@ -701,27 +754,34 @@ function renderMain() {
   }
   // nada mudou: não mexe na página (evita que as imagens pisquem a cada atualização)
   if (html === S.lastMainHtml && main.firstChild) { S.keepScroll = true; return; }
+  // página diferente (outra vista/jogo): desenha de novo; a mesma página: muda só o que mudou (filas laterais,
+  // emblemas, transmissão e posição ficam como estão — antes tudo era recriado a cada atualização e piscava)
+  const pageKey = `${S.view}|${S.eventId || ''}|${S.league || ''}|${S.sport || ''}`;
+  if (S.mainPage !== pageKey || !main.firstChild) { main.innerHTML = html; S.mainPage = pageKey; }
+  else morph(main, html);
   S.lastMainHtml = html;
-  // reaproveita o bloco do cassino já carregado (as imagens não piscam e a posição da fila mantém-se)
-  const oldCasino = main.querySelector('#homeCasino');
-  const rowScroll = oldCasino ? oldCasino.querySelector('.cg-row').scrollLeft : 0;
-  // mesma transmissão já na página: troca só o que está à volta do player (o vídeo continua a tocar)
-  const box = main.querySelector('#streamBox'), a = html.indexOf(STREAM_A), b = html.indexOf(STREAM_B);
-  if (box && a >= 0 && b > a && html.includes(`data-src="${esc(box.dataset.src)}"`)) {
-    for (const n of [...main.childNodes]) if (n !== box) n.remove();
-    box.insertAdjacentHTML('beforebegin', html.slice(0, a));
-    box.insertAdjacentHTML('afterend', html.slice(b + STREAM_B.length));
-  } else main.innerHTML = html;
   tickClocks();
   if (moreObs) { moreObs.disconnect(); const mb = main.querySelector('.more-games'); if (mb) moreObs.observe(mb); }
-  const newCasino = main.querySelector('#homeCasino');
-  if (oldCasino && newCasino && oldCasino.dataset.key === newCasino.dataset.key) {
-    newCasino.replaceWith(oldCasino);
-    oldCasino.querySelector('.cg-row').scrollLeft = rowScroll; // o navegador perde o deslize ao recolocar o bloco
-  }
   heroShow(S.heroIdx || 0, true);
   // a posição mantém-se sozinha; repô-la com scrollTo interrompia o deslize do dedo no telemóvel
   S.keepScroll = true;
+}
+
+/* topo de cada modalidade/liga, como na página inicial: transmissões, jogos ao vivo a deslizar (ou, sem jogos ao vivo,
+   os mais importantes a seguir: ligas principais primeiro, por hora) */
+function sportTop(pred) {
+  const pool = filtered((e) => pred(e) && e.state !== 'post' && !e.outright);
+  const order = (a, b) => (LEAGUE_BY_KEY[a.league]?.order ?? 999) - (LEAGUE_BY_KEY[b.league]?.order ?? 999) || a.date - b.date;
+  let out = '';
+  const tv = pool.filter((e) => e.stream).sort(order).slice(0, 10);
+  if (tv.length) out += `<div class="section-head"><h2>📺 Assistir ao vivo</h2><span class="muted">${tv.length} com transmissão</span></div><div class="hero">${tv.map(heroCard).join('')}</div>`;
+  const live = pool.filter((e) => e.state === 'in' && (e.markets || e.cm) && !e.stream).sort(order).slice(0, 10);
+  if (live.length) out += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${pool.filter((e) => e.state === 'in').length} eventos</span></div><div class="hero">${live.map(heroCard).join('')}</div>`;
+  else {
+    const next = pool.filter((e) => e.state === 'pre' && (e.markets || e.cm) && !isSuspended(e) && e.date - Date.now() < 36 * 3600000).sort(order).slice(0, 10);
+    if (next.length) out += `<div class="section-head"><h2>⭐ Jogos em destaque</h2></div><div class="hero">${next.map(heroCard).join('')}</div>`;
+  }
+  return out;
 }
 
 // totais e handicaps dos mercados automáticos: uma linha por fila (Mais | Menos, ou casa | fora)
@@ -1027,8 +1087,9 @@ function renderSlip() {
   document.querySelectorAll('.slip-tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === S.slipTab));
   const body = $('#slipBody');
   if (S.slipTab === 'open') {
-    body.innerHTML = !S.user ? `<div class="slip-empty"><div class="ic">🔐</div>Entre na sua conta para ver as apostas abertas.<br><br><button class="btn btn-green" data-action="login">Entrar</button></div>`
-      : open.length ? open.map(betCard).join('') : `<div class="slip-empty"><div class="ic">🎫</div>Você não tem apostas abertas.</div>`;
+    morph(body, !S.user ? `<div class="slip-empty"><div class="ic">🔐</div>Entre na sua conta para ver as apostas abertas.<br><br><button class="btn btn-green" data-action="login">Entrar</button></div>`
+      : open.length ? open.map(betCard).join('') : `<div class="slip-empty"><div class="ic">🎫</div>Você não tem apostas abertas.</div>`);
+    tickClocks();
     return;
   }
   if (!S.slip.length) {
@@ -1075,7 +1136,7 @@ function renderSlip() {
   const label = !S.user ? 'Entrar para apostar' : S.placing ? (live ? `Aprovando aposta ao vivo (até ${liveWait(items.map((i) => i.ev))}s)...` : 'Processando...') : `Apostar ${money(totalStake)}`;
   html += `<button class="btn btn-green btn-block" data-action="place" ${S.placing ? 'disabled' : ''}>${label}</button>
     <button class="clear-link" data-action="clear">Limpar boletim</button>`;
-  body.innerHTML = html;
+  morph(body, html); // muda só o que mudou (o relógio e os valores escritos não piscam)
   tickClocks();
 }
 
@@ -1100,29 +1161,38 @@ function renderSidebar() {
     if (!open) continue;
     html += `<div class="side-leagues${S.sideAnim === sk ? ' anim' : ''}">`;
     if (lgs.length > 1) html += `<button class="side-item ${S.view === 'sport' && S.sport === sk ? 'active' : ''}" data-sport="${sk}">Todos<span class="cnt">${sCnt}</span></button>`;
-    let circuit = null;
-    const byCountry = sk === 'soccer' && lgs.some((l) => l.dyn); // futebol: países que abrem e fecham
-    if (byCountry && !lgs[0].dyn) html += `<div class="side-sub">Principais</div>`;
-    if (byCountry && S.view === 'league' && LEAGUE_BY_KEY[S.league]?.dyn) S.openCountries.add(LEAGUE_BY_KEY[S.league].country); // a liga aberta mostra o seu país
-    for (const l of lgs) {
-      if (byCountry && l.dyn) {
-        if (l.country !== circuit) {
-          circuit = l.country;
-          if (circuit !== null && !html.includes('data-countries-title')) html += `<div class="side-sub" data-countries-title>Países</div>`;
-          const cl = lgs.filter((x) => x.dyn && x.country === circuit).map((x) => x.key);
-          const ce = evs.filter((e) => cl.includes(e.league) && e.state !== 'post');
-          const clive = ce.filter((e) => e.state === 'in').length;
-          const op = S.openCountries.has(circuit);
-          html += `<button class="side-item side-country ${op ? 'open' : ''}" data-togglecountry="${esc(circuit)}">${esc(circuit)}<span class="cnt ${clive ? 'live' : ''}">${clive ? '● ' + clive : ce.length}</span><span class="chev">›</span></button>`;
-        }
-        if (!S.openCountries.has(l.country)) continue;
-      } else if (l.dyn && l.country !== circuit) {
-        // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
-        circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`;
-      }
+    const lgBtn = (l, extra = '') => {
       const le = evs.filter((e) => e.league === l.key);
       const lv = le.filter((e) => e.state === 'in').length;
-      html += `<button class="side-item ${byCountry && l.dyn ? 'side-cl ' : ''}${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
+      return `<button class="side-item ${extra}${S.view === 'league' && S.league === l.key ? 'active' : ''}" data-league="${l.key}">${esc(l.name)}<span class="cnt ${lv ? 'live' : ''}">${lv ? '● ' + lv : le.filter((e) => e.state !== 'post').length}</span></button>`;
+    };
+    const byCountry = sk === 'soccer' && lgs.some((l) => l.dyn); // futebol: países que abrem e fecham
+    if (byCountry) {
+      // "Principais" no topo; e cada país mostra TODAS as suas ligas (as principais primeiro, depois as outras)
+      const ALIAS = { EUA: 'Estados Unidos', Europa: 'Internacional', 'América do Sul': 'Internacional' };
+      const ctry = (l) => ALIAS[l.country] || l.country || 'Outros';
+      const main = lgs.filter((l) => !l.dyn);
+      if (main.length) html += `<div class="side-sub">Principais</div>` + main.map((l) => lgBtn(l)).join('');
+      if (S.view === 'league' && LEAGUE_BY_KEY[S.league]?.dyn) S.openCountries.add(ctry(LEAGUE_BY_KEY[S.league])); // a liga aberta mostra o seu país
+      const countries = [...new Set(lgs.map(ctry))].sort((a, b) => (a === 'Outros') - (b === 'Outros') || (a === 'Internacional' ? -1 : b === 'Internacional' ? 1 : a.localeCompare(b, 'pt-BR')));
+      html += `<div class="side-sub" data-countries-title>Países</div>`;
+      for (const c of countries) {
+        const cl = lgs.filter((l) => ctry(l) === c).sort((a, b) => (a.dyn ? 1 : 0) - (b.dyn ? 1 : 0) || (a.dyn && b.dyn ? a.name.localeCompare(b.name, 'pt-BR') : 0));
+        const ce = evs.filter((e) => cl.some((l) => l.key === e.league) && e.state !== 'post');
+        const clive = ce.filter((e) => e.state === 'in').length;
+        const op = S.openCountries.has(c);
+        html += `<button class="side-item side-country ${op ? 'open' : ''}" data-togglecountry="${esc(c)}">${esc(c)}<span class="cnt ${clive ? 'live' : ''}">${clive ? '● ' + clive : ce.length}</span><span class="chev">›</span></button>`;
+        if (op) html += cl.map((l) => lgBtn(l, 'side-cl ')).join('');
+      }
+    } else {
+      let circuit = null;
+      for (const l of lgs) {
+        if (l.dyn && l.country !== circuit) {
+          // ténis: um título por circuito (ATP, WTA, Challenger, ITF) antes dos seus torneios
+          circuit = l.country; html += `<div class="side-sub">${esc(circuit)}</div>`;
+        }
+        html += lgBtn(l);
+      }
     }
     html += `</div>`;
   }
@@ -1134,7 +1204,7 @@ function renderSidebar() {
   S.sideAnim = null;
   // só mexe no menu se mudou (redesenhar a cada atualização fazia-o piscar e perder a posição)
   const sb = $('#sidebar');
-  if (sb.dataset.html !== html) { const top = sb.scrollTop; sb.innerHTML = html; sb.dataset.html = html; sb.scrollTop = top; }
+  if (sb.dataset.html !== html) { morph(sb, html); sb.dataset.html = html; }
   $('#liveCountNav').textContent = liveN;
   $('#liveCountBn').textContent = liveN > 99 ? '99+' : liveN || '';
   document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.view === S.view || (a.dataset.view === 'home' && !['live', 'mybets', 'casino'].includes(S.view))));
