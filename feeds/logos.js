@@ -56,7 +56,7 @@ const espnLeague = new Map(); // liga do site → [{ names: [...], url }]
 const espnPlayers = new Map(); // nome do tenista (normalizado) → { id, flag } (torneios ATP/WTA da semana)
 const espnSurnames = new Map(); // apelido → bandeira (null se dois jogadores tiverem o mesmo apelido)
 // nomes da bet365 que a ESPN escreve de outra forma (já normalizados)
-const ALIAS = { 'miami florida': 'miami hurricanes', olympiakos: 'olympiacos piraeus', 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
+const ALIAS = { 'miami florida': 'miami hurricanes', olympiakos: 'olympiacos piraeus', 'forca lleida': 'ilerna lleida', 'baskets wuerzburg': 'wurzburg', 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
 const teamNames = (t) => [t.displayName, t.shortDisplayName, t.name, t.location, t.nickname].map(norm).filter(Boolean);
 async function espnGet(p) {
   const r = await fetch(ESPN + p, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
@@ -102,18 +102,19 @@ function espnLogo(sport, name, league) {
   const list = espnLeague.get(league);
   return list ? listLogo(list, name) : '';
 }
-function listLogo(list, name) {
+// strict: sem o "contém" (lista de outra liga: "Strasbourg" contém "Bourg")
+function listLogo(list, name, strict = false) {
   const qs = [norm(expand(name)), norm(name)].filter(Boolean);
   for (const q of [...qs]) if (ALIAS[q]) qs.push(ALIAS[q]);
   // "Sport Recife" perde a palavra "sport" ao normalizar: usa também o nome sem normalizar as siglas de clube
   qs.push(String(name).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
   const exact = list.find((t) => qs.some((q) => t.names.includes(q)));
   if (exact) return exact.url;
-  const near = list.filter((t) => qs.some((q) => q.length >= 4 && t.names.some((n) => n.length >= 4 && (n.includes(q) || q.includes(n)))));
+  const near = strict ? [] : list.filter((t) => qs.some((q) => q.length >= 4 && t.names.some((n) => n.length >= 4 && (n.includes(q) || q.includes(n)))));
   if (near.length === 1) return near[0].url;
   if (near.length) return ''; // dois parecidos na mesma liga: não arrisca
   // patrocinador no meio do nome ("Maccabi Tel Aviv" ~ "Maccabi Rapyd Tel Aviv"): todas as palavras da bet365 no nome
-  const words = list.filter((t) => qs.some((q) => q.includes(' ') && t.names.some((n) => q.split(' ').every((w) => n.split(' ').includes(w)))));
+  const words = list.filter((t) => qs.some((q) => (q.includes(' ') || strict) && q.length >= 4 && t.names.some((n) => q.split(' ').every((w) => n.split(' ').includes(w)))));
   return words.length === 1 ? words[0].url : '';
 }
 
@@ -121,14 +122,40 @@ function listLogo(list, name) {
    Euroliga e EuroCup: API oficial (api-live.euroleague.net). NBB (lnb.com.br) e Liga Nacional da Argentina
    (laliganacional.com.ar): a lista de equipas das páginas oficiais. Um pedido por liga ao arrancar e 1x/dia. */
 const EL_COMP = { euroleague: 'E', eurocup: 'U' };
+const EURO_DOMESTIC = new Set(['fra.lnb', 'esp.acb', 'ger.bbl', 'ita.lba']);
 const offLeague = new Map(); // liga do site → [{ names, url }]
+const IMG_RE = /<img\b[^>]*>/gi;
+const attr = (tag, a) => { const m = new RegExp(`\\s${a}="([^"]*)"`, 'i').exec(tag); return m ? m[1].replace(/&amp;/g, '&') : ''; };
 const unent = (s) => String(s).replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).replace(/&amp;/g, '&');
 const SITE_CRESTS = {
   // <a href=".../equipes/basket-osasco/"><img src="..."> Basket Osasco</a>
   nbb: { url: 'https://lnb.com.br/nbb/equipes/', re: /<a href="https:\/\/lnb\.com\.br\/equipes\/([^"/]+)\/?">\s*<img src="([^"]+)"[^>]*>\s*([^<]+?)\s*<\/a>/g, pick: (m) => ({ img: /[^\x21-\x7e]/.test(m[2]) ? encodeURI(m[2]) : m[2], names: [m[3], m[1].replace(/-/g, ' ')] }) }, // "Sâo-José-….png"
   // <a href="/laliga/equipo/19/114735/boca/inicio"><img src="/escudos/19/114735" title="=BOCA" />; "(C)", "(CR)" = cidade
   'arg.lnb': { url: 'https://www.laliganacional.com.ar/', re: /<a href="\/laliga\/equipo\/\d+\/\d+\/([^/"]+)\/[^"]*">\s*<img src="(\/escudos\/[^"]+)"[^>]*title="=([^"]+)"/g, pick: (m) => ({ img: 'https://www.laliganacional.com.ar' + m[2], names: [unent(m[3]).replace(/\s*\([^)]*\)\s*$/, ''), m[1].replace(/-/g, ' ')] }) },
+  // as outras: cada <img> do menu de equipas da página inicial (pick devolve null para as que não são emblemas)
+  // ACB: <img alt="Asisa Joventut logo" class="MainNavbarTeams…" src="https://static.acb.com/…">
+  'esp.acb': { url: 'https://www.acb.com/', re: IMG_RE, pick: (m) => /mainNavbarTeams/.test(m[0]) && / logo$/.test(attr(m[0], 'alt')) ? { img: attr(m[0], 'src'), names: [attr(m[0], 'alt').replace(/ logo$/, '')] } : null },
+  // BBL: <img alt="ALBA BERLIN logo" data-tooltip-content="Berlin" srcSet="/_next/image?url=https%3A%2F%2Fapi.basketball-bundesliga.de%2Fimages%2Fteams…">
+  'ger.bbl': { url: 'https://www.easycredit-bbl.de/', re: IMG_RE, pick: (m) => {
+    const u = /url=([^&"]+)/.exec(attr(m[0], 'srcSet') || attr(m[0], 'src'));
+    return u && /images%2Fteams/.test(u[1]) && / logo$/.test(attr(m[0], 'alt')) ? { img: decodeURIComponent(u[1]), names: [attr(m[0], 'alt').replace(/ logo$/, ''), attr(m[0], 'data-tooltip-content')] } : null;
+  } },
+  // LBA: <img alt="Openjobmetis Varese" src="https://lba-media.s3…"> — a página tem também notícias e patrocinadores com a mesma forma
+  'ita.lba': { url: 'https://www.legabasket.it/', re: IMG_RE, pick: (m) => {
+    const alt = unent(attr(m[0], 'alt'));
+    return /lba-media/.test(attr(m[0], 'src')) && alt && alt.length <= 40 && !/[:,"!?]| - |^news$/i.test(alt) ? { img: attr(m[0], 'src'), names: [alt] } : null;
+  } },
+  // NBL: o nome vem só no ficheiro (".../64a8…_Adelaide%2036ers.svg", "bnz.webp", "per-light.avif")
+  'aus.nbl': { url: 'https://nbl.com.au/', re: IMG_RE, pick: (m) => {
+    const src = attr(m[0], 'src');
+    if (!/xs-logo/.test(attr(m[0], 'class')) || !/website-files/.test(src)) return null;
+    const f = decodeURIComponent(src.split('/').pop()).replace(/^([0-9a-f]{24}_)+/, '').replace(/\.(svg|png|webp|avif)$/i, '').replace(/(_POS|_NEG|-light|-dark| logo)$/i, '').replace(/[-_]/g, ' ').trim().toLowerCase();
+    const name = NBL_FILE[f] || f;
+    return /^[0-9a-f]{32}$|3x3|next stars|nbl one|wnbl/.test(name) ? null : { img: src, names: [name] };
+  } },
 };
+// ficheiros da NBL com nome abreviado (só se usa o primeiro emblema de cada um: o "-light" vem antes do "-dark")
+const NBL_FILE = { bnz: 'new zealand breakers', mlb: 'melbourne united', per: 'perth wildcats', cairns: 'cairns taipans', 'tas jackjumpers': 'tasmania jackjumpers' };
 async function loadSiteCrests() {
   let n = 0;
   for (const [key, s] of Object.entries(SITE_CRESTS)) {
@@ -136,7 +163,7 @@ async function loadSiteCrests() {
       const r = await fetch(s.url, { headers: { 'user-agent': 'Mozilla/5.0 (TUGAS emblemas)' }, signal: AbortSignal.timeout(20000) });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const seen = new Map();
-      for (const m of (await r.text()).matchAll(s.re)) { const t = s.pick(m); if (!seen.has(t.img)) seen.set(t.img, { names: [...new Set(t.names.map(norm).filter(Boolean))], url: t.img }); }
+      for (const m of (await r.text()).matchAll(s.re)) { const t = s.pick(m); if (t?.img && !seen.has(t.img)) seen.set(t.img, { names: [...new Set(t.names.map(norm).filter(Boolean))], url: t.img }); }
       if (seen.size) { offLeague.set(key, [...seen.values()]); n += seen.size; }
       else console.warn(`[Emblemas] ${s.url}: nenhuma equipa encontrada (a página mudou?)`);
     } catch (e) { console.warn(`[Emblemas] ${s.url}: ${e.message}`); }
@@ -280,6 +307,8 @@ function logo(sport, name, priority, league) {
   if (sport === 'esports') return esportsLogo(name, priority, league);
   if (sport === 'tennis') return ESPN_ON ? tennisLogo(name, priority) : '';
   if (offLeague.has(league)) { const u = listLogo(offLeague.get(league), name); if (u) return u; }
+  // ligas europeias: as equipas que também jogam a Euroliga/EuroCup (a liga francesa não tem lista própria)
+  if (EURO_DOMESTIC.has(league)) for (const k of ['euroleague', 'eurocup']) { const u = offLeague.has(k) && listLogo(offLeague.get(k), name, true); if (u) return u; }
   if (ESPN_ON) { const u = espnLogo(sport, name, league); if (u) return u; }
   if (!SPORT_NAME[sport]) return ''; // ténis: só ESPN
   const k = keyOf(sport, name), c = cache.get(k);
