@@ -678,6 +678,11 @@ function legRaw(E, q) {
   return l;
 }
 
+/* uma seleção por mercado (como na bet365): duas do mesmo mercado ou não podem acontecer juntas ou são outra
+   seleção disfarçada (dupla chance "Casa ou empate" + "Fora ou empate" = só o empate, que o modelo pagava acima da odd
+   do próprio empate). Jogadores ficam de fora: dois marcadores ou dois amarelos diferentes juntam-se. */
+const sameMarket = (a, b) => a.mk === b.mk && !a.pl && !b.pl;
+
 /* preço de uma combinação do mesmo jogo.
    legs: [{ q (cotação da bet365), odds (odd mostrada) }] → { odds, params } ou { reason } */
 function quote(E, items) {
@@ -689,6 +694,8 @@ function quote(E, items) {
     if (!l) return { reason: `"${it.name}" não entra no Criar aposta`, bad: it.key };
     const p1 = joint(E, [l]);
     if (!p1 || Math.abs(Math.log(oddOf(p1) * EXTRA / it.odds)) > Math.log(1 + CHECK) + 0.15) return { reason: `"${it.name}" não entra no Criar aposta`, bad: it.key };
+    const twin = legs.findIndex((x) => sameMarket(x, l));
+    if (twin >= 0) return { reason: `"${items[twin].name}" e "${it.name}" são do mesmo mercado`, bad: it.key };
     legs.push(l);
   }
   const p = joint(E, legs);
@@ -722,7 +729,7 @@ function preview(E, items, cands) {
     out[c.key] = 0;
     if (items.length >= MAX_LEGS) continue;
     const l = c.q && legFor(E, c.q);
-    if (!l) continue;
+    if (!l || legs.some((x) => sameMarket(x, l))) continue;
     if (!single.has(c.q)) single.set(c.q, joint(E, [l]));
     const p1 = single.get(c.q);
     if (!p1 || Math.abs(Math.log(oddOf(p1) * EXTRA / c.odds)) > Math.log(1 + CHECK) + 0.15) continue;
