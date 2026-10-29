@@ -747,6 +747,20 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
     check(!run(rb, 'b8') && !rb.result, 'basquete na hora: rebotes só da MoviOdds → espera pela ESPN');
     eb = ebP(21, 10);
     check(run(rb, 'b8') && rb.value === 1, 'basquete na hora: as duas com 10 rebotes → ganha');
+    // pontos: só a MoviOdds, se os pontos dos jogadores somarem o placar ao vivo
+    eb = null; mv = mvP(21, 4); ev.home.score = 21; ev.away.score = 0;
+    const p1 = L('20#home#Austin Reaves'), p1u = L('u20#home#Austin Reaves');
+    check(run(p1, 'b9') && p1.value === 1, 'basquete na hora: pontos batem com o placar → ganha sem a ESPN');
+    check(run(p1u, 'b10') && p1u.value === -1, 'basquete na hora: pontos batem com o placar → "menos de" perde');
+    ev.home.score = 23;
+    const p2 = L('20#home#Austin Reaves');
+    check(!run(p2, 'b11') && !p2.result, 'basquete na hora: pontos não somam o placar → espera pela ESPN');
+    ev.home.score = 21;
+    const p3 = L('20#home#Austin Reaves'); E.check('b12', p3); T += 10000; E.check('b12', p3);
+    check(!p3.result, 'basquete na hora: pontos com menos de 20 s → ainda não');
+    T += 15000; check(E.check('b12', p3) && p3.value === 1, 'basquete na hora: pontos com 20 s estáveis → paga');
+    const pa = L('20#home#Austin Reaves', 'pra');
+    check(!run(pa, 'b13') && !pa.result, 'basquete na hora: combinado com rebotes/assistências precisa da ESPN');
   }
 }
 

@@ -148,17 +148,24 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
   }
 
   /* ---- basquete: jogador passou a linha ("N ou mais" ganha, "menos de N" perde, duplo/triplo-duplo feito) ----
-     Só com DUAS fontes de acordo: o box score ao vivo da MoviOdds e o da ESPN (a MoviOdds sozinha erra rebotes e
-     assistências). As estatísticas só sobem, por isso passar a linha decide; o resto (e quem não jogou) fica para o fim. */
+     Pontos: só a MoviOdds, quando os pontos dos jogadores somam o placar ao vivo de cada equipa (20 s de confirmação,
+     para uma cesta anulada na revisão). O resto só com DUAS fontes de acordo, MoviOdds e ESPN ao vivo (a MoviOdds sozinha
+     erra rebotes e assistências), 30 s. As estatísticas só sobem, por isso passar a linha decide; o resto fica para o fim. */
   function basket(leg, ev) {
     if (leg.market !== 'bp' || ev.sport !== 'basketball') return null;
     const stat = String(leg.per ?? '').split('|')[0], get = M.BP_FIELD[stat], n = M.bpNeed(leg);
-    const eb = espnBox(ev.id);
-    if (!get || !n || !eb) return null;
-    const a = M.bpPlayer(leg, BPL.roster(liveStats(ev.id)) || []), b = M.bpPlayer(leg, eb);
-    const va = a ? get(a) : NaN, vb = b ? get(b) : NaN;
-    if (!(va >= n.need) || !(vb >= n.need)) return null;
-    return { v: n.under ? -1 : 1, sig: `${stat}:passou`, text: `${BPL.STAT_PT[stat] || stat} ${Math.min(va, vb)}` };
+    if (!get || !n) return null;
+    const ro = BPL.roster(liveStats(ev.id)) || [];
+    const a = M.bpPlayer(leg, ro), va = a ? get(a) : NaN;
+    if (!(va >= n.need)) return null;
+    const v = n.under ? -1 : 1, label = BPL.STAT_PT[stat] || stat;
+    if (stat === 'pts') {
+      const sum = (sd) => ro.filter((p) => p.side === sd).reduce((q, p) => q + (Number(p.pts) || 0), 0);
+      if (sum('home') === Number(ev.home?.score) && sum('away') === Number(ev.away?.score)) return { v, sig: 'pts:passou', text: `${label} ${va}`, ms: 20000 };
+    }
+    const eb = espnBox(ev.id), b = eb ? M.bpPlayer(leg, eb) : null, vb = b ? get(b) : NaN;
+    if (!(vb >= n.need)) return null;
+    return { v, sig: `${stat}:passou`, text: `${label} ${Math.min(va, vb)}`, ms: 30000 };
   }
 
   // ---- futebol: os 90 minutos acabaram (prorrogação / pênaltis a seguir) ----
@@ -322,7 +329,7 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     const sig = `${d.sig}|${d.v}`;
     const s = seen.get(key);
     if (!s || s.sig !== sig) { seen.set(key, { sig, since: t }); return false; }
-    if (t - s.since < SETTLE_MS) return false;
+    if (t - s.since < (d.ms ?? SETTLE_MS)) return false;
     // salvaguardas: odds frescas agora; futebol/hóquei: mercados reabertos depois do último gol e abertos há 1 min
     if (!hasOpenOdds(ev)) return false;
     if (M.GOAL_SPORTS.has(ev.sport)) {

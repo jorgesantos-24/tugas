@@ -548,8 +548,8 @@ async function checkShootouts() {
 }
 setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 5000);
 
-/* Basquete (NBA/WNBA) ao vivo: box score da ESPN dos jogos com apostas de jogadores em aberto (a cada 20 s).
-   É a segunda fonte para pagar na hora quem passou a linha (early.js); a MoviOdds sozinha não chega. */
+/* Basquete (NBA/WNBA) ao vivo: box score da ESPN dos jogos com apostas de jogadores em aberto (a cada 10 s).
+   É a segunda fonte para pagar na hora quem passou a linha em rebotes, assistências, etc. (early.js). */
 const espnLive = new Map(); // jogo → { box, at, tried }
 async function checkBasketLive() {
   const t = now(), want = new Set();
@@ -557,7 +557,7 @@ async function checkBasketLive() {
   for (const id of want) {
     const ev = events.get(id), cur = espnLive.get(id);
     if (!ev || ev.state !== 'in' || ev.sport !== 'basketball' || !BPL.LEAGUES.has(ev.league)) continue;
-    if (cur && t - cur.tried < 20000) continue;
+    if (cur && t - cur.tried < 10000) continue;
     let box = null;
     try { box = await ESPN.basketBox(ev, null, M.bpKey, true); } catch { /* tenta na próxima */ }
     espnLive.set(id, box ? { box, at: t, tried: t } : { ...cur, tried: t });
