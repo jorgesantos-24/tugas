@@ -282,9 +282,24 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .bb-leg .x:hover{color:var(--text)}
 .bb-leg.bad{color:var(--red)}
 .bb-dot{flex:none;width:8px;height:8px;border-radius:50%;border:2px solid var(--yellow);margin-top:4px}
-.bb-card-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:8px 0 2px}
+.bb-card-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:8px 0 8px}
 .bb-card-head b{margin-left:auto;font-size:13px}
-.leg.in-bb{margin-left:6px}
+.bb-group{margin:6px 0;padding-bottom:2px}
+.bb-group + .leg,.leg + .bb-group{border-top:1px solid var(--line);padding-top:8px}
+/* seleções do mesmo Criar aposta: uma bolinha cada, ligadas por uma linha vertical (de bolinha a bolinha) */
+.bb-chain{position:relative}
+.bb-chain > *{position:relative}
+.bb-chain > *::before{content:'';position:absolute;left:5px;top:0;bottom:0;border-left:2px solid rgba(255,214,10,.55)}
+.bb-chain > :first-child::before{top:14px}
+.bb-chain > :last-child::before{bottom:auto;height:14px}
+.bb-chain > :only-child::before{display:none}
+.bb-chain .bb-dot{position:relative;z-index:1;background:var(--panel2)}
+.bb-panel .bb-chain .bb-dot{background:var(--panel)}
+.bb-chain .leg.in-bb{border:0;margin:0;padding:6px 0 6px 20px}
+.bb-chain .leg.in-bb .bb-dot{position:absolute;left:2px;top:10px;margin:0;background:var(--panel2)}
+.bb-chain .leg.won .bb-dot{border-color:var(--green);background:var(--green)}
+.bb-chain .leg.lost .bb-dot{border-color:var(--red);background:var(--red)}
+.bb-chain .leg.void .bb-dot{border-color:#888;background:#888}
 .ev-tabs button.bb-tab{border-color:rgba(255,214,10,.45);color:var(--yellow)}
 .ev-tabs button.bb-tab.active{background:var(--yellow);color:#10261a}
 .odd.bb-x .val{color:var(--yellow)}

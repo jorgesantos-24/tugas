@@ -328,6 +328,10 @@ function toggleSel(key) {
     if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é no futebol, antes do jogo)', 'err');
     else if (same >= BB_MAX) { toast(`Criar aposta: máximo de ${BB_MAX} seleções por jogo`, 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
+    // Criar aposta: o boletim mostra logo a odd calculada aqui; a do servidor substitui-a quando chegar
+    const grp = S.slip.filter((s) => s.evId === ev.id);
+    const loc = grp.length > 1 && bbOk(ev) && !bbOf(grp) ? bbLocal(ev, grp) : undefined;
+    if (loc?.mine) S.bbq[bbKey(grp)] = { odds: loc.mine, at: 0 };
     // segunda seleção do mesmo jogo de futebol: vira Criar aposta (múltipla)
     if (S.slip.length >= 2 && (!hasConflict() || (same && bbOk(ev)))) S.slipMode = 'multiple';
     // e, na página desse jogo, abre a aba Criar aposta
@@ -364,16 +368,62 @@ async function ensureBB(force = false) {
   if (S.view === 'event' && S.evTab?.id === S.eventId && S.evTab.tab === 'bb') { S.keepScroll = true; renderMain(); }
 }
 setInterval(() => { if (!document.hidden && S.slip.length > 1) ensureBB(); }, 5000);
-/* aba Criar aposta com seleções escolhidas: cada odd do jogo mostra quanto a aposta fica a valer ao juntá-la
-   (S.bbPrev.odds[key]; 0 = não junta). Pedido ao servidor quando as escolhidas mudam e a cada 15 s */
+/* aba Criar aposta com seleções escolhidas: cada odd do jogo mostra quanto a aposta fica a valer ao juntá-la (0 = não junta).
+   Calcula-se aqui no navegador, na hora: o servidor manda uma vez o modelo do jogo (/api/betbuilder/model) e o motor
+   é o mesmo do servidor (/bbengine.js). A odd da aposta é sempre a do servidor (/api/betbuilder/price).
+   Sem modelo (ainda a chegar ou falhou): pede as odds ao servidor (S.bbPrev), como antes. */
 let bbShow = null; // odds recalculadas do jogo a desenhar (só enquanto se desenha a aba Criar aposta)
 let bbMine = null; // odd da aposta deste jogo, mostrada nas seleções já escolhidas (aba Criar aposta, 2 ou mais)
+const bbM = new Map(); // evId → { at, v, E, src: { chave: cotação }, memo: Map(bbKey → { at, odds, mine }) }
+const bbLoading = new Set();
+async function ensureModel(ev, force = false) {
+  if (!window.BBE || !bbOk(ev) || bbLoading.has(ev.id)) return;
+  const c = bbM.get(ev.id);
+  if (c && Date.now() - c.at < (force ? 5000 : 90000)) return;
+  bbLoading.add(ev.id);
+  try {
+    const r = await api('GET', `/api/betbuilder/model?ev=${encodeURIComponent(ev.id)}`);
+    if (!r.model) throw new Error(r.reason);
+    // o mesmo motor do servidor que já temos: fica (com as contas já feitas)
+    if (c?.E && c.v === r.model.v) c.at = Date.now();
+    else {
+      const E = BBE.fromParams(r.model);
+      E.m = { home: r.model.home, away: r.model.away, quotes: [] };
+      E.v = r.model.v;
+      bbM.set(ev.id, { at: Date.now(), v: r.model.v, E, src: r.src || {}, memo: new Map() });
+      // primeira conta já agora (prepara cada seleção do jogo no motor; os cliques seguintes ficam em milissegundos)
+      setTimeout(() => { const ev2 = S.events.get(ev.id), first = ev2 && selections(ev2).find((s) => s.bb && !s.locked); if (first) bbLocal(ev2, [{ key: first.key, evId: ev.id }]); }, 30);
+    }
+  } catch { bbM.set(ev.id, { ...(c || {}), at: Date.now() - 60000 }); } // falhou: tenta outra vez daqui a 30 s
+  bbLoading.delete(ev.id);
+  if (S.view === 'event' && S.eventId === ev.id && S.evTab?.id === ev.id && S.evTab.tab === 'bb') { S.keepScroll = true; renderMain(); }
+}
+// { odds: { chave: odd }, mine: odd das escolhidas (2 ou mais) } pelo motor do navegador; undefined sem modelo
+function bbLocal(ev, mine) {
+  const c = bbM.get(ev.id);
+  if (!c?.E || !mine.length) return undefined;
+  const k = bbKey(mine), hit = c.memo.get(k);
+  if (hit && Date.now() - hit.at < 5000) return hit;
+  const items = mine.map((s) => { const { sel } = findSel(s.key); return { key: s.key, name: sel?.name || '', q: c.src[s.key] || null, odds: sel?.odds ?? s.odds }; });
+  const chosen = new Set(mine.map((s) => s.key));
+  const cands = selections(ev).filter((s) => s.bb && !s.locked && !chosen.has(s.key)).map((s) => ({ key: s.key, q: c.src[s.key] || null, odds: s.odds }));
+  // mercados novos no jogo que o modelo ainda não tem: pede-o outra vez
+  if (cands.some((x) => !x.q)) queueMicrotask(() => ensureModel(ev, true));
+  let out = { at: Date.now(), odds: null, mine: null };
+  try {
+    out.odds = items.every((it) => it.q) ? BBE.preview(c.E, items, cands) : null;
+    if (items.length > 1 && out.odds) out.mine = BBE.quote(c.E, items).odds || null;
+  } catch (e) { console.error('[Criar aposta]', e); return undefined; }
+  if (c.memo.size > 60) c.memo.clear();
+  c.memo.set(k, out);
+  return out;
+}
 let bbpBusy = false;
 async function ensurePreview() {
   const ev = S.view === 'event' && S.events.get(S.eventId);
   if (!bbOk(ev) || S.evTab?.id !== ev.id || S.evTab.tab !== 'bb') return;
   const mine = S.slip.filter((s) => s.evId === ev.id);
-  if (!mine.length || bbpBusy) return;
+  if (!mine.length || bbpBusy || bbLocal(ev, mine) !== undefined) return;
   const k = bbKey(mine), c = S.bbPrev;
   if (c && c.k === k && Date.now() - c.at < 15000) return;
   bbpBusy = true;
@@ -1059,7 +1109,7 @@ function bbPanel(ev) {
   const q = bbOf(mine);
   return `<div class="slip-bb bb-panel ${q?.reason ? 'bad' : ''}">
     <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
-    ${mine.map((s) => { const { sel } = findSel(s.key); return `<div class="bb-leg ${s.key === q?.bad ? 'bad' : ''}"><button class="x" data-remove="${esc(s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(sel ? sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(sel ? sel.marketName : '')}</div></div></div>`; }).join('')}
+    <div class="bb-chain">${mine.map((s) => { const { sel } = findSel(s.key); return `<div class="bb-leg ${s.key === q?.bad ? 'bad' : ''}"><button class="x" data-remove="${esc(s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(sel ? sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(sel ? sel.marketName : '')}</div></div></div>`; }).join('')}</div>
     ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
   </div>`;
 }
@@ -1208,10 +1258,12 @@ function renderEvent() {
     if (tabs.length > 2) html += `<div class="tabs ev-tabs">${tabs.map((t) => `<button class="${t.id === tab ? 'active' : ''}${t.id === 'bb' ? ' bb-tab' : ''}" data-evtab="${t.id}">${esc(t.label)}<span class="tab-cnt">${t.id === 'all' ? Object.keys(groups).length : new Set(sels.filter((s) => t.has(s)).map((s) => s.marketName)).size}</span></button>`).join('')}</div>`;
     if (tab === 'bb') html += bbPanel(ev);
     // odds recalculadas com as escolhidas (só as do pedido para as escolhidas de agora)
-    const mineKey = bbKey(S.slip.filter((s) => s.evId === ev.id));
-    bbShow = tab === 'bb' && mineKey && S.bbPrev?.k === mineKey ? S.bbPrev.odds : null;
-    const mine = S.slip.filter((s) => s.evId === ev.id);
-    bbMine = tab === 'bb' && mine.length > 1 ? bbOf(mine)?.odds || null : null;
+    const mine = S.slip.filter((s) => s.evId === ev.id), mineKey = bbKey(mine);
+    const loc = tab === 'bb' ? bbLocal(ev, mine) : undefined;
+    bbShow = tab !== 'bb' || !mineKey ? null : loc !== undefined ? loc.odds : S.bbPrev?.k === mineKey ? S.bbPrev.odds : null;
+    bbMine = tab === 'bb' && mine.length > 1 ? bbOf(mine)?.odds || loc?.mine || null : null;
+    // modelo do jogo pedido logo ao abrir a página (o primeiro clique já calcula na hora)
+    if (bbOk(ev)) queueMicrotask(() => ensureModel(ev));
     if (tab === 'bb') queueMicrotask(ensurePreview);
     // totais e handicaps aparecem em tabela (uma linha por fila); no Criar aposta só as seleções que o motor junta
     let entries = tab === 'bb' ? Object.entries(groups).map(([n, l]) => [n, l.filter((s) => s.bb)]).filter(([, l]) => l.length)
@@ -1374,17 +1426,24 @@ const legCls = (l) => !l.result ? '' : l.result.includes('won') ? 'won' : l.resu
 function betCard(bet, fold = false) {
   const closed = fold && !S.betOpen.has(bet.id);
   const bbSeen = new Set();
-  const legs = closed ? '' : bet.legs.map((l) => {
-    const ev = S.events.get(l.evId);
-    const cls = legCls(l);
-    // Criar aposta: um cabeçalho com a odd do grupo antes das seleções desse jogo
-    const head = l.bb && !bbSeen.has(l.bb) ? (bbSeen.add(l.bb), `<div class="bb-card-head"><span class="bb-tag">Criar aposta</span><span>${bet.legs.filter((x) => x.bb === l.bb).length} seleções</span><b style="color:var(--yellow)">${fmtOdd(bet.bb?.[l.bb]?.odds)}</b></div>`) : '';
-    return `${head}<div class="leg ${cls}${l.bb ? ' in-bb' : ''}">
-      ${legGame(l, ev)}
+  const legHtml = (l, ev) => `<div class="leg ${legCls(l)}${l.bb ? ' in-bb' : ''}">
+      ${l.bb ? '<span class="bb-dot"></span>' : legGame(l, ev)}
       <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${l.bb ? '' : fmtOdd(l.odds)}</span></div>
       <div class="lm">${esc(l.marketName)}</div>
       ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : ''}
       ${trackHtml(l, ev, bet)}
+    </div>`;
+  const legs = closed ? '' : bet.legs.map((l) => {
+    const ev = S.events.get(l.evId);
+    if (!l.bb) return legHtml(l, ev);
+    // Criar aposta: o jogo uma vez, com a odd do grupo, e as seleções por baixo ligadas por uma linha
+    if (bbSeen.has(l.bb)) return '';
+    bbSeen.add(l.bb);
+    const grp = bet.legs.filter((x) => x.bb === l.bb);
+    return `<div class="bb-group">
+      <div class="bb-card-head"><span class="bb-tag">Criar aposta</span><span>${grp.length} seleções</span><b style="color:var(--yellow)">${fmtOdd(bet.bb?.[l.bb]?.odds)}</b></div>
+      ${legGame(l, ev)}
+      <div class="bb-chain">${grp.map((x) => legHtml(x, ev)).join('')}</div>
     </div>`;
   }).join('');
   let action = '';
@@ -1471,7 +1530,7 @@ function renderSlip() {
       html += `<div class="slip-bb ${q?.reason || gi.some((i) => i.suspended) ? 'bad' : ''}">
         <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
         <div class="si-event">${ev ? esc(evLabel(ev)) : ''}</div>
-        ${gi.map((i) => `<div class="bb-leg ${i.s.key === bad ? 'bad' : ''}"><button class="x" data-remove="${esc(i.s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(i.sel ? i.sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(i.sel ? i.sel.marketName : '')}</div></div></div>`).join('')}
+        <div class="bb-chain">${gi.map((i) => `<div class="bb-leg ${i.s.key === bad ? 'bad' : ''}"><button class="x" data-remove="${esc(i.s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(i.sel ? i.sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(i.sel ? i.sel.marketName : '')}</div></div></div>`).join('')}</div>
         ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
       </div>`;
       continue;

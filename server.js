@@ -740,6 +740,39 @@ function bbPreview(keys) {
   return odds ? { odds } : { reason: 'estas seleções não entram no Criar aposta' };
 }
 
+/* Criar aposta no navegador: o modelo do jogo (parâmetros do motor) e a cotação de cada seleção que entra.
+   O navegador mostra as odds recalculadas na hora; a odd da aposta continua a ser a do servidor (/api/betbuilder/price). */
+const BB_FIELDS = ['group_name', 'group_id', 'side', 'label', 'line', 'handicap', 'n2'];
+function bbModel(evId) {
+  const ev = events.get(evId);
+  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
+  const m = FEED.bbMatch(evId);
+  const E = m && BB.engineFor(evId, m);
+  if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  const src = {};
+  for (const s of M.selections(ev)) {
+    if (!s.bb) continue;
+    const q = srcQuote(ev, s);
+    if (q) src[s.key] = Object.fromEntries(BB_FIELDS.filter((k) => q[k] != null).map((k) => [k, q[k]]));
+  }
+  return { model: BB.modelOf(E), src };
+}
+// o motor (feeds/players.js + feeds/betbuilder.js) num só ficheiro para o navegador
+let bbEngineJs = null;
+function bbEngineFile() {
+  if (bbEngineJs) return bbEngineJs;
+  const wrap = (file, name) => `{const module={exports:{}},exports=module.exports;(function(){
+${fs.readFileSync(path.join(__dirname, 'feeds', file), 'utf8')}
+})();mods.${name}=module.exports;}
+`;
+  const js = `(function(){'use strict';const mods={};const require=(p)=>/players/.test(p)?mods.players:/markets/.test(p)?Markets:{};
+${wrap('players.js', 'players')}${wrap('betbuilder.js', 'bb')}window.BBE=mods.bb;})();
+`;
+  const data = Buffer.from(js);
+  bbEngineJs = { data, gz: zlib.gzipSync(data, { level: 9 }), etag: `"${crypto.createHash('sha1').update(data).digest('base64url').slice(0, 16)}"` };
+  return bbEngineJs;
+}
+
 /* A lista de jogos leva só os mercados da linha do jogo (vencedor e linha principal do total) e o número total
    de seleções ("+N"). Os mercados completos de um jogo vêm de /api/events/full (página do jogo, boletim, apostas
    em aberto) — com dezenas de mercados por jogo de ténis, mandar tudo a cada 5 s pesaria vários MB. */
@@ -1662,6 +1695,10 @@ const routes = {
   },
 
   // aba Criar aposta: a odd de cada seleção do jogo já somada às escolhidas (como na bet365)
+  'GET /api/betbuilder/model': (ctx) => {
+    rateLimit(ctx.ip, 'bbm', 60, 60000);
+    return bbModel(String(new URL(ctx.req.url, 'http://x').searchParams.get('ev') || ''));
+  },
   'POST /api/betbuilder/preview': (ctx) => {
     rateLimit(ctx.ip, 'bbp', 240, 60000);
     const ks = ctx.body.keys;
@@ -2048,6 +2085,12 @@ const server = http.createServer(async (req, res) => {
   // emblemas da API-Football pelo nosso domínio (o media.api-sports.io é bloqueado no DNS de provedores brasileiros)
   const crest = (req.method === 'GET' || req.method === 'HEAD') && /^\/escudos\/(\d{1,7})\.png$/.exec(url.pathname);
   if (crest) return LOGOS.serveCrest(crest[1], res);
+  if (url.pathname === '/bbengine.js') {
+    const c = bbEngineFile(), h = { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', ETag: c.etag, Vary: 'Accept-Encoding' };
+    if (req.headers['if-none-match'] === c.etag) { res.writeHead(304, h); return res.end(); }
+    if (acceptsGzip(req)) { res.writeHead(200, { ...h, 'Content-Encoding': 'gzip' }); return res.end(c.gz); }
+    res.writeHead(200, h); return res.end(c.data);
+  }
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (req.method === 'POST' && url.pathname === '/api/webhooks/bravopay') return handleWebhook(req, res);
   if (req.method === 'GET' && url.pathname === '/api/stream') { // odds ao vivo empurradas

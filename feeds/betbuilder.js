@@ -661,7 +661,13 @@ function floorOdds(E, legs, singles, pOf) {
 }
 
 // seleção do site (cotação da bet365) → seleção do motor; null se o motor não a sabe calcular
+// (guardada no motor por cotação: as contas de cada estado ficam na seleção e não se refazem a cada pedido)
 function legFor(E, q) {
+  const c = (E.lf ||= new WeakMap());
+  if (!c.has(q)) c.set(q, legRaw(E, q));
+  return c.get(q);
+}
+function legRaw(E, q) {
   const l = legOf(E.m, q);
   if (!l || l.fam === 'combo') return null;
   if (l.b === 'c' && !E.C) return null;
@@ -747,6 +753,8 @@ function paramsOf(E, legs) {
   for (const l of legs) if (l.pp) { pp[l.pp.name] = E.pp[l.pp.name]; if (E.players[l.pp.name]) players[l.pp.name] = E.players[l.pp.name]; }
   return { home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players, pp };
 }
+// o motor inteiro do jogo, para o navegador calcular as odds da aba Criar aposta sem esperar pelo servidor
+const modelOf = (E) => ({ v: E.v, home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players: E.players, pp: E.pp });
 // cotação da bet365 → só os campos que o motor usa (vai para a aposta)
 const srcOf = (q) => Object.fromEntries(['group_name', 'side', 'label', 'line', 'handicap', 'n2'].filter((k) => q[k] != null).map((k) => [k, q[k]]));
 
@@ -774,9 +782,10 @@ function engineFor(id, m) {
   if (c && Date.now() - c.at < TTL && c.n === m.quotes.length) return c.E;
   let E = null;
   try { E = build(m); } catch (e) { console.error('[Criar aposta]', id, e.message); }
+  if (E) E.v = Date.now(); // versão do motor (o navegador refaz o seu quando muda)
   cache.set(id, { E, at: Date.now(), n: m.quotes.length });
   if (cache.size > 400) for (const [k, v] of cache) if (Date.now() - v.at > TTL) cache.delete(k);
   return E;
 }
 
-module.exports = { engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };
+module.exports = { modelOf, engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };
