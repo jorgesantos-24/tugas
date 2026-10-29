@@ -43,6 +43,7 @@ const FAST_MS = 5000, SLOW_MS = 60000; // ao vivo: 5 s (só os jogos a decorrer)
 /* Espera antes de aceitar uma aposta / cash out ao vivo, por modalidade (segundos). Cobre o tempo entre o lance
    acontecer e a bet365 suspender o mercado (+ ~1-2 s até chegar cá). Ajustável no .env: LIVE_DELAY_SOCCER=8 ...
    Com várias modalidades no mesmo boletim vale a maior. Mínimo 3 s. */
+const FRESH_SPORTS = new Set(['tabletennis', 'basketball']); // ver a aprovação ao vivo: odds lidas depois do pedido
 const LIVE_DELAY_DEFAULT = { soccer: 8, hockey: 8, tennis: 6, basketball: 5, esports: 5, tabletennis: 6 };
 const LIVE_DELAYS = Object.fromEntries(Object.entries(LIVE_DELAY_DEFAULT).map(([k, v]) => {
   const n = Number(process.env[`LIVE_DELAY_${k.toUpperCase()}`]);
@@ -1442,7 +1443,18 @@ const routes = {
       const snap = liveSnapshot(liveIds);
       await sleep(live ? liveDelayMs([...snap.keys()].map((id) => events.get(id)?.sport)) : PRE_DELAY_MS);
       if (snap.size) await refreshLiveNow(snap.keys()); // placar mais recente antes de decidir
-      const liveReason = liveChanged(snap, t0);
+      let liveReason = liveChanged(snap, t0);
+      /* tênis de mesa e basquete: a MoviOdds só volta a ler a bet365 a cada ~10 s (medido em 29/10: 2 a 16 s no tênis de
+         mesa), e um ponto/cesta decide mercados em segundos. A aposta só entra com odds lidas DEPOIS do pedido (espera até
+         20 s); sem leitura nova é recusada. Assim quem vê o jogo à frente não apanha odds de antes do ponto. */
+      const fresh = [...snap.keys()].filter((id) => FRESH_SPORTS.has(events.get(id)?.sport));
+      if (!liveReason && fresh.length) {
+        const t0src = FEED.srcNow() - (now() - t0); // o pedido, no relógio da fonte
+        const ok = () => fresh.every((id) => (FEED.polledAt(id) || 0) > t0src);
+        for (let w = 0; !ok() && w < 40; w++) await sleep(500);
+        if (!ok()) liveReason = 'odds por confirmar: a fonte não atualizou a partida a tempo';
+        else { await refreshLiveNow(snap.keys()); liveReason = liveChanged(snap, t0); }
+      }
       const placed = [], rejected = [];
       for (let i = 0; i < parsed.length; i++) {
         const tk = parsed[i];
