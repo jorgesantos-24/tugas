@@ -254,7 +254,7 @@ const LW = require('./livewatch.js')({ col, inc, M, events, findSel, now }); // 
 // liquidação antecipada: seleções já decididas pagas 2,5 min depois (sem esperar pelo fim do jogo)
 // ténis ponto a ponto: placares de cada game gravados ao vivo → mercados de pontos (1º ponto, placar após N pontos...)
 const POINTS = require('./feeds/points.js');
-const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now, POINTS });
+const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now, POINTS, espnBox: (id) => { const x = espnLive.get(id); return x && now() - x.at < 90000 ? x.box : null; } });
 let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 // resultado final: vale logo à primeira leitura (RESULT_CONFIRM_S > 0 obriga a lê-lo igual outra vez depois desse tempo)
 const RESULT_CONFIRM_MS = Number(process.env.RESULT_CONFIRM_S || 0) * 1000;
@@ -547,6 +547,24 @@ async function checkShootouts() {
   for (const [id, x] of shootouts) if (!events.has(id) || t - x.at > 6 * 3600000) shootouts.delete(id);
 }
 setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 5000);
+
+/* Basquete (NBA/WNBA) ao vivo: box score da ESPN dos jogos com apostas de jogadores em aberto (a cada 20 s).
+   É a segunda fonte para pagar na hora quem passou a linha (early.js); a MoviOdds sozinha não chega. */
+const espnLive = new Map(); // jogo → { box, at, tried }
+async function checkBasketLive() {
+  const t = now(), want = new Set();
+  for (const b of pendingRows()) for (const l of b.legs) if (!l.result && l.market === 'bp') want.add(l.evId);
+  for (const id of want) {
+    const ev = events.get(id), cur = espnLive.get(id);
+    if (!ev || ev.state !== 'in' || ev.sport !== 'basketball' || !BPL.LEAGUES.has(ev.league)) continue;
+    if (cur && t - cur.tried < 20000) continue;
+    let box = null;
+    try { box = await ESPN.basketBox(ev, null, M.bpKey, true); } catch { /* tenta na próxima */ }
+    espnLive.set(id, box ? { box, at: t, tried: t } : { ...cur, tried: t });
+  }
+  for (const id of espnLive.keys()) if (!want.has(id) || events.get(id)?.state !== 'in') espnLive.delete(id);
+}
+setInterval(() => { checkBasketLive().catch((e) => console.error('[Basquete ao vivo]', e.message)); }, 5000);
 
 async function checkExtraTime() {
   const t = now();

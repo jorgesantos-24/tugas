@@ -37,6 +37,7 @@ const TENNIS_FIRST_SRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfsa', 'tfs
 const TENNIS_POINTS = new Set(['tg1p', 'tgsa', 'tgpb', 'tgbp', 'tfsa', 'tfsbp', 'ttblead', 'ttbsa', 'ttbpb']);
 
 const PARTS = require('./feeds/parts.js');
+const BPL = require('./feeds/bplayers.js');
 const PLAYERS = require('./feeds/players.js');
 const SCOPE_PT = (s) => ({ ft: 'jogo', h1: '1º tempo', h2: '2º tempo', corners: 'escanteios', cards: 'cartões' }[s]
   || (/^q(\d)$/.exec(s) ? `${s.slice(1)}º quarto` : /^p(\d)$/.exec(s) ? `${s.slice(1)}º período` : /^map(\d+)$/.exec(s) ? `mapa ${s.slice(3)}` : s));
@@ -57,7 +58,7 @@ const MONO_PART = new Set(['ptot', 'pteam', 'pbtts', 'pcln', 'pot']);
 // combinações em que mais gols nunca desfazem: só ambas marcam e "mais/menos de" (sem resultado, faixas ou "exatamente")
 const monoCond = (pick) => String(pick).replace(/^!/, '').split(';').every((c) => /^(btts=(yes|no)|(tot|th|ta)=(gt|lt):[\d.]+)$/.test(c));
 
-module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null }) {
+module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null, espnBox = () => null }) {
   const seen = new Map();     // aposta|seleção → { sig, since }
   const openSince = new Map(); // jogo → desde quando os mercados estão abertos (null = fechados)
 
@@ -144,6 +145,20 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null 
     const v = p && get ? get(p) : undefined;
     if (!Number.isFinite(v) || v < Number(String(leg.pick).split('#')[0])) return null;
     return { v: 1, sig: `${stat}:${v}`, text: `${PLAYERS.STAT_PT[stat] || stat} ${v}` };
+  }
+
+  /* ---- basquete: jogador passou a linha ("N ou mais" ganha, "menos de N" perde, duplo/triplo-duplo feito) ----
+     Só com DUAS fontes de acordo: o box score ao vivo da MoviOdds e o da ESPN (a MoviOdds sozinha erra rebotes e
+     assistências). As estatísticas só sobem, por isso passar a linha decide; o resto (e quem não jogou) fica para o fim. */
+  function basket(leg, ev) {
+    if (leg.market !== 'bp' || ev.sport !== 'basketball') return null;
+    const stat = String(leg.per ?? '').split('|')[0], get = M.BP_FIELD[stat], n = M.bpNeed(leg);
+    const eb = espnBox(ev.id);
+    if (!get || !n || !eb) return null;
+    const a = M.bpPlayer(leg, BPL.roster(liveStats(ev.id)) || []), b = M.bpPlayer(leg, eb);
+    const va = a ? get(a) : NaN, vb = b ? get(b) : NaN;
+    if (!(va >= n.need) || !(vb >= n.need)) return null;
+    return { v: n.under ? -1 : 1, sig: `${stat}:passou`, text: `${BPL.STAT_PT[stat] || stat} ${Math.min(va, vb)}` };
   }
 
   // ---- futebol: os 90 minutos acabaram (prorrogação / pênaltis a seguir) ----
@@ -301,7 +316,7 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null 
     const ev = events.get(leg.evId);
     const key = `${betId}|${leg.evId}|${leg.key}`;
     if (!ev || ev.state !== 'in') { seen.delete(key); return false; }
-    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
+    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || basket(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
     if (!d) { seen.delete(key); return false; }
     const t = now();
     const sig = `${d.sig}|${d.v}`;

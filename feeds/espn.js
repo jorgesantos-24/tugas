@@ -145,8 +145,9 @@ async function shootout(ev) {
 
 /* Box score do basquete (NBA/WNBA), reserva da MoviOdds para os mercados de jogadores.
    fin = placar final do site [c, f] → [{ key, side, played, pts, reb, ast, tpm, stl, blk }] (lados do site), ou null
-   se o jogo não estiver terminado na ESPN, se o placar não bater certo ou se os pontos dos jogadores não somarem o placar. */
-async function basketBox(ev, fin, bpKey) {
+   se o jogo não estiver terminado na ESPN, se o placar não bater certo ou se os pontos dos jogadores não somarem o placar.
+   live = true: o box score do jogo a decorrer (os pontos dos jogadores têm de somar o placar atual da ESPN). */
+async function basketBox(ev, fin, bpKey, live = false) {
   if (OFF) return null;
   const slug = ESPN_LEAGUE[ev.league];
   if (!slug || !/^basketball\/(nba|wnba)$/.test(slug)) return null;
@@ -163,10 +164,16 @@ async function basketBox(ev, fin, bpKey) {
       if (same(ev.home.name, H.team?.displayName) && same(ev.away.name, A.team?.displayName)) swap = false;
       else if (same(ev.home.name, A.team?.displayName) && same(ev.away.name, H.team?.displayName)) swap = true;
       else continue;
-      if (!c.status?.type?.completed) return null;
+      if (live ? c.status?.type?.state !== 'in' : !c.status?.type?.completed) return null;
       const r = await fetch(`${BASE}${slug}/summary?event=${encodeURIComponent(e.id)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
       if (!r.ok) return null;
       const d = await r.json();
+      if (live) { // placar atual da ESPN, nos lados do site
+        const cs = d.header?.competitions?.[0]?.competitors || [];
+        const sc = (id) => Number(cs.find((x) => String(x.id ?? x.team?.id) === String(id))?.score);
+        fin = swap ? [sc(A.team?.id), sc(H.team?.id)] : [sc(H.team?.id), sc(A.team?.id)];
+        if (!fin.every(Number.isFinite)) return null;
+      }
       const out = [];
       for (const tm of d.boxscore?.players || []) {
         const espnHome = String(tm.team?.id) === String(H.team?.id), espnAway = String(tm.team?.id) === String(A.team?.id);

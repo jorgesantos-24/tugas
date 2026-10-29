@@ -705,6 +705,51 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   console.log(`  basquete jogadores: ${mks} mercados reais da MoviOdds, ${sels} liquidações testadas`);
 }
 
+/* ================= 8b) basquete: pagar na hora quem passou a linha =================
+   Duas fontes (MoviOdds ao vivo + ESPN ao vivo) têm de mostrar a linha passada, estáveis durante o tempo de confirmação. */
+{
+  process.env.EARLY_SETTLE_S = process.env.EARLY_SETTLE_S || '150';
+  const mk = require(path.join(__dirname, '..', 'early.js'));
+  let T = 1e12, mv = null, eb = null;
+  const ev = { id: 'nb1', sport: 'basketball', league: 'nba', state: 'in', home: { name: 'A' }, away: { name: 'B' }, markets: [{ k: 'ml', sels: [{ lock: false }] }] };
+  const events = new Map([[ev.id, ev]]);
+  const E = mk({ M, TEN: require(path.join(__dirname, '..', 'feeds', 'tennis.js')), events, liveStats: () => mv, now: () => T, espnBox: () => eb });
+  const mvP = (pts, reb) => ({ players: [{ name: 'Austin Reaves', team: 'home', box_score: { minutes: '22:10', points: pts, rebounds: reb, assists: 1, three_pointers_made: 2, steals: 0, blocks: 0, on_court: true } }] });
+  const ebP = (pts, reb) => [{ key: M.bpKey('Austin Reaves'), side: 'home', played: true, pts, reb, ast: 1, tpm: 2, stl: 0, blk: 0 }];
+  const run = (leg, id) => { let r = false; for (let i = 0; i < 4 && !r; i++) { r = E.check(id, leg); T += 60000; } return r; };
+  const L = (pick, stat = 'pts') => ({ evId: ev.id, market: 'bp', per: `${stat}|9`, pick });
+  const BPL = require(path.join(__dirname, '..', 'feeds', 'bplayers.js'));
+  mv = mvP(21, 4); eb = ebP(21, 4);
+  const p = BPL.roster(mv)[0];
+  {
+    const need = p.pts; // "N ou mais" com N = pontos atuais → já passou
+    const over = L(`${need}#${p.side}#${p.name}`), under = L(`u${need}#${p.side}#${p.name}`);
+    check(run(over, 'b1') && over.result && over.value === 1, `basquete na hora: ${p.name} ${need}+ pontos → ganha (${over.result})`);
+    check(run(under, 'b2') && under.value === -1, `basquete na hora: ${p.name} menos de ${need} → perde (${under.result})`);
+    const hi = L(`${need + 1}#${p.side}#${p.name}`);
+    check(!run(hi, 'b3') && !hi.result, 'basquete na hora: ainda não passou → fica em aberto');
+    eb = eb.map((x) => (x.key === p.key ? { ...x, pts: need - 1 } : x));
+    const dis = L(`${need}#${p.side}#${p.name}`);
+    check(!run(dis, 'b4') && !dis.result, 'basquete na hora: a ESPN ainda não mostra → fica em aberto');
+    eb = null;
+    const noE = L(`${need}#${p.side}#${p.name}`);
+    check(!run(noE, 'b5') && !noE.result, 'basquete na hora: sem a ESPN → fica em aberto');
+    eb = ebP(21, 4); ev.markets = [{ k: 'ml', sels: [{ lock: true }] }];
+    const lk = L(`${need}#${p.side}#${p.name}`);
+    check(!run(lk, 'b6') && !lk.result, 'basquete na hora: mercados fechados → espera');
+    ev.markets = [{ k: 'ml', sels: [{ lock: false }] }];
+    // tempo de confirmação: uma passagem só não chega
+    const one = L(`${need}#${p.side}#${p.name}`); E.check('b7', one);
+    check(!one.result, 'basquete na hora: precisa de confirmação estável');
+    // rebotes: a MoviOdds diz 10, a ESPN 9 → "10 ou mais" fica em aberto (a MoviOdds erra rebotes)
+    mv = mvP(21, 10); eb = ebP(21, 9);
+    const rb = L(`10#home#Austin Reaves`, 'reb');
+    check(!run(rb, 'b8') && !rb.result, 'basquete na hora: rebotes só da MoviOdds → espera pela ESPN');
+    eb = ebP(21, 10);
+    check(run(rb, 'b8') && rb.value === 1, 'basquete na hora: as duas com 10 rebotes → ganha');
+  }
+}
+
 /* ================= 9) hóquei: mercados que eram da equipa =================
    Dados reais em scripts/dados/hoquei-2026-10.json (cotações de 16 jogos e 73 resultados com cronologia).
    Cada mercado, com cada resultado (reais + prorrogação + pênaltis montados): exatamente um vencedor, ou tudo para a
