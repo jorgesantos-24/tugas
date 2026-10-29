@@ -632,7 +632,7 @@ function fromWs(id) {
 }
 
 module.exports = {
-  name: 'MoviOdds (bet365)', SPORTS, fetchAll, fetchLive, fetchResult, parseResult, clockLabel, toEvent, tennisResult, loadPlayerCoverage,
+  name: 'MoviOdds (bet365)', SPORTS, COUNTRY_PT, fetchAll, fetchLive, fetchResult, parseResult, clockLabel, toEvent, tennisResult, loadPlayerCoverage,
   // WebSocket: start(cb) liga e avisa os jogos que mudaram; want(ids) diz quais seguir; fromWs(id) dá o evento atualizado
   guardRemoved, liveStats: (id) => WS.stats(id), // estatísticas ao vivo em bruto (histórico de games do ténis, mapas) — liquidação antecipada
   ws: { start: (cb, down) => WS.start(cb, down), want: (ids) => WS.want(ids), onStats: (fn) => WS.onStats(fn), info: () => ({ ...WS.info(), livePolls: { ...livePolls } }), isOpen: WS.isOpen }, fromWs,

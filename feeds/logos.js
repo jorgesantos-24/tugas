@@ -9,6 +9,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const M = require('../public/markets.js'); // país de cada liga (as de futebol criadas na hora também)
 
 const KEY = process.env.THESPORTSDB_KEY || '123'; // chave pública do plano grátis
 const OFF = process.env.LOGOS === '0'; // LOGOS=0 desliga (o site mostra as iniciais)
@@ -56,7 +57,7 @@ const espnLeague = new Map(); // liga do site → [{ names: [...], url }]
 const espnPlayers = new Map(); // nome do tenista (normalizado) → { id, flag } (torneios ATP/WTA da semana)
 const espnSurnames = new Map(); // apelido → bandeira (null se dois jogadores tiverem o mesmo apelido)
 // nomes da bet365 que a ESPN escreve de outra forma (já normalizados)
-const ALIAS = { 'miami florida': 'miami hurricanes', olympiakos: 'olympiacos piraeus', 'forca lleida': 'ilerna lleida', 'baskets wuerzburg': 'wurzburg', 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
+const ALIAS = { 'miami florida': 'miami hurricanes', olympiakos: 'olympiacos piraeus', 'forca lleida': 'ilerna lleida', 'baskets wuerzburg': 'wurzburg', 'ferrocarril oeste': 'ferro', 'dc united': 'd c united', 'deportivo a coruna': 'deportivo', 'atletico mineiro': 'atletico mg', 'sport recife': 'recife', 'sheff utd': 'sheffield united', 'sheff wed': 'sheffield wednesday', az: 'az alkmaar', 'man utd': 'manchester united', 'man city': 'manchester city', 'nottm forest': 'nottingham forest', 'wolves': 'wolverhampton wanderers' };
 const teamNames = (t) => [t.displayName, t.shortDisplayName, t.name, t.location, t.nickname].map(norm).filter(Boolean);
 async function espnGet(p) {
   const r = await fetch(ESPN + p, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(20000) });
@@ -92,6 +93,68 @@ async function loadEspnTennis() {
     } catch (e) { console.warn(`[Emblemas] ESPN ténis ${tour}: ${e.message}`); }
   }
 }
+/* Futebol: TODAS as ligas da ESPN (~220), agrupadas por país, para as competições que não estão em ESPN_LEAGUE
+   (2.ª/3.ª divisões, ligas menores, criadas na hora como "fut.<país>-<liga>"). Cada equipa só é procurada entre as
+   do mesmo país; as taças continentais (UEFA, Conmebol…) só com nome igual. Em segundo plano, 1x/dia. */
+// país da liga (como o site o mostra, markets.js) → prefixo das ligas da ESPN ("Inglaterra" → eng.1…eng.5, taças)
+const ESPN_COUNTRY = {
+  Inglaterra: 'eng', Espanha: 'esp', Alemanha: 'ger', 'Itália': 'ita', 'França': 'fra', Portugal: 'por', Holanda: 'ned', 'Escócia': 'sco',
+  'Bélgica': 'bel', Turquia: 'tur', Argentina: 'arg', Brasil: 'bra', 'México': 'mex', EUA: 'usa', 'Estados Unidos': 'usa', Chile: 'chi',
+  'Colômbia': 'col', 'Bolívia': 'bol', Uruguai: 'uru', Paraguai: 'par', Peru: 'per', Equador: 'ecu', Venezuela: 'ven', 'Austrália': 'aus',
+  'Japão': 'jpn', China: 'chn', 'Arábia Saudita': 'ksa', 'Rússia': 'rus', 'Suécia': 'swe', Noruega: 'nor', Dinamarca: 'den', 'Áustria': 'aut',
+  'Grécia': 'gre', 'Índia': 'ind', 'Canadá': 'can', Honduras: 'hon', 'Costa Rica': 'crc', Guatemala: 'gua', 'El Salvador': 'slv', 'África do Sul': 'rsa',
+};
+const countryOf = (league) => M.LEAGUE_BY_KEY[league]?.country || null;
+const espnCountry = new Map(); // prefixo → [{ names, url }] (uma entrada por emblema)
+let espnCups = [];
+const CUP_PRE = /^(uefa|conmebol|concacaf|afc|caf)$/;
+async function loadEspnSoccerAll() {
+  let slugs;
+  try {
+    const r = await fetch('https://sports.core.api.espn.com/v2/sports/soccer/leagues?limit=1000', { signal: AbortSignal.timeout(20000) });
+    slugs = ((await r.json()).items || []).map((x) => /leagues\/([^?]+)/.exec(x.$ref)?.[1]).filter(Boolean);
+  } catch (e) { console.warn(`[Emblemas] ESPN lista de ligas de futebol: ${e.message}`); return; }
+  const byPre = new Map(); // prefixo → Map(url → Set(nomes)): a mesma equipa aparece na liga e nas taças do país
+  for (const s of slugs) {
+    try {
+      const d = await espnGet(`soccer/${s}/teams`);
+      const pre = s.split('.')[0], m = byPre.get(pre) || new Map(); byPre.set(pre, m);
+      for (const t of (d.sports?.[0]?.leagues?.[0]?.teams || []).map((x) => x.team)) {
+        const url = t?.logos?.[0]?.href;
+        if (url) { const set = m.get(url) || new Set(); m.set(url, set); for (const n of teamNames(t)) set.add(n); }
+      }
+    } catch { /* liga sem equipas ou indisponível */ }
+    await new Promise((r) => setTimeout(r, 300)); // sem pressa: 1x/dia, em segundo plano
+  }
+  const cups = new Map();
+  for (const [pre, m] of byPre) {
+    const list = [...m].map(([url, set]) => ({ names: [...set], url }));
+    if (CUP_PRE.test(pre)) for (const t of list) cups.set(t.url, t); else espnCountry.set(pre, list);
+  }
+  espnCups = [...cups.values()];
+  console.log(`[Emblemas] ESPN futebol (todas as ligas): ${[...espnCountry.values()].reduce((a, l) => a + l.length, 0)} equipas em ${espnCountry.size} países, ${espnCups.length} nas taças continentais.`);
+}
+function soccerCountryLogo(name, league) {
+  const pre = ESPN_COUNTRY[countryOf(league)], list = pre && espnCountry.get(pre);
+  return (list && listLogo(list, name)) || (espnCups.length && listLogo(espnCups, name, true)) || '';
+}
+
+/* Futebol, reserva: equipas de cada país da API-Football (api-sports.io), num ficheiro fixo do projeto
+   (feeds/escudos-futebol.json, gerado por `node scripts/escudos-futebol.js` com a chave grátis: 1 pedido por país).
+   O servidor não faz pedidos à API: as imagens vêm de media.api-sports.io/football/teams/<id>.png, sem chave.
+   Formato: { "Tchéquia": [["Slavia Praha", 560], …] }. */
+const AF_FILE = path.join(__dirname, 'escudos-futebol.json');
+const afCountry = new Map(); // país → [{ names, url }]
+try {
+  for (const [c, teams] of Object.entries(JSON.parse(fs.readFileSync(AF_FILE, 'utf8')))) {
+    afCountry.set(c, teams.map(([n, id]) => ({ names: [norm(n)].filter(Boolean), url: `https://media.api-sports.io/football/teams/${id}.png` })));
+  }
+} catch { /* ainda não gerado */ }
+function afLogo(name, league) {
+  const list = afCountry.get(countryOf(league));
+  return list ? listLogo(list, name) : '';
+}
+
 // emblema na ESPN: primeiro nome igual, depois "contém" (só dentro da mesma liga)
 function espnLogo(sport, name, league) {
   if (sport === 'tennis') {
@@ -102,6 +165,8 @@ function espnLogo(sport, name, league) {
   const list = espnLeague.get(league);
   return list ? listLogo(list, name) : '';
 }
+// palavras que sozinhas não identificam uma equipa
+const GENERIC = new Set('united city town athletic atletico athletico sporting real deportivo union club rovers wanderers rangers county borough albion basket basketball baskets women reserves'.split(' '));
 // strict: sem o "contém" (lista de outra liga: "Strasbourg" contém "Bourg")
 function listLogo(list, name, strict = false) {
   const qs = [norm(expand(name)), norm(name)].filter(Boolean);
@@ -110,7 +175,9 @@ function listLogo(list, name, strict = false) {
   qs.push(String(name).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
   const exact = list.find((t) => qs.some((q) => t.names.includes(q)));
   if (exact) return exact.url;
-  const near = strict ? [] : list.filter((t) => qs.some((q) => q.length >= 4 && t.names.some((n) => n.length >= 4 && (n.includes(q) || q.includes(n)))));
+  // "contém" só com palavras inteiras e não só genéricas ("Worcester City" não contém "Chester"; "United" não chega)
+  const within = (a, b) => (' ' + b + ' ').includes(' ' + a + ' ') && a.split(' ').some((w) => !GENERIC.has(w));
+  const near = strict ? [] : list.filter((t) => qs.some((q) => q.length >= 4 && t.names.some((n) => n.length >= 4 && (within(q, n) || within(n, q)))));
   if (near.length === 1) return near[0].url;
   if (near.length) return ''; // dois parecidos na mesma liga: não arrisca
   // patrocinador no meio do nome ("Maccabi Tel Aviv" ~ "Maccabi Rapyd Tel Aviv"): todas as palavras da bet365 no nome
@@ -309,7 +376,8 @@ function logo(sport, name, priority, league) {
   if (offLeague.has(league)) { const u = listLogo(offLeague.get(league), name); if (u) return u; }
   // ligas europeias: as equipas que também jogam a Euroliga/EuroCup (a liga francesa não tem lista própria)
   if (EURO_DOMESTIC.has(league)) for (const k of ['euroleague', 'eurocup']) { const u = offLeague.has(k) && listLogo(offLeague.get(k), name, true); if (u) return u; }
-  if (ESPN_ON) { const u = espnLogo(sport, name, league); if (u) return u; }
+  if (ESPN_ON) { const u = espnLogo(sport, name, league) || (sport === 'soccer' ? soccerCountryLogo(name, league) : ''); if (u) return u; }
+  if (sport === 'soccer') { const u = afLogo(name, league); if (u) return u; }
   if (!SPORT_NAME[sport]) return ''; // ténis: só ESPN
   const k = keyOf(sport, name), c = cache.get(k);
   if (c && (c.url || Date.now() - c.at < RETRY_MISS_MS)) return c.url;
@@ -356,6 +424,7 @@ async function start() {
   console.log(`[Emblemas] Das próprias ligas: Euroliga/EuroCup ${el}, NBB/Liga Nacional ${sc}.`);
   setInterval(loadEuroleague, 86400000); setInterval(loadSiteCrests, 86400000);
   if (ESPN_ON) {
+    loadEspnSoccerAll(); setInterval(loadEspnSoccerAll, 86400000); // ~220 pedidos: em segundo plano, não atrasa o arranque
     const n = await loadEspnTeams(); await loadEspnTennis();
     console.log(`[Emblemas] ESPN (só para teste): ${n} emblemas de equipas em ${espnLeague.size} ligas, ${espnPlayers.size} tenistas com bandeira.`);
     // equipas: 1x/dia; tenistas: a cada hora (os torneios mudam todas as semanas)
