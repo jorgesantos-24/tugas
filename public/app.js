@@ -458,8 +458,7 @@ function timeCell(ev) {
 
 // emblema da equipa; sem emblema, as iniciais num círculo (se a imagem falhar, também)
 const crestText = (t) => initials(String(t.short || t.name || '').replace(/[^\p{L}\p{N} ]/gu, '')) || '?'; // só letras/números (vai dentro do onerror)
-// fotos dos tenistas (Wikimedia Commons): recortadas num círculo, com o rosto em cima
-const crest = (t) => (t.logo && !badLogos.has(t.logo) ? `<img${/upload\.wikimedia\.org/.test(t.logo) ? ' class="ph"' : ''} src="${esc(t.logo)}" alt="" loading="lazy" data-ini="${esc(crestText(t))}" onerror="badLogo(this)">` : `<i class="crest">${crestText(t)}</i>`);
+const crest = (t) => (t.logo && !badLogos.has(t.logo) ? `<img src="${esc(t.logo)}" alt="" loading="lazy" data-ini="${esc(crestText(t))}" onerror="badLogo(this)">` : `<i class="crest">${crestText(t)}</i>`);
 function teamLine(t, ev, other) {
   const showScore = ev.state !== 'pre' && t.score != null;
   const won = ev.state === 'post' && showScore && t.score > other.score;

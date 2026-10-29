@@ -132,7 +132,6 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .ev-teams{min-width:0}
 .team-line{display:flex;align-items:center;gap:8px;height:22px}
 .team-line img{width:18px;height:18px;object-fit:contain;flex:none}
-img.ph,.team-line img.ph,.hero-team img.ph,.bg-team img.ph,.hb-team img.ph{border-radius:50%;object-fit:cover;object-position:50% 18%;background:var(--panel3,#2a3340)}
 /* sem emblema: iniciais num círculo, do mesmo tamanho da imagem */
 .crest{display:inline-grid;place-items:center;flex:none;width:18px;height:18px;border-radius:50%;background:var(--panel3,#2a3340);color:#cfd8e3;font-style:normal;font-weight:800;font-size:8px;letter-spacing:-.3px;line-height:1}
 .hero-team .crest{width:42px;height:42px;font-size:14px}
