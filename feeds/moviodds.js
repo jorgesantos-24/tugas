@@ -26,6 +26,7 @@ const TT = require('./tabletennis.js'); // tênis de mesa: mercados e resultado 
 const KNOCKOUT = new Set(['bra.copa', 'conmebol.lib', 'conmebol.sud', 'uefa.ucl', 'uefa.uel', 'uefa.uecl', 'eng.efl', 'esp.copa', 'ger.copa']);
 // último estado de cada jogo vindo dos pedidos normais (equipas, liga, hora, relógio): o WebSocket só traz odds e estatísticas
 const lastMeta = new Map(); // id → { m (sem cotações), sport }
+const fullQuotes = new Map(); // futebol: id → cotações do último pedido com todos os grupos (para o Criar aposta)
 
 // placar ao vivo a partir das estatísticas do WebSocket (chega antes do pedido seguinte)
 function scoreFromStats(sport, st) {
@@ -139,9 +140,11 @@ const MARKET_ORDER = ['ml', 'mlr', 'dc', 'dcr', 'dnb', 'btts', 'set1', 'fmov', '
 
 const STALE_LIVE_MS = 60000; // ao vivo: odds lidas há mais de 1 min ficam bloqueadas
 
+// tempo máximo de cada pedido (o completo do futebol tem ~118 MB: numa ligação lenta, ex. testes locais, pode precisar de mais)
+const TIMEOUT_MS = Number(process.env.MOVIODDS_TIMEOUT_MS) || 25000;
 async function get(pathQs) {
   const url = `${BASE}${pathQs}${KEY ? (pathQs.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY) : ''}`;
-  const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(25000) });
+  const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!r.ok) throw new Error(`MoviOdds ${pathQs.split('&')[0]}: HTTP ${r.status}`);
   return r.json();
 }
@@ -332,6 +335,12 @@ function toEvent(m0, serverNow, sport, full = true) {
   }
   if (BY_TOURNAMENT[sport]) lg = tournament(lg, m.league, sport);
   const live = !!m.in_play;
+  if (sport === 'soccer') {
+    if (full && !live && m.quotes?.length) {
+      fullQuotes.set(String(m0.id), { quotes: m.quotes, at: Date.now() });
+      if (fullQuotes.size > 3000) for (const [k, v] of fullQuotes) if (Date.now() - v.at > EXTRA_PRE_MS) fullQuotes.delete(k);
+    } else if (live) fullQuotes.delete(String(m0.id));
+  }
   const kick = Date.parse(m.kickoff_utc);
   const xs = live ? STATS.build(sport, st, m) : null; // estatísticas no formato da página do jogo
   let score = null, clock;
@@ -392,6 +401,7 @@ function toEvent(m0, serverNow, sport, full = true) {
     const stale = staleAll || !!gs[q.group_id]?.stale;
     if (stale && !live) continue;
     const sel = { pick: s.pick, odds, lock: !!(q.suspended || stale) };
+    Object.defineProperty(sel, 'q', { value: q }); // cotação de origem (Criar aposta); fora do JSON
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
@@ -738,6 +748,8 @@ module.exports = {
   name: 'MoviOdds (bet365)', SPORTS, COUNTRY_PT, fetchAll, fetchLive, fetchResult, parseResult, clockLabel, toEvent, tennisResult, loadPlayerCoverage,
   // WebSocket: start(cb) liga e avisa os jogos que mudaram; want(ids) diz quais seguir; fromWs(id) dá o evento atualizado
   guardRemoved, liveStats: (id) => WS.stats(id),
+  // Criar aposta: jogo de futebol antes do início com todos os grupos de mercados ({ home, away, quotes }) ou null
+  bbMatch: (id) => { const meta = lastMeta.get(String(id)), f = fullQuotes.get(String(id)); return meta && f && Date.now() - f.at < EXTRA_PRE_MS ? { home: meta.m.home, away: meta.m.away, quotes: f.quotes } : null; },
   // última leitura da bet365 pela MoviOdds para este jogo (ms, relógio da fonte), pelo WebSocket; null sem WebSocket
   // e a idade dessa leitura em ms, no relógio da fonte (o nosso pode estar adiantado ou atrasado)
   polledAt: (id) => { const p = WS.get(id)?.polledAt; return p ? Date.parse(p) || null : null; }, srcNow: () => WS.now(), // estatísticas ao vivo em bruto (histórico de games do ténis, mapas) — liquidação antecipada

@@ -398,7 +398,7 @@ module.exports = function adminRoutes(routes, D) {
         if (results.length !== bet.legs.length) fail(400, 'Número de seleções não confere.');
         const legs = bet.legs.map((l, i) => ({ ...l, result: results[i], value: LEG_VALUE[results[i]], final: l.final || 'equipa', manual: true }));
         // todas ganhas: o "retorno potencial" mostrado; com devolvidas, recalcula (igual à liquidação automática)
-        const payout = legs.some((l) => l.value === -1) ? 0 : legs.every((l) => l.value === 1) ? bet.potential : Math.round(bet.stake * legs.reduce((p, l) => p * D.M.outcomeFactor(l.value, l.odds), 1));
+        const payout = legs.some((l) => l.value === -1) ? 0 : legs.every((l) => l.value === 1) ? bet.potential : Math.round(bet.stake * D.betFactor(bet, legs)); // Criar aposta: refaz a odd do grupo
         const status = payout === 0 ? 'lost' : payout > bet.stake ? 'won' : 'void';
         const wasOpen = bet.status === 'open';
         const diff = wasOpen ? payout : payout - (bet.payout || 0);

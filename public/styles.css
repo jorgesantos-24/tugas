@@ -270,6 +270,22 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .slip-item .x{position:absolute;top:8px;right:8px;color:var(--muted);font-size:16px;line-height:1}
 .slip-item .x:hover{color:var(--text)}
 .si-pick{font-weight:700;padding-right:22px;display:flex;justify-content:space-between;gap:8px}
+/* Criar aposta: seleções do mesmo jogo numa odd */
+.slip-bb{background:var(--panel2);border-radius:10px;padding:10px 12px;margin-bottom:8px;border:1px solid rgba(255,214,10,.35)}
+.slip-bb.bad{border-color:var(--red)}
+.bb-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.bb-tag{background:var(--yellow);color:#10261a;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.3px;border-radius:5px;padding:2px 7px}
+.bb-odd{color:var(--yellow);font-weight:800}
+.bb-odd .old{color:var(--muted);text-decoration:line-through;font-weight:500;margin-right:4px}
+.bb-leg{position:relative;display:flex;gap:8px;align-items:flex-start;padding:7px 22px 0 2px;font-weight:600;font-size:13px}
+.bb-leg .x{position:absolute;top:6px;right:0;color:var(--muted);font-size:16px;line-height:1}
+.bb-leg .x:hover{color:var(--text)}
+.bb-leg.bad{color:var(--red)}
+.bb-dot{flex:none;width:8px;height:8px;border-radius:50%;border:2px solid var(--yellow);margin-top:4px}
+.bb-card-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:8px 0 2px}
+.bb-card-head b{margin-left:auto;font-size:13px}
+.leg.in-bb{margin-left:6px}
+.bb-hint{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid rgba(255,214,10,.3);border-radius:10px;padding:9px 12px;margin:0 0 10px;font-size:13px;color:#d6e6dc}
 .si-odds{color:var(--yellow)}
 .si-odds .old{color:var(--muted);text-decoration:line-through;font-weight:500;margin-right:4px}
 .si-market{font-size:12px;color:var(--muted);margin-top:2px}

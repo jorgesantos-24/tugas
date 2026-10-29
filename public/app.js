@@ -14,7 +14,7 @@ const S = {
   site: {}, // dados da empresa (/api/site): e-mail de suporte, CNPJ...
   events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
   view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(), betOpen: new Set(), openMkts: new Set(),
-  slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '',
+  slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '', bbq: {},
   acceptAnyLocal: lsGet('gl_acceptAny', true), streamHidden: lsGet('gl_streamHidden', false),
   user: null, bets: [], tx: [], payments: { live: false }, games: {},
   placing: false, cashoutConfirm: null, cashoutBusy: null,
@@ -323,14 +323,47 @@ function toggleSel(key) {
     const { ev, sel } = findSel(key);
     if (!sel || sel.locked || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
     if (S.slip.length >= 20) { toast('Máximo de 20 seleções', 'err'); return; }
+    const same = S.slip.filter((s) => s.evId === ev.id).length;
+    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é no futebol, antes do jogo)', 'err');
+    else if (same >= BB_MAX) { toast(`Criar aposta: máximo de ${BB_MAX} seleções por jogo`, 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
-    if (S.slip.length >= 2 && !hasConflict()) S.slipMode = 'multiple';
+    // segunda seleção do mesmo jogo de futebol: vira Criar aposta (múltipla)
+    if (S.slip.length >= 2 && (!hasConflict() || (same && bbOk(ev)))) S.slipMode = 'multiple';
   }
   if (S.slip.length < 2) S.slipMode = 'single';
   S.slipTab = 'slip';
   render();
+  ensureBB();
 }
-const hasConflict = () => new Set(S.slip.map((s) => s.evId)).size !== S.slip.length;
+
+/* Criar aposta: seleções do mesmo jogo de futebol (antes do início) numa odd só, calculada pelo servidor */
+const BB_MAX = 6;
+const bbOk = (ev) => !!ev && ev.sport === 'soccer' && ev.state === 'pre' && !ev.manual;
+const slipGroups = () => { const g = new Map(); for (const s of S.slip) g.set(s.evId, [...(g.get(s.evId) || []), s]); return g; };
+const bbKey = (list) => list.map((s) => s.key).sort().join('~');
+const bbOf = (list) => S.bbq[bbKey(list)] || null;
+let bbBusy = false;
+async function ensureBB(force = false) {
+  const need = [...slipGroups().values()].filter((g) => g.length > 1 && bbOk(findSel(g[0].key).ev))
+    .filter((g) => { const q = bbOf(g); return force || !q || Date.now() - q.at > 15000; });
+  if (!need.length || bbBusy) return;
+  bbBusy = true;
+  for (const g of need) if (!bbOf(g)) S.bbq[bbKey(g)] = { busy: true, at: Date.now() };
+  try {
+    const { groups } = await api('POST', '/api/betbuilder/price', { groups: need.map((g) => g.map((s) => s.key)) });
+    need.forEach((g, i) => { const old = bbOf(g); S.bbq[bbKey(g)] = { ...groups[i], prev: old?.odds ?? old?.prev ?? null, at: Date.now() }; });
+  } catch { need.forEach((g) => { S.bbq[bbKey(g)] = { reason: 'não foi possível calcular a odd', at: Date.now() - 10000 }; }); }
+  bbBusy = false;
+  renderSlip();
+}
+setInterval(() => { if (!document.hidden && S.slip.length > 1) ensureBB(); }, 5000);
+// conflito: duas seleções do mesmo jogo que não formam um Criar aposta válido
+const hasConflict = () => [...slipGroups().values()].some((g) => g.length > 1 && !(bbOf(g)?.odds));
+const slipOdds = (items) => {
+  let o = 1;
+  for (const g of slipGroups().values()) o *= g.length > 1 ? bbOf(g)?.odds || 1 : (items.find((i) => i.s.key === g[0].key)?.sel?.odds || 1);
+  return o;
+};
 function slipState() {
   return S.slip.map((s) => {
     const { ev, sel } = findSel(s.key);
@@ -352,10 +385,12 @@ async function placeBets() {
   if (items.some((i) => i.changed) && !acceptAny()) { toast('As odds mudaram. Aceite as alterações.', 'err'); return; }
   let tickets;
   if (S.slipMode === 'multiple') {
-    if (hasConflict()) { toast('Seleções do mesmo jogo não podem ser combinadas', 'err'); return; }
+    if (hasConflict()) { const bad = [...slipGroups().values()].find((g) => g.length > 1 && !bbOf(g)?.odds); toast(bbOf(bad)?.reason ? `Criar aposta: ${bbOf(bad).reason}` : bbOf(bad)?.busy ? 'A calcular a odd do Criar aposta…' : 'Seleções do mesmo jogo não podem ser combinadas', 'err'); return; }
     const stake = parseMoney(S.comboStake);
     if (stake < 1) { toast('Valor mínimo: R$ 1,00', 'err'); return; }
-    tickets = [{ keys: items.map((i) => i.s.key), odds: items.map((i) => i.s.odds), stake }];
+    const bb = {};
+    for (const [evId, g] of slipGroups()) if (g.length > 1) bb[evId] = bbOf(g).odds;
+    tickets = [{ keys: items.map((i) => i.s.key), odds: items.map((i) => i.s.odds), stake, ...(Object.keys(bb).length ? { bb } : {}) }];
   } else {
     tickets = [];
     for (const it of items) {
@@ -373,6 +408,7 @@ async function placeBets() {
     const res = await api('POST', '/api/bets', { tickets, acceptAny: acceptAny() });
     setUser(res.user);
     for (const r of res.rejected) toast(`Aposta recusada: ${r.reason}`, 'err');
+    if (res.rejected.length) ensureBB(true); // odd do Criar aposta pode ter mudado
     if (held.length) toast(held.length > 1 ? `${held.length} apostas não enviadas: seleções suspensas (ficam no boletim)` : 'Uma aposta não foi enviada: seleção suspensa (fica no boletim)', 'err');
     if (res.placed.length) {
       const placedKeys = new Set(res.placed.flatMap((p) => p.bet.legs.map((l) => l.key)));
@@ -409,7 +445,7 @@ function sessionExpired(e, what) {
   return true;
 }
 const cashoutValue = (bet) => {
-  if (bet.status !== 'open') return null;
+  if (bet.status !== 'open' || bet.bb) return null; // Criar aposta: sem Cash Out
   const f = cashoutFactor(bet, findSel);
   if (!f) return null;
   const v = Math.floor(bet.stake * 100 * f) / 100;
@@ -1121,6 +1157,8 @@ function renderEvent() {
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
+    // Criar aposta: dica no futebol antes do jogo
+    else if (bbOk(ev)) { const n = S.slip.filter((s) => s.evId === ev.id).length; html += `<div class="bb-hint"><span class="bb-tag">Criar aposta</span><span>${n > 1 ? `${n} seleções deste jogo no boletim — a odd é calculada junta` : `Escolha até ${BB_MAX} seleções deste jogo e junte numa odd só (pode juntar com outros jogos)`}</span></div>`; }
     // secções (como na bet365): só aparecem as que têm mercados; "Todos" mostra tudo
     const tabs = eventTabs(ev).filter((t) => t.id === 'all' || sels.some((s) => t.has(s)));
     let tab = S.evTab?.id === ev.id ? S.evTab.tab : 'all';
@@ -1285,12 +1323,15 @@ const legCls = (l) => !l.result ? '' : l.result.includes('won') ? 'won' : l.resu
 // fold = página "Minhas apostas": o cartão começa fechado e abre com um toque (S.betOpen guarda os abertos)
 function betCard(bet, fold = false) {
   const closed = fold && !S.betOpen.has(bet.id);
+  const bbSeen = new Set();
   const legs = closed ? '' : bet.legs.map((l) => {
     const ev = S.events.get(l.evId);
     const cls = legCls(l);
-    return `<div class="leg ${cls}">
+    // Criar aposta: um cabeçalho com a odd do grupo antes das seleções desse jogo
+    const head = l.bb && !bbSeen.has(l.bb) ? (bbSeen.add(l.bb), `<div class="bb-card-head"><span class="bb-tag">Criar aposta</span><span>${bet.legs.filter((x) => x.bb === l.bb).length} seleções</span><b style="color:var(--yellow)">${fmtOdd(bet.bb?.[l.bb]?.odds)}</b></div>`) : '';
+    return `${head}<div class="leg ${cls}${l.bb ? ' in-bb' : ''}">
       ${legGame(l, ev)}
-      <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${fmtOdd(l.odds)}</span></div>
+      <div class="lp"><span>${esc(l.name)}</span><span style="color:var(--yellow)">${l.bb ? '' : fmtOdd(l.odds)}</span></div>
       <div class="lm">${esc(l.marketName)}</div>
       ${l.result ? `<span class="lm">${RES_PT[l.result]} · ${l.early ? `decidida ${esc(l.final)}` : `Final ${esc(l.final)}`}</span>` : ''}
       ${trackHtml(l, ev, bet)}
@@ -1303,7 +1344,8 @@ function betCard(bet, fold = false) {
     else if (co) action = `<button class="cashout-btn ${S.cashoutConfirm === bet.id ? 'confirm' : ''}" data-cashout="${bet.id}">${S.cashoutConfirm === bet.id ? `Confirmar Cash Out ${money(co)}` : `Cash Out ${money(co)}`}</button>`;
     else action = `<button class="cashout-btn" disabled>Cash Out indisponível</button>`;
   }
-  const type = bet.type === 'multiple' ? `Múltipla (${bet.legs.length})` : 'Simples';
+  const nbb = Object.keys(bet.bb || {}).length;
+  const type = nbb && bet.legs.every((l) => l.bb) && nbb === 1 ? `Criar aposta (${bet.legs.length})` : bet.type === 'multiple' ? `Múltipla (${bet.legs.length})${nbb ? ' · Criar aposta' : ''}` : 'Simples';
   const status = `<span class="bet-status st-${bet.status}">${ST_PT[bet.status]}</span>`;
   const when = new Date(bet.placedAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   if (closed) {
@@ -1363,10 +1405,27 @@ function renderSlip() {
   const items = slipState();
   const conflict = hasConflict();
   const multi = S.slipMode === 'multiple';
-  const totalOdds = round2(items.reduce((p, i) => p * (i.sel ? i.sel.odds : 1), 1));
+  const totalOdds = round2(multi ? slipOdds(items) : items.reduce((p, i) => p * (i.sel ? i.sel.odds : 1), 1));
   $('#slipFabOdds').textContent = multi ? '@ ' + fmtOdd(totalOdds) : '';
-  let html = `<div class="slip-mode"><button class="${!multi ? 'active' : ''}" data-mode="single">Simples</button><button class="${multi ? 'active' : ''}" data-mode="multiple" ${S.slip.length < 2 || conflict ? 'disabled' : ''}>Múltipla</button></div>`;
+  const bbAble = [...slipGroups().values()].every((g) => g.length < 2 || bbOk(findSel(g[0].key).ev));
+  let html = `<div class="slip-mode"><button class="${!multi ? 'active' : ''}" data-mode="single">Simples</button><button class="${multi ? 'active' : ''}" data-mode="multiple" ${S.slip.length < 2 || !bbAble ? 'disabled' : ''}>Múltipla</button></div>`;
+  const groups = slipGroups(), shown = new Set();
   for (const { s, ev, sel, suspended, changed } of items) {
+    // múltipla: as seleções do mesmo jogo aparecem juntas num quadro "Criar aposta" com a odd do grupo
+    const grp = multi && groups.get(s.evId);
+    if (grp && grp.length > 1) {
+      if (shown.has(s.evId)) continue;
+      shown.add(s.evId);
+      const q = bbOf(grp), gi = grp.map((g) => items.find((i) => i.s.key === g.key));
+      const bad = q?.bad;
+      html += `<div class="slip-bb ${q?.reason || gi.some((i) => i.suspended) ? 'bad' : ''}">
+        <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
+        <div class="si-event">${ev ? esc(evLabel(ev)) : ''}</div>
+        ${gi.map((i) => `<div class="bb-leg ${i.s.key === bad ? 'bad' : ''}"><button class="x" data-remove="${esc(i.s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(i.sel ? i.sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(i.sel ? i.sel.marketName : '')}</div></div></div>`).join('')}
+        ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
+      </div>`;
+      continue;
+    }
     const stake = S.stakes[s.key] || '';
     const ret = sel ? parseMoney(stake) * sel.odds : 0;
     html += `<div class="slip-item ${suspended ? 'bad' : ''}">
@@ -1378,7 +1437,7 @@ function renderSlip() {
       ${!multi ? `<div class="stake-row"><label class="stake"><span>R$</span><input inputmode="decimal" data-stake="${esc(s.key)}" value="${esc(stake)}" placeholder="0,00"></label><div class="ret">Retorno<b>${money(ret)}</b></div></div>` : ''}
     </div>`;
   }
-  if (conflict) html += `<div class="si-warn" style="margin-bottom:8px">Seleções do mesmo jogo não podem ser combinadas em múltipla.</div>`;
+  if (conflict && !multi) html += `<div class="si-warn" style="margin-bottom:8px">${[...groups.values()].some((g) => g.length > 1 && bbOk(findSel(g[0].key).ev)) ? 'Seleções do mesmo jogo: use Múltipla para o Criar aposta.' : 'Seleções do mesmo jogo não podem ser combinadas em múltipla.'}</div>`;
   let totalStake;
   if (multi) {
     totalStake = parseMoney(S.comboStake);
@@ -1865,7 +1924,7 @@ document.addEventListener('click', async (e) => {
     return;
   }
   if (d.remove) { toggleSel(d.remove); return; }
-  if (d.mode) { S.slipMode = d.mode; renderSlip(); return; }
+  if (d.mode) { S.slipMode = d.mode; renderSlip(); if (d.mode === 'multiple') ensureBB(); return; }
   if (d.tab) { S.slipTab = d.tab; renderSlip(); return; }
   if (d.quick) { S.comboStake = String(round2(parseMoney(S.comboStake) + +d.quick)).replace('.', ','); renderSlip(); return; }
   if (d.chip) { depState.amount = +d.chip; if ($('#depCpf')) depState.cpf = $('#depCpf').value; openDeposit(); return; }
@@ -1912,7 +1971,7 @@ document.addEventListener('click', async (e) => {
     case 'place': placeBets(); break;
     case 'more': S.listLimit += LIST_STEP; S.keepScroll = true; renderMain(); break;
     case 'clear': S.slip = []; S.stakes = {}; S.comboStake = ''; S.slipMode = 'single'; render(); break;
-    case 'accept': S.slip.forEach((s) => { const { sel } = findSel(s.key); if (sel) s.odds = sel.odds; }); renderSlip(); break;
+    case 'accept': S.slip.forEach((s) => { const { sel } = findSel(s.key); if (sel) s.odds = sel.odds; }); for (const q of Object.values(S.bbq)) q.prev = null; renderSlip(); break;
     case 'back': { const p = S.prevView || { view: 'home' }; go(p.view, { league: p.league, sport: p.sport }); } break;
     case 'login': afterAuth = null; openLogin(); break; // login pedido pelo próprio jogador: não reabre nada pendente
     case 'register': openRegister(); break;
@@ -1967,7 +2026,7 @@ document.addEventListener('input', (e) => {
     const btn = document.querySelector('[data-action="place"]'); if (btn && !S.placing && S.user) btn.textContent = `Apostar ${money(ts)}`;
   } else if (t.id === 'comboStake') {
     S.comboStake = t.value;
-    const odds = slipState().reduce((p, i) => p * (i.sel ? i.sel.odds : 1), 1);
+    const odds = round2(slipOdds(slipState()));
     if ($('#potRet')) $('#potRet').textContent = money(parseMoney(t.value) * odds);
     const btn = document.querySelector('[data-action="place"]'); if (btn && !S.placing && S.user) btn.textContent = `Apostar ${money(parseMoney(t.value))}`;
   } else if (t.id === 'depCpf' || t.id === 'regCpf') {

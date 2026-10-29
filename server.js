@@ -32,6 +32,7 @@ const M = require('./public/markets.js');
 const BP = require('./bravopay.js');
 const FB = require('./firebase.js');
 const FEED = require('./feeds/moviodds.js'); // jogos, odds e resultados
+const BB = require('./feeds/betbuilder.js'); // Criar aposta (várias seleções do mesmo jogo numa odd)
 const LOGOS = require('./feeds/logos.js');   // emblemas das equipas
 const ESPN = require('./feeds/espn.js');     // futebol: resultado do prolongamento e dos penáltis
 const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailVerification, WEB_CONFIG, EMULATOR } = FB;
@@ -162,6 +163,7 @@ function publicBet(b) {
   return {
     id: b.id, type: b.type, stake: fromCents(b.stake), odds: b.odds, potential: fromCents(b.potential), status: b.status,
     payout: fromCents(b.payout), placedAt: b.placedAt, settledAt: b.settledAt,
+    ...(b.bb ? { bb: Object.fromEntries(Object.entries(b.bb).map(([k, g]) => [k, { odds: g.odds }])) } : {}), // Criar aposta: odd de cada grupo
     // emblemas das equipas de cada seleção: o site mostra-os mesmo depois de o jogo sair da lista
     legs: (b.legs || []).map((l) => {
       const [h, a] = String(l.event || '').split(' x ');
@@ -689,6 +691,37 @@ function findSel(key) {
   return { ev, sel: M.selections(ev).find((s) => s.key === key) || null };
 }
 
+/* ---------------- Criar aposta ----------------
+   Várias seleções do mesmo jogo de futebol (antes do início) numa só odd, calculada pelo motor (feeds/betbuilder.js)
+   a partir de todas as odds da bet365 desse jogo. Pode juntar-se a outros jogos numa múltipla. */
+const bbEligible = (ev) => !!ev && !ev.manual && ev.sport === 'soccer' && ev.state === 'pre' && !M.isSuspended(ev) && now() < +ev.date;
+// seleção do site → cotação da bet365 de onde veio
+function srcQuote(ev, o) {
+  for (const mk of ev.markets || []) {
+    if (mk.k !== o.market || String(mk.per ?? '') !== String(o.per ?? '')) continue;
+    const s = mk.sels.find((x) => x.pick === o.pick && (x.line ?? null) === (o.line ?? null) && String(x.base ?? '') === String(o.base ?? ''));
+    if (s) return s.q || null;
+  }
+  return null;
+}
+// odd de um grupo de seleções do mesmo jogo → { odds, params, items } ou { reason, bad? }
+function bbQuote(keys) {
+  const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
+  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
+  const m = FEED.bbMatch(evId);
+  const E = m && BB.engineFor(evId, m);
+  if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  const items = [];
+  for (const key of keys) {
+    const { sel } = findSel(key);
+    if (!sel || sel.locked) return { reason: `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`, bad: key };
+    const q = !sel.manual && srcQuote(ev, sel);
+    items.push({ key, sel, q, odds: sel.odds, name: sel.name });
+  }
+  const r = BB.quote(E, items);
+  return r.reason ? r : { ...r, items };
+}
+
 /* A lista de jogos leva só os mercados da linha do jogo (vencedor e linha principal do total) e o número total
    de seleções ("+N"). Os mercados completos de um jogo vêm de /api/events/full (página do jogo, boletim, apostas
    em aberto) — com dezenas de mercados por jogo de ténis, mandar tudo a cada 5 s pesaria vários MB. */
@@ -919,6 +952,20 @@ async function loadTrail() {
   if (trail.size) console.log(`[Seleções por marcar] ${trail.size} apostas fechadas com seleções ainda a acompanhar (${found} encontradas agora)`);
 }
 
+/* odd final de uma aposta com seleções devolvidas (ou meio ganhas): cada seleção solta conta pela sua odd;
+   cada Criar aposta conta pela odd do grupo e, com seleções anuladas, a odd é recalculada só com as que ficaram
+   (mesmos números do modelo do momento da aposta; se ficar uma só, vale a odd dela nesse momento) */
+function betFactor(row, legs) {
+  let f = legs.filter((l) => !l.bb).reduce((p, l) => p * M.outcomeFactor(l.value, l.odds), 1);
+  for (const [evId, g] of Object.entries(row.bb || {})) {
+    const gl = legs.filter((l) => l.bb === evId);
+    if (gl.every((l) => l.value === 1)) { f *= g.odds; continue; }
+    try { f *= BB.requote(g.params, gl.filter((l) => l.value > 0).map((l) => ({ src: l.src, odds: l.odds }))); }
+    catch (e) { console.error(`[Criar aposta] aposta ${row.id}: nova odd falhou (${e.message}); conta cada seleção pela sua odd`); f *= gl.filter((l) => l.value > 0).reduce((p, l) => p * l.odds, 1); }
+  }
+  return f;
+}
+
 // as duas atualizações chamam isto: se já estiver a correr, a próxima (daqui a 5 s) apanha o que faltar
 let settling = false;
 async function settleBets() {
@@ -944,7 +991,7 @@ async function settleAll() {
       if (anyLost || allDone) {
         // todas ganhas: paga exatamente o "retorno potencial" mostrado (odd total arredondada a 2 casas);
         // com devolvidas / meio ganhas, recalcula com as odds de cada seleção
-        const payout = anyLost ? 0 : legs.every((l) => l.value === 1) ? row.potential : Math.round(row.stake * legs.reduce((p, l) => p * M.outcomeFactor(l.value, l.odds), 1));
+        const payout = anyLost ? 0 : legs.every((l) => l.value === 1) ? row.potential : Math.round(row.stake * betFactor(row, legs));
         const status = payout === 0 ? 'lost' : payout > row.stake ? 'won' : 'void';
         await closeBet(row, status, payout, legs, status === 'won' ? 'Prêmio' : 'Aposta devolvida');
       } else if (changed) {
@@ -1454,9 +1501,14 @@ const routes = {
       if (!Array.isArray(tk.keys) || !tk.keys.length || tk.keys.length > 20) fail(400, 'Boletim inválido.');
       const stake = toCents(tk.stake);
       if (!(stake >= 100)) fail(400, 'Valor mínimo por aposta: R$ 1,00.');
-      const evIds = tk.keys.map((k) => String(k).split('|')[0]);
-      if (new Set(evIds).size !== evIds.length) fail(400, 'Seleções do mesmo jogo não podem ser combinadas.');
-      return { keys: tk.keys.map(String), seen: Array.isArray(tk.odds) ? tk.odds : [], stake };
+      const keys = tk.keys.map(String);
+      if (new Set(keys).size !== keys.length) fail(400, 'Boletim inválido.');
+      // várias seleções do mesmo jogo: só como Criar aposta (a odd do grupo é calculada mais abaixo)
+      const byEv = new Map();
+      for (const k of keys) { const e = k.split('|')[0]; byEv.set(e, [...(byEv.get(e) || []), k]); }
+      for (const ks of byEv.values()) if (ks.length > BB.MAX_LEGS) fail(400, `Criar aposta: máximo de ${BB.MAX_LEGS} seleções por jogo.`);
+      const bbSeen = tk.bb && typeof tk.bb === 'object' ? tk.bb : {};
+      return { keys, seen: Array.isArray(tk.odds) ? tk.odds : [], stake, byEv, bbSeen };
     });
     // apostas com alguma seleção suspensa: recusadas uma a uma (as outras do boletim seguem); todas suspensas → erro
     const preRejected = new Map(); // índice → motivo
@@ -1499,19 +1551,32 @@ const routes = {
         let reason = null;
         if (preRejected.has(i)) { rejected.push({ index: i, reason: preRejected.get(i) }); continue; }
         if (liveReason && tk.keys.some((k) => snap.has(String(k).split('|')[0]))) { rejected.push({ index: i, reason: liveReason }); continue; }
+        // Criar aposta: odd de cada grupo de seleções do mesmo jogo (recalculada agora, no servidor)
+        const bbq = {};
+        for (const [evId, ks] of tk.byEv) {
+          if (ks.length < 2) continue;
+          const q = bbQuote(ks);
+          if (q.reason) { reason = q.reason; break; }
+          if (!acceptAny && tk.bbSeen[evId] != null && Number(tk.bbSeen[evId]) !== q.odds) { reason = 'odds alteradas'; break; }
+          bbq[evId] = q;
+        }
+        if (reason) { rejected.push({ index: i, reason }); continue; }
         for (let j = 0; j < tk.keys.length; j++) {
           const { ev, sel } = findSel(tk.keys[j]);
           if (!sel || sel.locked || M.isSuspended(ev)) { reason = 'mercado suspenso'; break; }
-          if (!acceptAny && tk.seen[j] != null && Number(tk.seen[j]) !== sel.odds) { reason = 'odds alteradas'; break; }
+          const grp = bbq[ev.id];
+          if (!grp && !acceptAny && tk.seen[j] != null && Number(tk.seen[j]) !== sel.odds) { reason = 'odds alteradas'; break; }
           if (sel.maxStake && tk.stake > sel.maxStake) { reason = `aposta máxima no mercado "${sel.marketName}": ${brl(sel.maxStake)}`; break; }
           legs.push({
             key: sel.key, evId: ev.id, feed: ev.manual ? 'equipa' : 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
             name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
+            ...(grp ? { bb: ev.id, src: BB.srcOf(grp.items.find((x) => x.key === sel.key).q) } : {}),
           });
         }
         if (reason) { rejected.push({ index: i, reason }); continue; }
-        const odds = M.round2(legs.reduce((p, l) => p * l.odds, 1));
+        // odd total: seleções soltas × odd de cada Criar aposta
+        const odds = M.round2(legs.filter((l) => !l.bb).reduce((p, l) => p * l.odds, 1) * Object.values(bbq).reduce((p, g) => p * g.odds, 1));
         const potential = Math.round(tk.stake * odds);
         if (potential > MAX_WIN) { rejected.push({ index: i, reason: 'prêmio máximo de R$ 500.000 excedido' }); continue; }
         if (legs.some((l) => String(l.league).startsWith('fut.'))) {
@@ -1527,6 +1592,8 @@ const routes = {
         const bet = {
           id, userId: u.id, type: legs.length > 1 ? 'multiple' : 'single', stake: tk.stake, odds, potential,
           status: 'open', payout: null, placedAt: now(), settledAt: null, legs,
+          // Criar aposta: odd de cada grupo e os números do modelo (para refazer a conta se uma seleção for anulada)
+          ...(Object.keys(bbq).length ? { bb: Object.fromEntries(Object.entries(bbq).map(([k, g]) => [k, { odds: g.odds, params: g.params }])) } : {}),
         };
         try {
           await runTx([u.id], async (t) => {
@@ -1560,6 +1627,22 @@ const routes = {
   },
   
 
+  // Criar aposta: odd de cada grupo de seleções do mesmo jogo (o boletim pede quando muda)
+  'POST /api/betbuilder/price': (ctx) => {
+    rateLimit(ctx.ip, 'bb', 240, 60000);
+    const groups = ctx.body.groups;
+    if (!Array.isArray(groups) || !groups.length || groups.length > 10) fail(400, 'Pedido inválido.');
+    return {
+      groups: groups.map((ks) => {
+        if (!Array.isArray(ks) || ks.length < 2 || ks.length > 20) return { reason: 'escolha pelo menos 2 seleções' };
+        const keys = ks.map(String);
+        if (new Set(keys.map((k) => k.split('|')[0])).size !== 1) return { reason: 'seleções de jogos diferentes' };
+        const q = bbQuote(keys);
+        return q.reason ? { reason: q.reason, bad: q.bad || null } : { odds: q.odds };
+      }),
+    };
+  },
+
   'POST /api/cashout': async (ctx) => {
     const u = requireUser(ctx);
     const id = String(ctx.body.id || '');
@@ -1567,6 +1650,7 @@ const routes = {
     const s = await col.bets(u.id).doc(id).get();
     if (!s.exists) fail(404, 'Aposta não encontrada.');
     if (s.data().status !== 'open') fail(409, 'Esta aposta já foi encerrada.');
+    if (s.data().bb) fail(409, 'Cash Out indisponível em apostas com Criar aposta.');
     if (!M.cashoutFactor(publicBet(s.data()), findSel)) fail(409, 'Cash Out indisponível no momento.');
     // ao vivo: mesma proteção das apostas (espera, placar novo, recusa se houve gol)
     const t0 = now();
@@ -1788,7 +1872,7 @@ const ADM = require('./admin.js')(routes, {
   liveAlerts: (days) => LW.list(days),
   db, col, auth, FieldValue, runTx, addTx, getUser, dirty, fail, now, brl, fromCents, toCents, dayStart, dayKey, DAY,
   requireUser, authInfo, authState, endSessions, openWithdrawals, pendingDeposits, depositWindow, ADMIN_EMAILS, BP, SITE,
-  openBets, M, eventInfo: (id) => events.get(id) || null, feedName: FEED.name, settle: settleQueued, feedInfo: () => feedInfo(),
+  openBets, M, eventInfo: (id) => events.get(id) || null, feedName: FEED.name, settle: settleQueued, feedInfo: () => feedInfo(), betFactor,
 });
 // painel → "Esportes e mercados": modalidades, campeonatos, eventos e mercados da equipa (odds automáticas por rounds)
 require('./catalog.js')(routes, {
