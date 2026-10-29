@@ -254,7 +254,7 @@ const LW = require('./livewatch.js')({ col, inc, M, events, findSel, now }); // 
 // liquidação antecipada: seleções já decididas pagas 2,5 min depois (sem esperar pelo fim do jogo)
 // ténis ponto a ponto: placares de cada game gravados ao vivo → mercados de pontos (1º ponto, placar após N pontos...)
 const POINTS = require('./feeds/points.js');
-const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now, POINTS, espnBox: (id) => { const x = espnLive.get(id); return x && now() - x.at < 90000 ? x.box : null; } });
+const EARLY = require('./early.js')({ M, TEN: require('./feeds/tennis.js'), events, liveStats: FEED.liveStats, now, POINTS, raceLog: (id) => raceLogs.get(id) || null, espnBox: (id) => { const x = espnLive.get(id); return x && now() - x.at < 90000 ? x.box : null; } });
 let feedVersion = 0, feedCache = null, lastFeedOk = 0, lastBump = 0;
 // resultado final: vale logo à primeira leitura (RESULT_CONFIRM_S > 0 obriga a lê-lo igual outra vez depois desse tempo)
 const RESULT_CONFIRM_MS = Number(process.env.RESULT_CONFIRM_S || 0) * 1000;
@@ -484,6 +484,7 @@ async function checkResults() {
       if (t - p.at < RESULT_CONFIRM_MS) continue;
     }
     if (R.log) R.pts = POINTS.resolve(id, R.log); // ténis: sequência dos pontos de cada game (mercados de pontos)
+    if (ev.sport === 'basketball' && raceLogs.has(id)) R.blog = raceLogs.get(id); // corrida a X pontos: leituras ao vivo
     Object.assign(ev, {
       state: 'post', completed: true, awaiting: false, markets: null, clock: 'Encerrado' + (R.alts ? ' (pênaltis)' : ''), pendingResult: null,
       result: R, resultNote: note || (R.alts ? 'decidido nos pênaltis: a fonte não diz quem ganhou; mercados do vencedor ficam para a equipa' : null),
@@ -547,6 +548,24 @@ async function checkShootouts() {
   for (const [id, x] of shootouts) if (!events.has(id) || t - x.at > 6 * 3600000) shootouts.delete(id);
 }
 setInterval(() => { checkShootouts().catch((e) => console.error('[Pênaltis]', e.message)); }, 5000);
+
+/* Basquete ao vivo: pontos de cada quarto, pela ordem em que mudam (cada mensagem de estatísticas da MoviOdds).
+   Serve a "corrida a X pontos" (quem chegou primeiro); só entram leituras em que os quartos somam o placar.
+   No fim do jogo vai com o resultado (R.blog). */
+const raceLogs = new Map(); // jogo → [{ hp, ap }]
+function observeRace(id, st) {
+  const ev = events.get(id);
+  if (!ev || ev.sport !== 'basketball' || ev.state === 'post') return;
+  const hp = st?.home?.periods, ap = st?.away?.periods;
+  if (!Array.isArray(hp) || !Array.isArray(ap) || !hp.length || hp.length !== ap.length || ![...hp, ...ap].every(Number.isFinite)) return;
+  const sum = (x) => x.reduce((s, v) => s + v, 0);
+  if (sum(hp) !== st.home.points || sum(ap) !== st.away.points) return;
+  const L = raceLogs.get(id) || [], last = L[L.length - 1];
+  if (last && String(last.hp) === String(hp) && String(last.ap) === String(ap)) return;
+  L.push({ hp: [...hp], ap: [...ap] });
+  raceLogs.set(id, L);
+}
+setInterval(() => { for (const id of raceLogs.keys()) if (!events.has(id)) raceLogs.delete(id); }, 10 * 60000);
 
 /* Basquete (NBA/WNBA) ao vivo: box score da ESPN dos jogos com apostas de jogadores em aberto (a cada 10 s).
    É a segunda fonte para pagar na hora quem passou a linha em rebotes, assistências, etc. (early.js). */
@@ -2008,7 +2027,7 @@ const server = http.createServer(async (req, res) => {
     load: async (since) => (await col.pointLogs().where('at', '>=', since).get()).docs.map((d) => [d.id, d.data()]),
     save: (id, data) => col.pointLogs().doc(id).set(data),
   });
-  FEED.ws.onStats((id, st) => POINTS.observe(id, st));
+  FEED.ws.onStats((id, st) => { POINTS.observe(id, st); observeRace(id, st); });
   setInterval(() => POINTS.cleanup(), 3600000);
   FEED.ws.start(onWsChange, onWsDown); // odds e placar ao vivo empurrados pela MoviOdds
   // mercados de jogadores: que ligas trazem estatísticas por jogador (em segundo plano; até lá ficam fechados)

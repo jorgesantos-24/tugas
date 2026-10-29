@@ -223,7 +223,7 @@ function ttOutcome(leg, R) {
   if (k === 'ttrt') { const [pw, po] = pk.split(':'); return W((R.h > R.a ? 'home' : 'away') === pw && ouv(hp + ap, po) === 1); }
   return match(R.h, R.a);
 }
-const SOURCE_KINDS = new Set([...AUTO_KINDS, 'pp', 'bp', 'hgs', 'pet', ...TT_KINDS]);
+const SOURCE_KINDS = new Set([...AUTO_KINDS, 'pp', 'bp', 'hgs', 'pet', 'prace', ...TT_KINDS]);
 // uma condição de "pcond" (ver feeds/auto.js) com o placar [h, a]; null = condição desconhecida
 function condOK(c, h, a) {
   const [key, val = ''] = c.split('=');
@@ -352,6 +352,54 @@ function hgsOutcome(leg, R) {
   const g = type === 'first' ? H.order[0] : type === 'last' ? H.order[H.order.length - 1] : undefined;
   if (type !== 'first' && type !== 'last') return null;
   return W(!!g && g.key === k && g.side === side);
+}
+
+/* ---------- basquete: corrida a X pontos (feeds/auto.js) ----------
+   per = "<parte>|<grupo>" · pick = "<home|away|none>:<X>[:n]" (n = o mercado tem "Nenhuma" — sem ela, ninguém chegar
+   devolve). R.blog = placares de cada quarto vistos ao vivo, pela ordem ([{ hp, ap }], server.js): o primeiro a ter X
+   numa leitura em que o outro ainda não tinha ganha. Sem essa leitura, servem os fins de quarto (quem tinha X num fim
+   de quarto em que o outro ainda não tinha). Se nem assim se souber quem chegou primeiro: devolvida. */
+const RACE_IDX = { ft: (i) => true, h1: (i) => i < 2, h2: (i) => i >= 2, q1: (i) => i === 0, q2: (i) => i === 1, q3: (i) => i === 2, q4: (i) => i === 3 };
+function raceSum(hp, ap, scope) {
+  const f = RACE_IDX[scope];
+  if (!f || !Array.isArray(hp) || !Array.isArray(ap) || hp.length !== ap.length) return null;
+  let h = 0, a = 0;
+  for (let i = 0; i < hp.length; i++) if (f(i)) { h += Number(hp[i]); a += Number(ap[i]); }
+  return Number.isFinite(h) && Number.isFinite(a) ? [h, a] : null;
+}
+// quem chegou primeiro a X pelas leituras ao vivo: 'home' | 'away' | null (as leituras não decidem)
+function raceFromLog(log, scope, X) {
+  const s = (Array.isArray(log) ? log : []).map((e) => raceSum(e.hp, e.ap, scope)).filter(Boolean);
+  if (!s.length) return null;
+  // início da última sequência com X (um cesto anulado na revisão faz voltar atrás)
+  const run = (k) => { let i = s.length; while (i > 0 && s[i - 1][k] >= X) i--; return i < s.length ? i : Infinity; };
+  const h = run(0), a = run(1);
+  if (h === a) return null; // as duas chegaram na mesma leitura (ou nenhuma)
+  const [w, i] = h < a ? ['home', h] : ['away', a];
+  return s[i][w === 'home' ? 1 : 0] < X ? w : null;
+}
+// quem chegou primeiro a X pelos fins de quarto (dentro da parte)
+function raceFromQuarters(R, scope, X) {
+  const q = ['q1', 'q2', 'q3', 'q4'].map((k) => R.parts?.[k]);
+  if (q.some((x) => !Array.isArray(x))) return null;
+  const idx = { ft: [0, 1, 2], h1: [0], h2: [2] }[scope] || [];
+  const start = scope === 'h2' ? 2 : 0;
+  let h = 0, a = 0;
+  for (let i = start; i <= (idx[idx.length - 1] ?? -1); i++) {
+    h += q[i][0]; a += q[i][1];
+    if (h >= X || a >= X) return h >= X && a >= X ? null : h >= X ? 'home' : 'away';
+  }
+  return null;
+}
+function raceOutcome(leg, R) {
+  const [w, xs, nb] = String(leg.pick).split(':'), X = Number(xs), scope = scopeOf(leg);
+  const fin = partScore(R, scope);
+  if (!fin || !(X > 0) || !['home', 'away', 'none'].includes(w)) return null;
+  const hR = fin[0] >= X, aR = fin[1] >= X;
+  if (!hR && !aR) return w === 'none' ? 1 : nb === 'n' ? -1 : 0;
+  if (w === 'none') return -1;
+  const win = hR !== aR ? (hR ? 'home' : 'away') : raceFromLog(R.blog, scope, X) || raceFromQuarters(R, scope, X);
+  return win ? (w === win ? 1 : -1) : 0;
 }
 
 /* ---------- prolongamento e penáltis (futebol, resultado da ESPN) ----------
@@ -1098,6 +1146,7 @@ function legOutcome(leg, R) {
   if (leg.market === 'pp') return ppOutcome(leg, R);
   if (leg.market === 'bp') return bpOutcome(leg, R);
   if (leg.market === 'hgs') return hgsOutcome(leg, R);
+  if (leg.market === 'prace') return raceOutcome(leg, R);
   if (leg.market === 'pet') return petOutcome(leg, R);
   if (TENNIS_KINDS.has(leg.market)) return tennisOutcome(leg, R);
   if (ESPORTS_KINDS.has(leg.market)) return esportsOutcome(leg, R);
@@ -1172,6 +1221,6 @@ function cashoutFactor(bet, findSel, now = Date.now()) {
 
 const Markets = {
   SPORTS, GOAL_SPORTS, LEAGUES, LEAGUE_BY_KEY, addLeague, dynLeagues, setCatalog, round2, resultText, fmtLine, MARKET_NAMES, selections, isSuspended, evLabel,
-  legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, AUTO_KINDS, SOURCE_KINDS, FIGHT_KINDS, partOutcome, scopeOf, ppNorm, PP_FIELD, ppPlayer, bpKey, BP_FIELD, bpPlayer, bpNeed,
+  legOutcome, outcomeFactor, outcomeLabel, settleLeg, cashoutFactor, AUTO_KINDS, SOURCE_KINDS, FIGHT_KINDS, partOutcome, scopeOf, ppNorm, PP_FIELD, ppPlayer, bpKey, BP_FIELD, bpPlayer, bpNeed, raceFromLog, raceOutcome,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = Markets;

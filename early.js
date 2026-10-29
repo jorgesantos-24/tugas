@@ -58,7 +58,7 @@ const MONO_PART = new Set(['ptot', 'pteam', 'pbtts', 'pcln', 'pot']);
 // combinações em que mais gols nunca desfazem: só ambas marcam e "mais/menos de" (sem resultado, faixas ou "exatamente")
 const monoCond = (pick) => String(pick).replace(/^!/, '').split(';').every((c) => /^(btts=(yes|no)|(tot|th|ta)=(gt|lt):[\d.]+)$/.test(c));
 
-module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null, espnBox = () => null }) {
+module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null, espnBox = () => null, raceLog = () => null }) {
   const seen = new Map();     // aposta|seleção → { sig, since }
   const openSince = new Map(); // jogo → desde quando os mercados estão abertos (null = fechados)
 
@@ -166,6 +166,21 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     const eb = espnBox(ev.id), b = eb ? M.bpPlayer(leg, eb) : null, vb = b ? get(b) : NaN;
     if (!(vb >= n.need)) return null;
     return { v, sig: `${stat}:passou`, text: `${label} ${Math.min(va, vb)}`, ms: 30000 };
+  }
+
+  /* ---- basquete: corrida a X pontos — decide-se quando uma equipa chega a X e a outra ainda não (leituras ao vivo),
+     ou no fim da parte (ninguém chegou → "Nenhuma"). 20 s de confirmação (cesto anulado na revisão). ---- */
+  function race(leg, ev) {
+    if (leg.market !== 'prace' || ev.sport !== 'basketball') return null;
+    const st = liveStats(ev.id), score = [ev.home.score, ev.away.score];
+    if (!st || !score.every(Number.isFinite)) return null;
+    const scope = M.scopeOf(leg), [w, xs] = String(leg.pick).split(':'), X = Number(xs);
+    const done = PARTS.finishedParts(ev.sport, st, score, { live: true });
+    const R = { h: score[0], a: score[1], parts: done, blog: raceLog(ev.id) };
+    let v = null;
+    if (scope !== 'ft' && done[scope]) v = M.legOutcome(leg, R);
+    else { const win = M.raceFromLog(R.blog, scope, X); if (win) v = w === win ? 1 : -1; }
+    return v == null ? null : { v, sig: `race:${v}`, text: `corrida a ${X}`, ms: 20000 };
   }
 
   // ---- futebol: os 90 minutos acabaram (prorrogação / pênaltis a seguir) ----
@@ -323,7 +338,7 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     const ev = events.get(leg.evId);
     const key = `${betId}|${leg.evId}|${leg.key}`;
     if (!ev || ev.state !== 'in') { seen.delete(key); return false; }
-    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || basket(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
+    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || basket(leg, ev) || race(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
     if (!d) { seen.delete(key); return false; }
     const t = now();
     const sig = `${d.sig}|${d.v}`;

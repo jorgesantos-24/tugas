@@ -180,6 +180,56 @@ function rule(q, m, sport) {
       if (!s || !(w === 'home' || w === 'away') || !half(Number(mm[2])) || !half(Number(mm[4]))) return null;
       return cond(s, [`hc=${w}:${Number(mm[2])}`, `tot=${/^over$/i.test(mm[3]) ? 'gt' : 'lt'}:${Number(mm[4])}`]);
     }
+    const SUF = { ft: '', h1: ' (1º tempo)', h2: ' (2º tempo)', q1: ' (1º quarto)', q2: ' (2º quarto)', q3: ' (3º quarto)', q4: ' (4º quarto)' };
+    // margem de vitória sem equipa: "1-5" ... "31+" (quem ganhar, com prorrogação)
+    if (g === 'Winning Margin 7-Way') { const b = band(q.label ?? q.line); return b ? { ...cond('ft', [`ad=in:${b}`]), mname: 'Margem de vitória (qualquer equipa)', name: `Por ${b.replace('-999', ' ou mais').replace('-', ' a ')} pontos` } : null; }
+    /* "Team to Score X Points": as linhas Sim/Não não dizem a equipa. Em cada linha há duas de cada: pela ordem da
+       fonte (sel_id) a 1ª é da casa e a 2ª de fora (em blocos ou aos pares, conforme o jogo) — e todas as linhas têm de
+       bater com os totais das equipas da mesma parte: quem tem o total mais alto (ou, com totais iguais, o "Mais de"
+       mais barato) tem o "Sim" mais barato; equipas iguais → odds iguais. Senão não se oferece. */
+    if ((x = /^(?:(1st Half|2nd Half|1st Quarter|2nd Quarter|3rd Quarter|4th Quarter) )?Team [Tt]o Score X Points$/.exec(g))) {
+      const s = sc(x[1]), y = yn(q.side), n = Number(q.line);
+      if (!s || !y || !Number.isInteger(n) || n < 1) return null;
+      const rows = (m.quotes || []).filter((r) => r.group_id === q.group_id && r.market_id === q.market_id && r.odds_dec > 1);
+      const same = (line, want) => rows.filter((r) => txt(r.line) === line && yn(r.side) === want).sort((a, b) => Number(a.sel_id) - Number(b.sel_id));
+      const mine = same(txt(q.line), y);
+      const pos = mine.findIndex((r) => String(r.sel_id) === String(q.sel_id));
+      if (mine.length !== 2 || pos < 0) return null;
+      const totRe = new RegExp(`^${x[1] ? esc(x[1]) + ' (?:- )?' : ''}Team Totals$`);
+      const tot = (side) => (m.quotes || []).find((r) => totRe.test(txt(r.group_name)) && (who(r.side) || who(r.n2)) === side && (ou(r.label) || ou(r.side)) === 'over');
+      const th = tot('home'), ta = tot('away');
+      if (!th || !ta) return null;
+      const hl = lineOf(th), al = lineOf(ta);
+      // quem é mais forte: 'home' | 'away' | null (iguais)
+      const strong = hl !== al ? (hl > al ? 'home' : 'away') : Math.abs(th.odds_dec - ta.odds_dec) < 0.02 ? null : th.odds_dec < ta.odds_dec ? 'home' : 'away';
+      if (!Number.isFinite(hl) || !Number.isFinite(al)) return null;
+      // em cada linha com as duas equipas: a posição (pela ordem da fonte) do "Sim" mais barato e do "Não" mais caro
+      // tem de ser a mesma em todas as linhas; equipas iguais → odds iguais em todas
+      let sp = null;
+      for (const L of new Set(rows.map((r) => txt(r.line)))) {
+        const ys = same(L, 'yes'), ns = same(L, 'no');
+        if (ys.length === 1 && ns.length === 1) continue; // só uma equipa tem esta linha (não se sabe qual): fica de fora
+        if (ys.length !== 2 || ns.length !== 2) return null;
+        if (!strong) { if (ys[0].odds_dec !== ys[1].odds_dec || ns[0].odds_dec !== ns[1].odds_dec) return null; continue; }
+        if (ys[0].odds_dec === ys[1].odds_dec) continue; // odds iguais nesta linha: a posição vem das outras
+        const a = ys[0].odds_dec < ys[1].odds_dec ? 0 : 1, b = ns[0].odds_dec > ns[1].odds_dec ? 0 : 1;
+        if (ns[0].odds_dec === ns[1].odds_dec || a !== b || (sp != null && sp !== a)) return null;
+        sp = a;
+      }
+      if (strong && sp == null) return null;
+      const w = !strong ? (pos === 0 ? 'home' : 'away') : pos === sp ? strong : strong === 'home' ? 'away' : 'home';
+      const c = cond(s, [`t${w[0]}=gt:${n - 1}`], y === 'no');
+      return { ...c, sub: w, mname: `${w === 'home' ? m.home : m.away} faz X pontos${SUF[s]}`, name: `${n} ou mais — ${y === 'yes' ? 'Sim' : 'Não'}` };
+    }
+    /* corrida a X pontos: "Race to 20 Points" (equipa em label), "1st Half Race to (Points)", "4th Quarter Race to"
+       (equipa ou "Neither" em side, X em line) */
+    if ((x = /^(?:(1st Half|2nd Half|1st Quarter|2nd Quarter|3rd Quarter|4th Quarter) )?Race [Tt]o(?: (\d+) Points| \(Points\))?$/.exec(g))) {
+      const s = sc(x[1]), X = Number(x[2] || q.line), t = txt(q.side) || txt(q.label);
+      const w = /^neither$/i.test(t) ? 'none' : who(t);
+      if (!s || !Number.isInteger(X) || X < 1 || !(w === 'home' || w === 'away' || w === 'none')) return null;
+      const nb = (m.quotes || []).some((r) => r.group_id === q.group_id && r.market_id === q.market_id && /^neither$/i.test(txt(r.side) || txt(r.label)) && (x[2] || txt(r.line) === txt(q.line)));
+      return { k: 'prace', scope: s, pick: `${w}:${X}${nb ? ':n' : ''}`, sub: `r${X}`, mname: `Corrida a ${X} pontos${SUF[s]}`, name: w === 'none' ? 'Nenhuma' : w === 'home' ? m.home : m.away };
+    }
     if (g === 'Team Total Odd Or Even') { const w = who(q.side), p = oe(q.label); return (w === 'home' || w === 'away') && p ? cond('ft', [`par=${w[0]}:${p}`]) : null; }
     if ((x = /^(?:Game Total - Odd or Even|(1st Half) Total Odd\/Even|(1st|2nd|3rd|4th) Quarter Total - Odd\/Even)$/.exec(g))) {
       const s = x[1] ? 'h1' : x[2] ? QUARTER[x[2]] : 'ft', p = oe(q.label) || oe(q.side);

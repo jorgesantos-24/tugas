@@ -764,6 +764,100 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   }
 }
 
+/* ================= 8c) basquete: corrida a X pontos, equipa faz X pontos, margem sem equipa =================
+   Dados reais em scripts/dados/basquete-equipas-2026-10.json (68 jogos). */
+{
+  const AUTO = require(path.join(__dirname, '..', 'feeds', 'auto.js'));
+  const BD = require(path.join(__dirname, 'dados', 'basquete-equipas-2026-10.json'));
+  const C = (pick, R, want, what, per = 'ft|1') => eq({ market: 'prace', pick, per }, R, want, `corrida: ${what}`);
+  const q4 = { q1: [20, 18], q2: [22, 25], q3: [19, 21], q4: [24, 20] };
+  const R0 = { h: 85, a: 84, parts: { ...q4, h1: [42, 43], h2: [43, 41] } };
+  // leituras ao vivo (pontos de cada quarto)
+  const log = [{ hp: [0], ap: [0] }, { hp: [8], ap: [9] }, { hp: [10], ap: [9] }, { hp: [10], ap: [11] }, { hp: [12], ap: [11] }, { hp: [18], ap: [18] }, { hp: [20], ap: [18] }];
+  C('home:10', { ...R0, blog: log }, 1, 'casa chegou a 10 com a fora em 9', 'q1|1');
+  C('away:10', { ...R0, blog: log }, -1, 'fora perdeu a corrida a 10', 'q1|1');
+  C('none:10:n', { ...R0, blog: log }, -1, '"Nenhuma" perde quando alguém chega', 'q1|1');
+  C('home:25:n', { ...R0, blog: log }, -1, 'ninguém chegou a 25 no 1º quarto, com "Nenhuma"', 'q1|1');
+  C('none:25:n', { ...R0, blog: log }, 1, '"Nenhuma" ganha', 'q1|1');
+  C('home:25', { ...R0, blog: log }, 0, 'ninguém chegou e o mercado não tem "Nenhuma" → devolvida', 'q1|1');
+  C('home:15', R0, 0, 'as duas passaram 15 no quarto, sem leituras → devolvida', 'q1|1');
+  C('home:15', { ...R0, blog: [{ hp: [14], ap: [12] }, { hp: [16], ap: [14] }] }, 1, 'casa 16-14: chegou primeiro', 'q1|1');
+  C('home:15', { ...R0, blog: [{ hp: [14], ap: [14] }, { hp: [16], ap: [16] }] }, 0, 'as duas na mesma leitura → devolvida', 'q1|1');
+  // cesto anulado: a casa teve 15, voltou a 13, a fora chegou primeiro de vez
+  C('away:15', { ...R0, blog: [{ hp: [15], ap: [12] }, { hp: [13], ap: [12] }, { hp: [13], ap: [15] }, { hp: [17], ap: [15] }] }, 1, 'cesto anulado na revisão', 'q1|1');
+  // jogo todo pelos fins de quarto: 20-18, 42-43, 61-64 → a 40 a casa (42) e a fora (43) passaram no 2º quarto → sem leituras devolvida
+  C('home:40', R0, 0, 'a 40 os dois passaram no mesmo quarto → devolvida');
+  C('home:30', { ...R0, parts: { ...R0.parts, q2: [12, 3] } }, 1, 'fim do 2º quarto 32-21: casa chegou a 30 primeiro');
+  C('away:84', R0, 0, 'jogo todo: os dois passaram 84 no 4º quarto, sem leituras → devolvida');
+  C('home:85', R0, 1, 'só a casa chegou a 85');
+  // 2º tempo (conta a prorrogação): quartos 3 e 4 = 43-41; ao fim do 3º 19-21 → a 20 a fora chegou primeiro
+  C('away:20', R0, 1, '2º tempo: fim do 3º quarto 19-21', 'h2|1');
+  // as leituras usam os quartos da parte: 2º tempo com prorrogação no fim
+  C('home:45', { h: 95, a: 90, parts: { ...q4, h1: [42, 43], h2: [53, 47] }, blog: [{ hp: [20, 22, 19, 24], ap: [18, 25, 21, 20] }, { hp: [20, 22, 19, 24, 2], ap: [18, 25, 21, 20, 0] }, { hp: [20, 22, 19, 24, 10], ap: [18, 25, 21, 20, 6] }] }, 1, '2º tempo na prorrogação', 'h2|1');
+  check(M.raceFromLog(log, 'q1', 10) === 'home' && M.raceFromLog(log, 'q1', 30) === null, 'corrida: leituras ao vivo');
+
+  // regras com as cotações reais
+  let nTeam = 0, nRace = 0, nMargin = 0;
+  const RS = [];
+  for (const h of [60, 85, 102]) for (const a of [55, 84, 101]) for (const s1 of [[30, 28], [40, 41], [52, 47]]) RS.push({ h, a, parts: { h1: s1, q1: [Math.floor(s1[0] / 2), Math.floor(s1[1] / 2)] } });
+  for (const m of BD.matches) {
+    const tot = (re, side) => { const r = m.quotes.find((q) => re.test(q.group_name) && (q.side === side || q.n2 === side) && /over/i.test(`${q.label} ${q.side}`)); return r ? AUTO.lineOf(r) : NaN; };
+    const groups = new Map();
+    for (const q of m.quotes) {
+      if (/Team Totals$/.test(q.group_name) || !(q.odds_dec > 1)) continue;
+      const r = AUTO.rule(q, m, 'basketball');
+      if (!r) continue;
+      const key = `${r.scope}|${q.group_id}:${r.sub || ''}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ q, r });
+      if (/Team [Tt]o Score X Points$/.test(q.group_name)) {
+        nTeam++;
+        // a equipa mais forte (total mais alto) tem de ficar com o "Sim" mais barato em cada linha
+        const pre = (/^(1st Half|1st Quarter) /.exec(q.group_name) || [])[1];
+        const re = new RegExp(`^${pre ? pre + ' (- )?' : ''}Team Totals$`);
+        const hl = tot(re, m.home), al = tot(re, m.away);
+        if (hl !== al && /^yes/i.test(q.side)) {
+          const twin = m.quotes.find((o) => o !== q && o.group_id === q.group_id && o.market_id === q.market_id && o.line === q.line && /^yes/i.test(o.side) && o.odds_dec > 1);
+          const strong = hl > al ? 'home' : 'away', mineStrong = q.odds_dec < twin.odds_dec;
+          const w = r.sub;
+          check((w === strong) === mineStrong, `faz X pontos: ${m.home} x ${m.away} ${q.group_name} ${q.line} ${w} @${q.odds_dec} (totais ${hl}/${al})`);
+        }
+      }
+      if (r.k === 'prace') nRace++;
+      if (q.group_name === 'Winning Margin 7-Way') nMargin++;
+    }
+    // cada mercado: com qualquer resultado, exatamente uma seleção ganha (Sim/Não de cada linha; faixas da margem)
+    for (const [key, list] of groups) {
+      if (list[0].r.k !== 'pcond') continue;
+      const byLine = new Map();
+      for (const x of list) { const k = list[0].q.group_name === 'Winning Margin 7-Way' ? 'm' : String(x.q.line); if (!byLine.has(k)) byLine.set(k, []); byLine.get(k).push(x); }
+      for (const [L, sels] of byLine) for (const R of RS) {
+        const outs = sels.map((x) => M.legOutcome({ market: x.r.k, pick: x.r.pick, per: `${x.r.scope}|1` }, R));
+        const exact = sels.length >= 2 && outs.filter((v) => v === 1).length === 1;
+        check(exact || (list[0].q.group_name === 'Winning Margin 7-Way' && R.h === R.a), `${m.home} x ${m.away} ${list[0].q.group_name} ${L}: ${outs.join(',')} com ${R.h}-${R.a}`);
+      }
+    }
+  }
+  check(nTeam > 300 && nRace > 300 && nMargin > 20, `basquete real: poucas seleções lidas (faz X ${nTeam}, corrida ${nRace}, margem ${nMargin})`);
+  console.log(`  basquete real: ${nTeam} "faz X pontos", ${nRace} corridas, ${nMargin} margens sem equipa`);
+
+  // ao vivo (early.js): decide quando uma chega a X e a outra não; "Nenhuma" só no fim da parte
+  process.env.EARLY_SETTLE_S = process.env.EARLY_SETTLE_S || '150';
+  const mk = require(path.join(__dirname, '..', 'early.js'));
+  let T = 2e12, lg = [], st = null;
+  const ev = { id: 'rc1', sport: 'basketball', league: 'x', state: 'in', home: { name: 'A', score: 0 }, away: { name: 'B', score: 0 }, markets: [{ k: 'ml', sels: [{ lock: false }] }] };
+  const E = mk({ M, TEN: require(path.join(__dirname, '..', 'feeds', 'tennis.js')), events: new Map([[ev.id, ev]]), liveStats: () => st, now: () => T, raceLog: () => lg });
+  const set = (hp, ap, summary = []) => { st = { home: { points: hp.reduce((a, b) => a + b, 0), periods: hp }, away: { points: ap.reduce((a, b) => a + b, 0), periods: ap }, summary }; ev.home.score = st.home.points; ev.away.score = st.away.points; lg.push({ hp, ap }); };
+  const run = (leg, id) => { let r = false; for (let i = 0; i < 3 && !r; i++) { r = E.check(id, leg); T += 15000; } return r; };
+  set([8], [9]); set([10], [9]);
+  const a = { evId: ev.id, market: 'prace', per: 'q1|1', pick: 'home:10:n' }, b = { evId: ev.id, market: 'prace', per: 'q1|1', pick: 'away:10:n' }, n = { evId: ev.id, market: 'prace', per: 'q1|1', pick: 'none:25:n' };
+  check(run(a, 'r1') && a.value === 1, 'corrida ao vivo: casa chega a 10 → paga');
+  check(run(b, 'r2') && b.value === -1, 'corrida ao vivo: fora perde logo');
+  check(!run(n, 'r3') && !n.result, 'corrida ao vivo: "Nenhuma" espera pelo fim do quarto');
+  set([22], [20], ['Score After 1st Quarter - 22-20']); set([22, 0], [20, 0], ['Score After 1st Quarter - 22-20']);
+  check(run(n, 'r3') && n.value === 1, 'corrida ao vivo: fim do 1º quarto 22-20 → "Nenhuma" (25) ganha');
+}
+
 /* ================= 9) hóquei: mercados que eram da equipa =================
    Dados reais em scripts/dados/hoquei-2026-10.json (cotações de 16 jogos e 73 resultados com cronologia).
    Cada mercado, com cada resultado (reais + prorrogação + pênaltis montados): exatamente um vencedor, ou tudo para a
