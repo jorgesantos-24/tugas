@@ -24,11 +24,12 @@ const STAT = {
   Points: 'pts', Rebounds: 'reb', Assists: 'ast', 'Threes Made': 'tpm', Steals: 'stl', Blocks: 'blk',
   'Points & Assists': 'pa', 'Points & Rebounds': 'pr', 'Assists & Rebounds': 'ar', 'Points, Assists & Rebounds': 'pra',
   'Steals & Blocks': 'sb', 'Double Double': 'dd', 'Triple Double': 'td',
+  '1st Quarter Points': 'q1pts', '1st Quarter Rebounds': 'q1reb', '1st Quarter Assists': 'q1ast', 'Player First': 'fb', // lance a lance da ESPN
 };
 const STAT_PT = {
   pts: 'Pontos', reb: 'Rebotes', ast: 'Assistências', tpm: 'Cestas de 3', stl: 'Roubos de bola', blk: 'Tocos',
   pa: 'Pontos + assistências', pr: 'Pontos + rebotes', ar: 'Assistências + rebotes', pra: 'Pontos + rebotes + assistências',
-  sb: 'Roubos + tocos', dd: 'Duplo-duplo', td: 'Triplo-duplo',
+  sb: 'Roubos + tocos', dd: 'Duplo-duplo', td: 'Triplo-duplo', q1pts: 'Pontos no 1º quarto', q1reb: 'Rebotes no 1º quarto', q1ast: 'Assistências no 1º quarto', fb: 'Primeiro cesto', fa: 'Primeira assistência', fr: 'Primeiro rebote',
 };
 // minutos em quadra: número ou "22:32" (ao vivo)
 const mins = (v) => { const m = /^(\d+):(\d+)$/.exec(String(v ?? '').trim()); return m ? Number(m[1]) + Number(m[2]) / 60 : Number(v) || 0; };
@@ -39,12 +40,15 @@ const name = (v) => { const s = String(v ?? '').trim(); return s && num(s) == nu
 function quote(q, m) {
   const g = String(q.group_name ?? '').trim();
   const ou = / O\/U$/.test(g);
-  const stat = STAT[g.replace(/ O\/U$/, '')];
+  // "Player First": um grupo com três mercados (side = Basket / Assist / Rebound)
+  const stat = g === 'Player First' ? { basket: 'fb', assist: 'fa', rebound: 'fr' }[String(q.side ?? '').trim().toLowerCase()] : STAT[g.replace(/ O\/U$/, '')];
   if (!stat) return null;
   const side = (team) => (team === m.home ? 'home' : team === m.away ? 'away' : '');
   const sel = (pick, player, label) => ({
     k: 'bp', per: `${stat}|${q.group_id}`, pick, mname: `${STAT_PT[stat]} do jogador${ou ? ' (mais/menos)' : ''}`, cat: 'players', name: `${player} — ${label}`,
   });
+  // primeiro cesto / assistência / rebote do jogo: jogador em line
+  if (stat === 'fb' || stat === 'fa' || stat === 'fr') { const p = name(q.line); return p ? sel(`1#${side(q.n2)}#${p}`, p, STAT_PT[stat].toLowerCase()) : null; }
   if (stat === 'dd' || stat === 'td') {
     const p = name(q.line), yes = /^yes$/i.test(String(q.side ?? '').trim()), no = /^no$/i.test(String(q.side ?? '').trim());
     const need = stat === 'dd' ? 2 : 3;

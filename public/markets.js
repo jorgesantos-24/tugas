@@ -306,6 +306,7 @@ const BP_FIELD = {
   pts: (p) => p.pts, reb: (p) => p.reb, ast: (p) => p.ast, tpm: (p) => p.tpm, stl: (p) => p.stl, blk: (p) => p.blk,
   pa: (p) => p.pts + p.ast, pr: (p) => p.pts + p.reb, ar: (p) => p.ast + p.reb, pra: (p) => p.pts + p.reb + p.ast, sb: (p) => p.stl + p.blk,
   dd: dd10, td: dd10,
+  q1pts: (p) => p.q1pts, q1reb: (p) => p.q1reb, q1ast: (p) => p.q1ast, fb: (p) => p.fb, fa: (p) => p.fa, fr: (p) => p.fr, // 1º quarto e primeiros (lance a lance da ESPN)
 };
 // N e se é "menos de" de uma seleção
 function bpNeed(leg) {
@@ -328,6 +329,10 @@ function bpOutcome(leg, R) {
     return sur && !R.bp.some((x) => x.key.split(' ').slice(1).join(' ') === sur) ? 0 : null;
   }
   if (!p.played) return 0; // não entrou em quadra: devolvida
+  const q1 = /^q1/.test(String(leg.per ?? ''));
+  if (q1 && p.q1done && p.q1played === false) return 0; // não jogou no 1º quarto: devolvida
+  if (/^fb\|/.test(String(leg.per ?? '')) && p.fbFt) return 0; // primeiros pontos de lance livre: devolvida
+  if (/^fr\|/.test(String(leg.per ?? '')) && p.frTeam) return 0; // primeiro rebote foi da equipa: devolvida
   const v = get(p);
   if (!Number.isFinite(v)) return null;
   return (v >= n.need) !== n.under ? 1 : -1;

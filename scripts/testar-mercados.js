@@ -687,7 +687,7 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
       const byPlayer = new Map();
       for (const s of mk.sels) { const nm = String(s.pick).split('#').slice(2).join('#'); if (!byPlayer.has(nm)) byPlayer.set(nm, []); byPlayer.get(nm).push(s); }
       for (const [nm, list] of byPlayer) for (const v of [0, 1, 5, 9, 10, 12, 25, 40]) {
-        const p = { key: M.bpKey(nm), side: '', played: true, pts: v, reb: v, ast: v, tpm: v, stl: v, blk: v };
+        const p = { key: M.bpKey(nm), side: '', played: true, pts: v, reb: v, ast: v, tpm: v, stl: v, blk: v, q1pts: v, q1reb: v, q1ast: v, q1played: true, q1done: true, fb: v > 0 ? 1 : 0, fbFt: false, fa: v > 0 ? 1 : 0, fr: v > 0 ? 1 : 0, frTeam: false };
         const RR = { done: true, h: 100, a: 100, bp: [p] };
         const outs = list.map((s) => M.legOutcome({ market: 'bp', per: mk.per, pick: s.pick }, RR));
         sels += list.length;
@@ -856,6 +856,45 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   check(!run(n, 'r3') && !n.result, 'corrida ao vivo: "Nenhuma" espera pelo fim do quarto');
   set([22], [20], ['Score After 1st Quarter - 22-20']); set([22, 0], [20, 0], ['Score After 1st Quarter - 22-20']);
   check(run(n, 'r3') && n.value === 1, 'corrida ao vivo: fim do 1º quarto 22-20 → "Nenhuma" (25) ganha');
+}
+
+/* ================= 8d) basquete: jogadores no 1º quarto (lance a lance da ESPN) ================= */
+{
+  const BPL = require(path.join(__dirname, '..', 'feeds', 'bplayers.js'));
+  const m = { home: 'ATL Hawks', away: 'CLE Cavaliers' };
+  const s = BPL.quote({ group_name: '1st Quarter Points', group_id: '77', side: '7', line: 'James Harden', n2: 'CLE Cavaliers' }, m);
+  check(s && s.per === 'q1pts|77' && s.pick === '7#away#James Harden', `1º quarto: leitura da cotação (${JSON.stringify(s)})`);
+  const P = (o) => ({ key: M.bpKey('James Harden'), side: 'away', played: true, pts: 20, reb: 5, ast: 6, tpm: 2, stl: 1, blk: 0, q1pts: 8, q1reb: 1, q1ast: 3, q1played: true, q1done: true, ...o });
+  const Q = (pick, stat, bp, want, what) => eq({ market: 'bp', per: `${stat}|77`, pick }, { done: true, h: 100, a: 99, bp: [bp] }, want, `1º quarto: ${what}`);
+  Q('7#away#James Harden', 'q1pts', P(), 1, '8 pontos no 1º quarto → 7 ou mais ganha');
+  Q('10#away#James Harden', 'q1pts', P(), -1, '8 pontos → 10 ou mais perde (20 no jogo não conta)');
+  Q('3#away#James Harden', 'q1ast', P(), 1, '3 assistências no 1º quarto');
+  Q('3#away#James Harden', 'q1reb', P({ q1played: false, q1pts: 0, q1reb: 0, q1ast: 0 }), 0, 'não jogou no 1º quarto → devolvida');
+  Q('3#away#James Harden', 'q1reb', P({ q1pts: undefined, q1reb: undefined, q1ast: undefined }), null, 'sem lance a lance conferido → espera');
+  const fbq = BPL.quote({ group_name: 'Player First', group_id: '78', side: 'Basket', line: 'James Harden', n2: 'CLE Cavaliers' }, m);
+  check(fbq && fbq.per === 'fb|78' && fbq.pick === '1#away#James Harden', 'primeiro cesto: leitura da cotação');
+  Q('1#away#James Harden', 'fb', P({ fb: 1, fbFt: false }), 1, 'primeiro cesto foi dele');
+  Q('1#away#James Harden', 'fb', P({ fb: 0, fbFt: false }), -1, 'primeiro cesto de outro');
+  Q('1#away#James Harden', 'fb', P({ fb: 0, fbFt: true }), 0, 'primeiros pontos de lance livre → devolvida');
+  Q('1#away#James Harden', 'fb', P({ fb: 0, played: false }), 0, 'não jogou → devolvida');
+  // ao vivo: só a ESPN decide
+  process.env.EARLY_SETTLE_S = process.env.EARLY_SETTLE_S || '150';
+  const mk = require(path.join(__dirname, '..', 'early.js'));
+  let T = 3e12, eb = null;
+  const ev = { id: 'q1e', sport: 'basketball', league: 'nba', state: 'in', home: { name: 'ATL Hawks', score: 30 }, away: { name: 'CLE Cavaliers', score: 28 }, markets: [{ k: 'ml', sels: [{ lock: false }] }] };
+  const E = mk({ M, TEN: require(path.join(__dirname, '..', 'feeds', 'tennis.js')), events: new Map([[ev.id, ev]]), liveStats: () => ({ players: [] }), now: () => T, espnBox: () => eb });
+  const run = (leg, id) => { let r = false; for (let i = 0; i < 4 && !r; i++) { r = E.check(id, leg); T += 15000; } return r; };
+  const L = (pick, stat) => ({ evId: ev.id, market: 'bp', per: `${stat}|77`, pick });
+  eb = [P({ q1pts: 7, q1done: false })];
+  const a = L('7#away#James Harden', 'q1pts'), b = L('u7#away#James Harden', 'q1pts'), c = L('10#away#James Harden', 'q1pts');
+  check(run(a, 'q1a') && a.value === 1, '1º quarto ao vivo: chegou a 7 → paga');
+  check(run(b, 'q1b') && b.value === -1, '1º quarto ao vivo: "menos de 7" perde');
+  check(!run(c, 'q1c') && !c.result, '1º quarto ao vivo: 10 ainda em aberto durante o quarto');
+  eb = [P({ q1pts: 8, q1done: true })];
+  check(run(c, 'q1c') && c.value === -1, '1º quarto ao vivo: quarto acabado com 8 → "10 ou mais" perde');
+  eb = null;
+  const d = L('5#away#James Harden', 'q1pts');
+  check(!run(d, 'q1d') && !d.result, '1º quarto ao vivo: sem a ESPN → espera');
 }
 
 /* ================= 9) hóquei: mercados que eram da equipa =================
