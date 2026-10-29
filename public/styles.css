@@ -212,6 +212,10 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .pl-grid .wide-odd{min-width:0;width:100%;justify-content:center}
 .lines-tbl.combo .ln-head,.lines-tbl.combo .ln-row{grid-template-columns:minmax(96px,1.1fr) 1fr 1fr}
 .lines-tbl .ln-team{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lines-tbl.tot3 .ln-head,.lines-tbl.tot3 .ln-row{grid-template-columns:52px 1fr 1fr 1fr}
+.lines-tbl .ln-head.cs,.lines-tbl .ln-row.cs{grid-template-columns:repeat(var(--c),1fr)}
+.lines-tbl .ln-row.cs1{grid-template-columns:1fr}
+.tl-team{padding:10px 14px 0;font-size:12px;font-weight:700;color:var(--yellow)}
 /* telemóvel: nomes compridos passam para duas linhas em vez de cortar; 3 opções ficam 2 + 1 */
 @media (max-width:700px){
   .lines-tbl .ln-team,.lines-tbl .ln-head span,.pl-grid .pl-name{white-space:normal;line-height:1.2}

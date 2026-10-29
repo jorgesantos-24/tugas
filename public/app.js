@@ -813,62 +813,157 @@ function linesTable(list, ev, open = true) {
     ${(open ? (x) => x : mainWindow)([...rows].sort((a, b) => a[0] - b[0])).map(([k, r]) => `<div class="ln-row">${total ? `<span class="ln">${k}</span>` : ''}${cell(r[0], total ? '' : fmtLine(r[0]?.cline ?? k))}${cell(r[1], total ? '' : fmtLine(r[1]?.cline ?? -k))}</div>`).join('')}</div>`;
 }
 
+const EMPTY_ODD = '<span class="odd empty wide-odd"><span class="val">-</span></span>';
+const oddCell = (ev, name) => (s) => (s ? oddBtn(name == null ? s : { ...s, name }, ev, { wide: true, cls: 'wide-odd' }) : EMPTY_ODD);
+const cap = (t) => String(t).replace(/^./, (c) => c.toUpperCase());
+
 /* margem de vitória e par/ímpar de cada equipa (pick "mh=..." / "par=h:..." casa, "ma=..." / "par=a:..." visitante):
-   uma coluna por equipa, com o nome no topo e só a margem (ou Par/Ímpar) nos botões */
+   uma coluna por equipa, com o nome no topo e só a margem (ou Par/Ímpar) nos botões, por ordem da margem */
 function teamCols(list, ev, open = true) {
   const sideOf = (s) => (/^(mh=|par=h:)/.test(String(s.pick)) ? 'h' : /^(ma=|par=a:)/.test(String(s.pick)) ? 'a' : null);
   if (!list.every(sideOf)) return '';
-  const col = (t, side) => list.filter((s) => sideOf(s) === side[1]).map((s) => ({ ...s, name: String(s.name).startsWith(t.name) ? s.name.slice(t.name.length).trim() : s.name }));
-  const h = col(ev.home, 'mh='), a = col(ev.away, 'ma=');
+  const num = (s) => parseFloat(s.name) || 0;
+  const col = (t, side) => list.filter((s) => sideOf(s) === side).map((s) => ({ ...s, name: String(s.name).startsWith(t.name) ? s.name.slice(t.name.length).trim() : s.name })).sort((x, y) => num(x) - num(y));
+  return twoCols(col(ev.home, 'h'), col(ev.away, 'a'), ev, open);
+}
+function twoCols(h, a, ev, open) {
   if (!h.length || !a.length) return '';
-  const n = open ? Math.max(h.length, a.length) : Math.min(Math.max(h.length, a.length), MKT_SELS);
-  const cell = (s) => (s ? oddBtn(s, ev, { wide: true, cls: 'wide-odd' }) : '<span class="odd empty wide-odd"><span class="val">-</span></span>');
+  const n = open ? Math.max(h.length, a.length) : Math.min(Math.max(h.length, a.length), MKT_ROWS);
+  const cell = oddCell(ev);
   return `<div class="lines-tbl"><div class="ln-head"><span>${esc(ev.home.name)}</span><span>${esc(ev.away.name)}</span></div>
     ${Array.from({ length: n }, (_, i) => `<div class="ln-row">${cell(h[i])}${cell(a[i])}</div>`).join('')}</div>`;
 }
-
-/* resultado (ou handicap) + total, e vencedor + "os dois fazem X pontos": uma tabela por linha, com a equipa à esquerda
-   e Mais de | Menos de (ou Sim | Não). Picks: "res=home;tot=gt:239.5", "hc=home:-1.5;tot=lt:239.5", "res=home;bx=yes:100" */
-const COMBO_RE = /^(res=(home|away)|hc=(home|away):(-?[\d.]+));(tot|bx)=(gt|lt|yes|no):([\d.]+)$/;
-function comboGrid(list, ev) {
-  const ps = list.map((s) => COMBO_RE.exec(String(s.pick)));
-  if (!ps.every(Boolean) || new Set(ps.map((p) => p[5])).size > 1) return '';
-  const bx = ps[0][5] === 'bx';
-  const byLine = new Map();
-  list.forEach((s, i) => {
-    const [, row, rs, hs, hl, , c, ln] = ps[i], side = rs || hs;
-    if (!byLine.has(ln)) byLine.set(ln, new Map());
-    const rows = byLine.get(ln);
-    if (!rows.has(row)) rows.set(row, { side, label: (side === 'home' ? ev.home : ev.away).name + (hs ? ' ' + fmtLine(Number(hl)) : '') + (bx ? ' vence' : '') });
-    rows.get(row)[c === 'gt' || c === 'yes' ? 0 : 1] = s;
-  });
-  const cell = (s) => (s ? oddBtn({ ...s, name: '' }, ev, { wide: true, cls: 'wide-odd' }) : '<span class="odd empty wide-odd"><span class="val">-</span></span>');
-  const head = (ln) => (bx ? [`Os dois fazem ${ln}+: Sim`, 'Não'] : [`Mais de ${ln}`, `Menos de ${ln}`]);
-  return [...byLine].sort((a, b) => a[0] - b[0]).map(([ln, rows]) => `<div class="lines-tbl combo"><div class="ln-head"><span></span>${head(ln).map((h) => `<span>${esc(h)}</span>`).join('')}</div>
-    ${[...rows.values()].sort((a, b) => (a.side === 'home' ? 0 : 1) - (b.side === 'home' ? 0 : 1)).map((r) => `<div class="ln-row"><span class="ln-team">${esc(r.label)}</span>${cell(r[0])}${cell(r[1])}</div>`).join('')}</div>`).join('');
+/* qualquer mercado em que todas as opções começam pelo nome de uma equipa/jogador ("Lucia Szabova por decisão",
+   "Ondrej Mezera: mais de 38.5"): uma coluna por lado, sem repetir o nome */
+function nameCols(list, ev, open = true) {
+  const H = ev.home.name, A = ev.away.name, h = [], a = [], rest = [];
+  const [first, second] = H.length >= A.length ? [[H, h], [A, a]] : [[A, a], [H, h]];
+  for (const s of list) {
+    const n = String(s.name), m = n.startsWith(first[0]) ? first : n.startsWith(second[0]) ? second : null;
+    if (!m) { rest.push(s); continue; } // empate / "nenhum": fica por baixo, a toda a largura
+    // tira o separador (": ", " - ", " e ") mas não o sinal de uma linha ("-2.5")
+    const lbl = n.slice(m[0].length).replace(/^\s*(?:[:,]|[–—-](?=\s))?\s*/, '').replace(/^(?:e|and)\s+/i, '').replace(/^\((.*)\)$/, '$1').trim();
+    if (!lbl) return '';
+    m[1].push({ ...s, name: cap(lbl) });
+  }
+  if (rest.length > 2) return '';
+  const cols = twoCols(h, a, ev, open);
+  return cols && rest.length ? cols.replace(/<\/div>$/, rest.map((s) => `<div class="ln-row cs1">${oddCell(ev)(s)}</div>`).join('') + '</div>') : cols;
 }
 
-/* jogadores do basquete (pick "10#away#James Harden", nome "James Harden — 10 ou mais"): grelha com os jogadores à
-   esquerda (casa primeiro, separados por equipa) e as linhas em cima ("10+", "15+"); fechado mostra MKT_PL por equipa */
-const MKT_PL = 4;
-function playerGrid(list, ev, open = true) {
-  if (list[0].market !== 'bp') return '';
-  const cols = new Map(), teams = { home: new Map(), away: new Map() };
+/* combinações em tabela: a fila (equipa, empate, "Mais de 2.5") à esquerda e o resto em colunas (Mais | Menos,
+   Sim | Não, Ambas marcam Sim | Não). Picks: "res=home;tot=gt:239.5", "hc=home:-1.5;tot=lt:239.5", "res=home;bx=yes:100",
+   "res=draw;btts=no", "tot=gt:2.5;btts=yes" */
+const COMBO_RE = /^(res=(home|draw|away)|hc=(home|away):(-?[\d.]+)|tot=(gt|lt):([\d.]+));(tot|bx|btts)=(gt|lt|yes|no)(?::([\d.]+))?$/;
+function comboGrid(list, ev) {
+  const ps = list.map((s) => COMBO_RE.exec(String(s.pick)));
+  if (!ps.every(Boolean) || new Set(ps.map((p) => p[7])).size > 1) return '';
+  const kind = ps[0][7], byLine = new Map();
+  list.forEach((s, i) => {
+    const [, row, rs, hs, hl, tou, tl, , c, ln = ''] = ps[i], side = rs || hs;
+    const label = side ? (side === 'draw' ? 'Empate' : ev[side].name + (hs ? ' ' + fmtLine(Number(hl)) : '') + (kind === 'bx' ? ' vence' : '')) : `${tou === 'gt' ? 'Mais' : 'Menos'} de ${tl}`;
+    const rank = side ? { home: 0, draw: 1, away: 2 }[side] : tou === 'gt' ? 0 : 2;
+    if (!byLine.has(ln)) byLine.set(ln, new Map());
+    const rows = byLine.get(ln);
+    if (!rows.has(row)) rows.set(row, { rank, label, tl: Number(tl) || 0 });
+    rows.get(row)[c === 'gt' || c === 'yes' ? 0 : 1] = s;
+  });
+  const cell = oddCell(ev, '');
+  const head = (ln) => (kind === 'bx' ? [`Os dois fazem ${ln}+: Sim`, 'Não'] : kind === 'btts' ? ['Ambas marcam: Sim', 'Não'] : [`Mais de ${ln}`, `Menos de ${ln}`]);
+  return [...byLine].sort((a, b) => a[0] - b[0]).map(([ln, rows]) => `<div class="lines-tbl combo"><div class="ln-head"><span></span>${head(ln).map((h) => `<span>${esc(h)}</span>`).join('')}</div>
+    ${[...rows.values()].sort((a, b) => a.tl - b.tl || a.rank - b.rank).map((r) => `<div class="ln-row"><span class="ln-team">${esc(r.label)}</span>${cell(r[0])}${cell(r[1])}</div>`).join('')}</div>`).join('');
+}
+
+/* "Sim X" / "Não X" (pick "tot=in:1-2" e "!tot=in:1-2"): uma fila por X, com Sim | Não */
+function yesNoTable(list, ev, open = true) {
+  if (list[0].market !== 'pcond' || !list.every((s) => /^(Sim|Não)\s+\S/.test(String(s.name)))) return '';
+  const rows = new Map();
   for (const s of list) {
-    const [, side, pl] = String(s.pick).split('#'), col = String(s.name).split(' — ')[1] || '';
+    const p = String(s.pick), k = p.replace(/^!/, ''), lbl = String(s.name).replace(/^(Sim|Não)\s+/, '').replace(/^\((.*)\)$/, '$1');
+    if (!rows.has(k)) rows.set(k, { label: cap(lbl) });
+    rows.get(k)[p.startsWith('!') ? 1 : 0] = s;
+  }
+  const cell = oddCell(ev, '');
+  const rs = (open ? (x) => x : mainWindow)([...rows]);
+  return `<div class="lines-tbl combo"><div class="ln-head"><span></span><span>Sim</span><span>Não</span></div>
+    ${rs.map(([, r]) => `<div class="ln-row"><span class="ln-team">${esc(r.label)}</span>${cell(r[0])}${cell(r[1])}</div>`).join('')}</div>`;
+}
+
+/* total a 3 opções (pick "tot=gt:6" / "tot=eq:6" / "tot=lt:6"): uma fila por número, com Mais de | Exatamente | Menos de */
+function threeWayTotal(list, ev, open = true) {
+  const ps = list.map((s) => /^tot=(gt|eq|lt):(\d+(?:\.\d+)?)$/.exec(String(s.pick)));
+  if (!ps.every(Boolean) || !ps.some((p) => p[1] === 'eq')) return '';
+  const rows = new Map();
+  list.forEach((s, i) => { const [, c, n] = ps[i]; if (!rows.has(n)) rows.set(n, {}); rows.get(n)[{ gt: 0, eq: 2, lt: 1 }[c]] = s; });
+  const cell = oddCell(ev, '');
+  const rs = (open ? (x) => x : mainWindow)([...rows].sort((a, b) => a[0] - b[0]));
+  return `<div class="lines-tbl tot3"><div class="ln-head"><span></span><span>Mais de</span><span>Exatamente</span><span>Menos de</span></div>
+    ${rs.map(([n, r]) => `<div class="ln-row"><span class="ln">${n}</span>${cell(r[0])}${cell(r[2])}${cell(r[1])}</div>`).join('')}</div>`;
+}
+
+/* total de uma equipa (pick "home:over", com linha): uma tabela Mais | Menos por equipa, a casa primeiro */
+function teamLines(list, ev, open = true) {
+  if (list[0].market !== 'pteam' || !list.every((s) => /^(home|away):(over|under)$/.test(String(s.pick)) && s.line != null)) return '';
+  return ['home', 'away'].map((side) => {
+    const sub = list.filter((s) => s.pick.startsWith(side)).map((s) => ({ ...s, cside: s.pick.split(':')[1], cline: s.line }));
+    return sub.length ? `<div class="tl-team">${esc(ev[side].name)}</div>${linesTable(sub, ev, open)}` : '';
+  }).join('');
+}
+
+/* placar exato (futebol, hóquei, sets e placar do set no ténis; pick "2-1" = casa-fora): três colunas — vitória da casa, empate, vitória de fora —
+   cada uma da odd mais baixa para a mais alta; "outro placar" fica por baixo */
+function scoreCols(list, ev, open = true) {
+  if (!['cs', 'pcs', 'tscs', 'sets'].includes(list[0].market)) return '';
+  const cols = [[], [], []], rest = [];
+  for (const s of list) {
+    const m = /^(\d+)-(\d+)$/.exec(String(s.pick));
+    if (!m) { rest.push(s); continue; }
+    const h = +m[1], a = +m[2];
+    cols[h > a ? 0 : h === a ? 1 : 2].push({ ...s, name: `${h}-${a}` });
+  }
+  if (!cols[0].length && !cols[2].length) return '';
+  cols.forEach((c) => c.sort((x, y) => x.odds - y.odds));
+  const used = cols.map((c, i) => [c, [ev.home.name, 'Empate', ev.away.name][i]]).filter(([c]) => c.length);
+  const max = Math.max(...used.map(([c]) => c.length)), n = open ? max : Math.min(max, MKT_ROWS);
+  const cell = oddCell(ev);
+  return `<div class="lines-tbl" style="--c:${used.length}"><div class="ln-head cs">${used.map(([, h]) => `<span>${esc(h)}</span>`).join('')}</div>
+    ${Array.from({ length: n }, (_, i) => `<div class="ln-row cs">${used.map(([c]) => cell(c[i])).join('')}</div>`).join('')}
+    ${n === max ? rest.map((s) => `<div class="ln-row cs1">${cell(s)}</div>`).join('') : ''}</div>`;
+}
+
+/* jogadores (basquete "10#away#James Harden"; futebol "2#home#Nome", com ou sem equipa; marcadores do hóquei
+   "home#Nome"): grelha com os jogadores à esquerda (casa primeiro, separados por equipa) e as linhas em cima ("10+",
+   "A qualquer momento"); fechado mostra MKT_PL por equipa */
+const MKT_PL = 4;
+const PL_COL = { 'score or assist': 'Marca ou assiste', 'or assist': 'Marca ou assiste', 'ou assist': 'Marca ou assiste', assist: 'Assiste', score: 'Marca', '': 'Marca' };
+function playerGrid(list, ev, open = true) {
+  if (!['bp', 'pp', 'hgs'].includes(list[0].market)) return '';
+  const cols = new Map(), teams = { home: new Map(), away: new Map(), '': new Map() };
+  for (const s of list) {
+    const parts = String(s.pick).split('#'), [side, pl] = parts.length >= 3 ? [parts[1], parts.slice(2).join('#')] : [parts[0], parts[1]];
     if (!teams[side] || !pl) return '';
-    const n = /^(\d+) ou mais$/.exec(col);
-    if (!cols.has(col)) cols.set(col, { key: n ? Number(n[1]) : 0, label: n ? `${n[1]}+` : col.replace(/^./, (c) => c.toUpperCase()) });
+    const nm = String(s.name), raw0 = nm.includes(' — ') ? nm.split(' — ')[1] : nm.split(pl).join(' ').replace(/\s+/g, ' ').trim();
+    const raw = raw0.replace(/^Marca (?=\d)/, '').replace(/^Marca a qualquer/, 'A qualquer').replace(/ a marcar$/, ''); // marcadores do hóquei: "Primeiro", "2+"
+    const n = /^(\d+)(?:\+| ou mais)/.exec(raw);
+    const col = n ? `n${n[1]}` : raw;
+    if (!cols.has(col)) cols.set(col, { key: n ? Number(n[1]) : -1, idx: cols.size, label: n ? `${n[1]}+` : PL_COL[raw.toLowerCase()] || cap(raw) });
     if (!teams[side].has(pl)) teams[side].set(pl, {});
     teams[side].get(pl)[col] = s;
   }
-  const cs = [...cols].sort((a, b) => a[1].key - b[1].key);
-  const cell = (s) => (s ? oddBtn({ ...s, name: '' }, ev, { wide: true, cls: 'wide-odd' }) : '<span class="odd empty wide-odd"><span class="val">-</span></span>');
+  // só linhas ("10+", "15+"): por número; com nomes ("Primeiro", "2+"): pela ordem da fonte
+  const cs = [...cols].sort((a, b) => ([...cols.values()].some((c) => c.key < 0) ? a[1].idx - b[1].idx : a[1].key - b[1].key));
+  const cell = oddCell(ev, '');
   const block = (side) => {
     const ps = [...teams[side]].slice(0, open ? undefined : MKT_PL);
-    return ps.length ? `<div class="pl-team">${esc(ev[side].name)}</div>` + ps.map(([pl, r]) => `<span class="pl-name">${esc(pl)}</span>${cs.map(([c]) => cell(r[c])).join('')}`).join('') : '';
+    return ps.length ? (side ? `<div class="pl-team">${esc(ev[side].name)}</div>` : '') + ps.map(([pl, r]) => `<span class="pl-name">${esc(pl)}</span>${cs.map(([c]) => cell(r[c])).join('')}`).join('') : '';
   };
-  return `<div class="pl-wrap"><div class="pl-grid" style="--n:${cs.length}"><span class="pl-name pl-h"></span>${cs.map(([, c]) => `<span class="pl-h">${esc(c.label)}</span>`).join('')}${block('home')}${block('away')}</div></div>`;
+  return `<div class="pl-wrap"><div class="pl-grid" style="--n:${cs.length}"><span class="pl-name pl-h"></span>${cs.map(([, c]) => `<span class="pl-h">${esc(c.label)}</span>`).join('')}${block('home')}${block('away')}${block('')}</div></div>`;
+}
+// a tabela de cada mercado (a primeira que serve), aberta e como fica agora; null = botões normais
+const GRIDS = [linesTable, teamLines, teamCols, comboGrid, yesNoTable, threeWayTotal, scoreCols, playerGrid, nameCols];
+function marketGrid(list, ev, open) {
+  for (const g of GRIDS) { const full = g(list, ev, true); if (full) return { full, body: open ? full : g(list, ev, false) }; }
+  return null;
 }
 
 /* Secções da página do jogo. Cada secção diz que seleções mostra; um mercado pode estar em várias
@@ -988,13 +1083,27 @@ function renderEvent() {
   const sels = selections(ev);
   const groups = {};
   for (const s of sels) (groups[s.marketName] ||= []).push(s);
+  /* o mesmo nome com vencedor, handicap e total juntos (ex.: "1º período" no hóquei) fica em três mercados; os
+     marcadores do hóquei ("Marcadores — Primeiro a marcar", "— Último"...) ficam numa só grelha */
+  const SPLIT = { pml2: 'vencedor', p1x2: 'vencedor', pspr: 'handicap', ptot: 'total' };
+  const regrouped = {};
+  for (const [n, l] of Object.entries(groups)) {
+    delete groups[n];
+    if (new Set(l.map((s) => s.market)).size > 1 && l.every((s) => SPLIT[s.market])) for (const s of l) (regrouped[`${n}: ${SPLIT[s.market]}`] ||= []).push(s);
+    else if (l[0].market === 'hgs' && n.includes(' — ')) { const [base, col] = n.split(' — '); (regrouped[base] ||= []).push(...l.map((s) => ({ ...s, name: `${String(s.pick).split('#')[1]} — ${col}` }))); }
+    else regrouped[n] = l;
+  }
+  Object.assign(groups, regrouped);
   // intervalo / final na ordem da bet365: primeiro os que acabam com a casa a ganhar, depois os da visitante
   const HTFT = ['home-home', 'draw-home', 'away-home', 'home-away', 'draw-away', 'away-away', 'home-draw', 'draw-draw', 'away-draw'];
   // os outros: casa primeiro, depois o que não é de nenhuma equipa (empate, "outro resultado"), depois a visitante
   const sideRank = (s) => (String(s.name).includes(ev.home.name) ? 0 : String(s.name).includes(ev.away.name) ? 2 : 1);
   for (const l of Object.values(groups)) {
-    if (l[0].market === 'phtft') l.sort((a, b) => HTFT.indexOf(a.pick) - HTFT.indexOf(b.pick));
+    if (l[0].market === 'phtft') l.splice(0, l.length, ...l.map((s) => ({ ...s, name: String(s.name).replace(' - ', ' / ') })).sort((a, b) => HTFT.indexOf(a.pick) - HTFT.indexOf(b.pick)));
     else if (l.some((s) => sideRank(s) !== 1)) l.sort((a, b) => sideRank(a) - sideRank(b));
+    // Sim antes de Não; períodos/tempos/quartos por ordem, com o empate no fim
+    else if (l.every((s) => /^(Sim|Não)$/.test(s.name))) l.sort((a, b) => (a.name === 'Não') - (b.name === 'Não'));
+    else if (['hphs', 'phs'].includes(l[0].market)) l.sort((a, b) => /tie/.test(a.pick) - /tie/.test(b.pick) || String(a.pick).localeCompare(String(b.pick)));
   }
   const form =(f) => (f ? `<div class="form">${f.split('').slice(-5).map((c) => `<i class="${c}">${c === 'W' ? 'V' : c === 'L' ? 'D' : 'E'}</i>`).join('')}</div>` : '');
   const status = ev.state === 'in' ? `<div class="big-clock"><span class="live-dot"></span> ${clockHtml(ev)}${ev.alive ? ` · 👥 ${ev.alive.h} v ${ev.alive.a}` : ''}</div>`
@@ -1046,8 +1155,8 @@ function renderEvent() {
       const cc = list[0].cclose; // prazo de fechamento próprio do mercado
       const note = cc ? `<small>${Date.now() >= cc ? 'fechado' : 'apostas até ' + dateLabel(new Date(cc))}</small>` : manualNote(list) || (ev.state === 'in' ? '<small>Ao vivo</small>' : '');
       const open = mktOpen(ev, rawName);
-      const full = linesTable(list, ev) || teamCols(list, ev) || comboGrid(list, ev) || playerGrid(list, ev);
-      const body = full ? (linesTable(list, ev, open) || teamCols(list, ev, open) || comboGrid(list, ev) || playerGrid(list, ev, open)) : `<div class="market-body${list.length > 4 ? ' many' : ''}">${(open ? list : list.slice(0, MKT_SELS)).map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`;
+      const grid = marketGrid(list, ev, open), full = grid?.full;
+      const body = grid ? grid.body : `<div class="market-body${list.length > 4 ? ' many' : ''}">${(open ? list : list.slice(0, MKT_SELS)).map((s) => oddBtn(s, ev, { wide: true, cls: 'wide-odd' })).join('')}</div>`;
       // só tem botão quem tem mais do que cabe fechado
       const tog = (full ? body !== full : list.length > MKT_SELS) || open ? `<button class="mkt-tog" data-mkt="${esc(rawName)}">${open ? 'Mostrar menos ▴' : 'Mostrar mais ▾'}</button>` : '';
       html += `<div class="market"><div class="market-head">${esc(name)}${note}</div>${body}${tog}</div>`;

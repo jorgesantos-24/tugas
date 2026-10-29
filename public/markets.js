@@ -922,7 +922,7 @@ const ptBR = (function () {
     R(/\b(\d+)(st|nd|rd|th)\b/g, '$1º'), R(/ and /g, ' e '),
     R(/^Jogador (.+)$/, '$1 do jogador'), R(/^Alternativo (.+)$/, '$1 (alternativo)'), R(/^Adicional (.+)$/, '$1 (adicional)'), R(/\bResult\b/g, 'Resultado'), R(/\bWin\b/g, 'Vence'), R(/\bTo\b/g, 'para'),
   ];
-  const SEL = [R(/^Any other result$/i, 'Outro resultado'), R(/^Any other Score$/i, 'Outro placar'), R(/^Any Other$/i, 'Outro'), R(/^Overtime$/, 'Prorrogação'), R(/^Penalties$/, 'Pênaltis'), R(/^Regular Time$/i, 'Tempo regulamentar'), R(/ or /g, ' ou '), R(/^Over (?=\d)/, 'Mais de '), R(/^Under (?=\d)/, 'Menos de '), R(/^Exactly (?=\d)/, 'Exatamente '),
+  const SEL = [R(/^Any other result$/i, 'Outro resultado'), R(/^Any other Score$/i, 'Outro placar'), R(/^Any Other$/i, 'Outro'), R(/^Overtime$/, 'Prorrogação'), R(/^Penalties$/, 'Pênaltis'), R(/^Regular Time$/i, 'Tempo regulamentar'), R(/^Regulation$/i, 'Tempo regulamentar'), R(/^Shootout$/i, 'Pênaltis'), R(/ Corners$/, ' (escanteios)'), R(/ or /g, ' ou '), R(/^Over (?=\d)/, 'Mais de '), R(/^Under (?=\d)/, 'Menos de '), R(/^Exactly (?=\d)/, 'Exatamente '),
     // restos em inglês nas seleções (revisão de 2026-10-28, com o que a fonte manda hoje)
     R(/ To Win \(\d-Way\)$/, ''), R(/^To Win$/, 'Vence'), R(/^Period (\d)$/, '$1º período'), R(/^Half (\d)$/, '$1º tempo'), R(/^(\d)(?:st|nd|rd|th) Half$/, '$1º tempo'),
     R(/ (\d)(?:st|nd|rd|th) Quarter$/, ' ($1º quarto)'), R(/ (\d)(?:st|nd|rd|th) Half$/, ' ($1º tempo)'), R(/^Basket (.+)$/, '$1'), R(/\b(\d) Points$/, '$1 pontos'),
@@ -960,6 +960,7 @@ const ptBR = (function () {
     R(/^(\d+º (?:tempo|quarto)) Margem de vitória$/, 'Margem de vitória do $1'), R(/^(\d+º tempo) Margem \(faixas\)$/, 'Margem de vitória do $1 (faixas)'),
     R(/^(\d+º (?:tempo|quarto)) Resultado \(com empate\)$/, 'Resultado do $1 (com empate)'), R(/^(\d+º (?:tempo|quarto)) Dupla Chance$/, 'Dupla chance do $1'),
     R(/^(\d+º (?:tempo|quarto)) 3 Way Linhas$/, 'Resultado do $1 (com empate)'), R(/^Multi goalscorers$/i, 'Marca mais de uma vez'),
+    R(/^de mais pontos Período$/, 'Período com mais gols'), R(/^de mais pontos Quarto$/, 'Quarto com mais pontos'), R(/^de mais pontos (\d+º tempo)$/, 'Tempo com mais gols'),
   ];
   const run = (t, list) => { for (const [re, to] of list) t = t.replace(re, to); return t; };
   // protege os nomes das equipas (e devolve-os no fim)

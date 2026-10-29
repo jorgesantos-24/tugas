@@ -115,7 +115,8 @@ function selName(q, m) {
   const parts = [];
   const add = (v) => { const s = String(v ?? '').trim(); if (s && !parts.some((p) => p.toLowerCase() === s.toLowerCase())) parts.push(s); };
   add(q.side); add(q.label);
-  if (q.line != null && !/^(To Win|Line|Total|Match)$/i.test(String(q.line))) add(q.line);
+  // a linha só entra se ainda não estiver no rótulo ("Over 0.5" + linha 0.5 dava "Mais de 0.5 0.5")
+  if (q.line != null && !/^(To Win|Line|Total|Match)$/i.test(String(q.line)) && !parts.some((p) => p.split(/\s+/).includes(String(q.line)))) add(q.line);
   if (q.n2 && !/^(1|X|2|1X|12|X2|2X)$/.test(q.n2) && q.n2 !== m.home && q.n2 !== m.away) add(`(${q.n2})`);
   if (q.handicap != null && !parts.some((p) => p.includes(String(q.handicap).replace(/^\+/, '')))) add(q.handicap);
   return tr(parts.join(' ').replace(/\s*\(Svr\)/g, ''), true) || '—';
