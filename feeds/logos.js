@@ -9,6 +9,8 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const dns = require('node:dns');
+const https = require('node:https');
 const M = require('../public/markets.js'); // país de cada liga (as de futebol criadas na hora também)
 
 const KEY = process.env.THESPORTSDB_KEY || '123'; // chave pública do plano grátis
@@ -151,17 +153,33 @@ try {
     afCountry.set(c, teams.map(([n, id]) => ({ names: [norm(n)].filter(Boolean), url: `/escudos/${id}.png` })));
   }
 } catch { /* ainda não gerado */ }
+// o endereço do servidor de imagens vem de DNS públicos (o do provedor pode bloqueá-lo); o DNS normal fica de reserva
+const PUB_DNS = new dns.Resolver({ timeout: 3000, tries: 1 });
+PUB_DNS.setServers(['8.8.8.8', '1.1.1.1']);
+const pubLookup = (host, opts, cb) => PUB_DNS.resolve4(host, (e, ips) => {
+  if (e || !ips?.length) return dns.lookup(host, opts, cb);
+  return opts?.all ? cb(null, ips.map((address) => ({ address, family: 4 }))) : cb(null, ips[0], 4);
+});
+function crestGet(url) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { lookup: pubLookup, timeout: 10000 }, (r) => {
+      if (r.statusCode !== 200) { r.resume(); return reject(new Error('HTTP ' + r.statusCode)); }
+      const parts = [];
+      r.on('data', (b) => parts.push(b));
+      r.on('end', () => resolve({ body: Buffer.concat(parts), type: r.headers['content-type'] || 'image/png' }));
+      r.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('tempo esgotado')));
+    req.on('error', reject);
+  });
+}
 // GET /escudos/<id>.png: busca a imagem uma vez e guarda-a em memória (o CDN do Firebase Hosting guarda-a também)
 const crestMem = new Map(); // id → { body, type } ou Promise
 const CREST_MAX = 4000;
 async function serveCrest(id, res) {
   let c = crestMem.get(id);
   if (!c) {
-    c = (async () => {
-      const r = await fetch(`https://media.api-sports.io/football/teams/${id}.png`, { signal: AbortSignal.timeout(10000) });
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return { body: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') || 'image/png' };
-    })();
+    c = crestGet(`https://media.api-sports.io/football/teams/${id}.png`);
     crestMem.set(id, c);
     if (crestMem.size > CREST_MAX) crestMem.delete(crestMem.keys().next().value); // a mais antiga
   }
