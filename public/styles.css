@@ -88,7 +88,7 @@ body{background:radial-gradient(1000px 500px at -10% -10%,rgba(31,211,111,.08),t
 .tab-cnt{font-size:11px;font-weight:700;padding:1px 7px;border-radius:10px;background:var(--panel3);color:var(--muted)}
 .sport-tabs button.active .tab-cnt{background:rgba(0,0,0,.2);color:#03200f}
 /* secções da página do jogo (Todos, Principais, 1º set, Games...): uma fila que desliza no telemóvel */
-.ev-tabs{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:12px 0 14px;padding:2px 0}
+.ev-tabs{scroll-margin-top:80px;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:12px 0 14px;padding:2px 0}
 .ev-tabs::-webkit-scrollbar{display:none}
 .ev-tabs button{flex:none;display:flex;align-items:center;gap:7px;white-space:nowrap;border:1px solid var(--line)}
 .ev-tabs button.active{border-color:transparent}
@@ -285,6 +285,11 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .bb-card-head{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);margin:8px 0 2px}
 .bb-card-head b{margin-left:auto;font-size:13px}
 .leg.in-bb{margin-left:6px}
+.ev-tabs button.bb-tab{border-color:rgba(255,214,10,.45);color:var(--yellow)}
+.ev-tabs button.bb-tab.active{background:var(--yellow);color:#10261a}
+.odd.bb-x .val{color:var(--yellow)}
+.odd.bb-off{opacity:.35;cursor:not-allowed}
+.slip-bb.bb-panel{background:var(--panel);margin:0 0 12px}
 .bb-hint{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid rgba(255,214,10,.3);border-radius:10px;padding:9px 12px;margin:0 0 10px;font-size:13px;color:#d6e6dc}
 .si-odds{color:var(--yellow)}
 .si-odds .old{color:var(--muted);text-decoration:line-through;font-weight:500;margin-right:4px}

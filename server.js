@@ -721,6 +721,24 @@ function bbQuote(keys) {
   const r = BB.quote(E, items);
   return r.reason ? r : { ...r, items };
 }
+// aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
+function bbPreview(keys) {
+  const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
+  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
+  const m = FEED.bbMatch(evId);
+  const E = m && BB.engineFor(evId, m);
+  if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  const items = [];
+  for (const key of keys) {
+    const { sel } = findSel(key);
+    if (!sel || sel.locked) return { reason: `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`, bad: key };
+    items.push({ key, q: !sel.manual && srcQuote(ev, sel), odds: sel.odds });
+  }
+  const mine = new Set(keys);
+  const cands = M.selections(ev).filter((s) => s.bb && !s.locked && !mine.has(s.key)).map((s) => ({ key: s.key, q: srcQuote(ev, s), odds: s.odds }));
+  const odds = BB.preview(E, items, cands);
+  return odds ? { odds } : { reason: 'estas seleções não entram no Criar aposta' };
+}
 
 /* A lista de jogos leva só os mercados da linha do jogo (vencedor e linha principal do total) e o número total
    de seleções ("+N"). Os mercados completos de um jogo vêm de /api/events/full (página do jogo, boletim, apostas
@@ -1641,6 +1659,16 @@ const routes = {
         return q.reason ? { reason: q.reason, bad: q.bad || null } : { odds: q.odds };
       }),
     };
+  },
+
+  // aba Criar aposta: a odd de cada seleção do jogo já somada às escolhidas (como na bet365)
+  'POST /api/betbuilder/preview': (ctx) => {
+    rateLimit(ctx.ip, 'bbp', 240, 60000);
+    const ks = ctx.body.keys;
+    if (!Array.isArray(ks) || !ks.length || ks.length > 20) fail(400, 'Pedido inválido.');
+    const keys = ks.map(String);
+    if (new Set(keys.map((k) => k.split('|')[0])).size !== 1) fail(400, 'Seleções de jogos diferentes.');
+    return bbPreview(keys);
   },
 
   'POST /api/cashout': async (ctx) => {

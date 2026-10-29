@@ -19,6 +19,7 @@ const PARTS = require('./parts.js'); // placar de cada parte (tempos, quartos, p
 const PLAYERS = require('./players.js'); // futebol: mercados de jogadores (cobertura por liga, estatísticas por jogador)
 const BP = require('./bplayers.js'); // basquete: mercados de jogadores (box score)
 const ESPN = require('./espn.js'); // box score do basquete (NBA/WNBA) e marcadores da NHL
+const BB = require('./betbuilder.js'); // Criar aposta: que seleções o motor sabe calcular
 const HG = require('./hgoals.js'); // hóquei: marcadores (NHL) e ordem dos gols
 const FIGHTS = require('./fights.js'); // MMA: resultado das lutas (MoviOdds + ESPN)
 const TT = require('./tabletennis.js'); // tênis de mesa: mercados e resultado (placar de cada set)
@@ -117,7 +118,9 @@ function soccerLeague(name, region) {
 const SOCCER_GROUPS = {
   // antes do jogo
   40: { k: 'ml' }, 10114: { k: 'dc' }, 10544: { k: 'dnb' }, 10150: { k: 'btts' }, 43: { k: 'cs' },
-  981: { k: 'total', main: true }, 10202: { k: 'total' }, 10143: { k: 'total' }, 50139: { k: 'total' },
+  // a mesma linha em dois grupos de totais (ex.: 1.5 em "Alternative Total Goals" a 1.29 e em "Alternative Goal Line"
+  // a 1.26, margens diferentes): fica a do grupo com prio maior, sem a tratar como conflito
+  981: { k: 'total', main: true }, 10202: { k: 'total', prio: 2 }, 10143: { k: 'total', prio: 1 }, 50139: { k: 'total' },
   938: { k: 'spread', main: true }, 50138: { k: 'spread' },
   // ao vivo
   1777: { k: 'ml' }, 10115: { k: 'dc' }, 10563: { k: 'dnb' }, 10565: { k: 'btts' },
@@ -197,7 +200,7 @@ function tennisLive(score) {
 function soccerQuote(q, m) {
   const g = SOCCER_GROUPS[q.group_id];
   if (!g) return null;
-  const s = { k: g.k, main: !!g.main };
+  const s = { k: g.k, main: !!g.main, prio: g.prio || 0 };
   if (g.k === 'ml' || g.k === 'dc') s.pick = { 1: 'home', X: 'draw', 2: 'away', '1X': 'hd', 12: 'ha', X2: 'da' }[q.n2];
   else if (g.k === 'dnb') s.pick = q.label === m.home ? 'home' : q.label === m.away ? 'away' : null;
   else if (g.k === 'btts') s.pick = /^yes$/i.test(q.label) ? 'yes' : /^no$/i.test(q.label) ? 'no' : null;
@@ -366,6 +369,7 @@ function toEvent(m0, serverNow, sport, full = true) {
   const gs = m.group_status || {};
   const byK = new Map();
   const mainSel = new WeakSet(), conflict = new Set(); // seleções do mercado principal · com duas odds diferentes na fonte
+  const prioOf = new WeakMap(); // prioridade do grupo de onde veio a seleção (totais do futebol)
   const specific = (q) => (sport === 'soccer' ? soccerQuote(q, m) : sport === 'tennis' ? TEN.quote(q, m) : sport === 'esports' ? esportsQuote(q, m) : sport === 'mma' ? fightQuote(q, m) : sport === 'tabletennis' ? TT.quote(q, m) : namedQuote(q, m, sport));
   const ctx = `${sport}|${m.home}|${m.away}|${m.league}|${live ? 1 : 0}`;
   // MMA: apostas só antes do início (a fonte não dá nada durante a luta); tênis de mesa ao vivo: feeds/tabletennis.js
@@ -402,6 +406,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (stale && !live) continue;
     const sel = { pick: s.pick, odds, lock: !!(q.suspended || stale) };
     Object.defineProperty(sel, 'q', { value: q }); // cotação de origem (Criar aposta); fora do JSON
+    // futebol antes do jogo: seleção que entra no Criar aposta (aba própria na página do jogo)
+    if (sport === 'soccer' && !live) { try { const l = BB.legOf(m, q); if (l && l.fam !== 'combo') sel.bb = 1; } catch { /* cotação fora do formato */ } }
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
@@ -416,9 +422,11 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (dup >= 0) {
       const old = mk.sels[dup];
       if (s.main && !mainSel.has(old)) { mk.sels[dup] = sel; mainSel.add(sel); }
+      else if (!mainSel.has(old) && !s.main && (s.prio || 0) !== (prioOf.get(old) || 0)) { if ((s.prio || 0) > (prioOf.get(old) || 0)) { conflict.delete(old); mk.sels[dup] = sel; prioOf.set(sel, s.prio || 0); } }
       else if (!(mainSel.has(old) && !s.main) && Math.abs(old.odds - sel.odds) > 0.001) conflict.add(old);
       continue;
     }
+    prioOf.set(sel, s.prio || 0);
     if (s.main) mainSel.add(sel);
     if (s.main && sel.line != null && mk.main == null) mk.main = s.k === 'spread' ? Math.abs(sel.line) : sel.line;
     mk.sels.push(sel);

@@ -317,6 +317,7 @@ function setUser(user) { if (user) S.user = user; renderHeader(); }
 
 /* ---------------- boletim ---------------- */
 function toggleSel(key) {
+  let jump = false;
   const i = S.slip.findIndex((s) => s.key === key);
   if (i >= 0) { S.slip.splice(i, 1); delete S.stakes[key]; }
   else {
@@ -329,10 +330,14 @@ function toggleSel(key) {
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
     // segunda seleção do mesmo jogo de futebol: vira Criar aposta (múltipla)
     if (S.slip.length >= 2 && (!hasConflict() || (same && bbOk(ev)))) S.slipMode = 'multiple';
+    // e, na página desse jogo, abre a aba Criar aposta
+    if (same === 1 && bbOk(ev) && S.view === 'event' && S.eventId === ev.id && !(S.evTab?.id === ev.id && S.evTab.tab === 'bb')) { S.evTab = { id: ev.id, tab: 'bb' }; jump = true; }
   }
   if (S.slip.length < 2) S.slipMode = 'single';
   S.slipTab = 'slip';
   render();
+  // sobe até às abas para se ver o quadro do Criar aposta
+  if (jump) document.querySelector('.ev-tabs')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   ensureBB();
 }
 
@@ -355,8 +360,28 @@ async function ensureBB(force = false) {
   } catch { need.forEach((g) => { S.bbq[bbKey(g)] = { reason: 'não foi possível calcular a odd', at: Date.now() - 10000 }; }); }
   bbBusy = false;
   renderSlip();
+  // aba Criar aposta aberta neste jogo: o quadro de cima mostra a odd nova
+  if (S.view === 'event' && S.evTab?.id === S.eventId && S.evTab.tab === 'bb') { S.keepScroll = true; renderMain(); }
 }
 setInterval(() => { if (!document.hidden && S.slip.length > 1) ensureBB(); }, 5000);
+/* aba Criar aposta com seleções escolhidas: cada odd do jogo mostra quanto a aposta fica a valer ao juntá-la
+   (S.bbPrev.odds[key]; 0 = não junta). Pedido ao servidor quando as escolhidas mudam e a cada 15 s */
+let bbShow = null; // odds recalculadas do jogo a desenhar (só enquanto se desenha a aba Criar aposta)
+let bbMine = null; // odd da aposta deste jogo, mostrada nas seleções já escolhidas (aba Criar aposta, 2 ou mais)
+let bbpBusy = false;
+async function ensurePreview() {
+  const ev = S.view === 'event' && S.events.get(S.eventId);
+  if (!bbOk(ev) || S.evTab?.id !== ev.id || S.evTab.tab !== 'bb') return;
+  const mine = S.slip.filter((s) => s.evId === ev.id);
+  if (!mine.length || bbpBusy) return;
+  const k = bbKey(mine), c = S.bbPrev;
+  if (c && c.k === k && Date.now() - c.at < 15000) return;
+  bbpBusy = true;
+  try { const r = await api('POST', '/api/betbuilder/preview', { keys: mine.map((s) => s.key) }); S.bbPrev = { k, at: Date.now(), odds: r.odds || null }; }
+  catch { S.bbPrev = { k, at: Date.now() - 10000, odds: null }; }
+  bbpBusy = false;
+  if (S.view === 'event' && S.eventId === ev.id) { S.keepScroll = true; renderMain(); }
+}
 // conflito: duas seleções do mesmo jogo que não formam um Criar aposta válido
 const hasConflict = () => [...slipGroups().values()].some((g) => g.length > 1 && !(bbOf(g)?.odds));
 const slipOdds = (items) => {
@@ -462,7 +487,12 @@ function oddBtn(sel, ev, opts = {}) {
   const mvStyle = move ? ` style="--d:-${((6000 - (mv.until - Date.now())) / 1000).toFixed(2)}s"` : '';
   const label = esc(opts.wide ? sel.name : sel.lbl);
   if (isSuspended(ev) || sel.locked) return `<span class="odd lock ${opts.cls || ''}" title="Suspenso"><span class="lbl">${label}</span><span class="val">🔒</span></span>`;
-  return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}"${mvStyle} data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(sel.odds)}</span></button>`;
+  // aba Criar aposta: a odd já junta com as escolhidas; as que não combinam ficam bloqueadas
+  const bx = !inSlip && bbShow ? bbShow[sel.key] : undefined;
+  if (bx === 0) return `<span class="odd lock bb-off ${opts.cls || ''}" title="Não combina com a sua aposta"><span class="lbl">${label}</span><span class="val">—</span></span>`;
+  if (bx) return `<button class="odd bb-x ${opts.cls || ''}" data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(bx)}</span></button>`;
+  const shown = inSlip && bbMine ? bbMine : sel.odds;
+  return `<button class="odd ${inSlip ? 'sel' : ''} ${move} ${opts.cls || ''}"${mvStyle} data-key="${esc(sel.key)}"><span class="lbl">${label}</span><span class="val">${fmtOdd(shown)}</span></button>`;
 }
 
 /* Futebol ao vivo: relógio ao segundo (22:30, 47:12, 93:05). O HTML leva o minuto (muda pouco, não obriga a redesenhar)
@@ -1018,7 +1048,20 @@ function eventTabs(ev) {
   const tabs = base.map((t) => (t.id === 'all' ? t : { ...t, has: (s) => (s.cat ? s.cat === t.id : t.has(s)) }));
   const cats = [...new Set(selections(ev).filter((s) => s.cat).map((s) => s.cat))].filter((c) => !tabs.some((t) => t.id === c));
   cats.sort((a, b) => (a === 'other') - (b === 'other') || a.localeCompare(b, undefined, { numeric: true }));
-  return tabs.concat(cats.map((c) => ({ id: c, label: catLabel(c), has: (s) => s.cat === c })));
+  // futebol antes do jogo: "Criar aposta" antes de "Todos", só com as seleções que o motor sabe juntar
+  const bb = bbOk(ev) ? [{ id: 'bb', label: 'Criar aposta', has: (s) => !!s.bb }] : [];
+  return bb.concat(tabs, cats.map((c) => ({ id: c, label: catLabel(c), has: (s) => s.cat === c })));
+}
+/* aba Criar aposta: as seleções deste jogo no boletim e a odd junta (calculada pelo servidor) */
+function bbPanel(ev) {
+  const mine = S.slip.filter((s) => s.evId === ev.id);
+  if (mine.length < 2) return `<div class="bb-hint"><span class="bb-tag">Criar aposta</span><span>${mine.length ? 'Escolha mais uma seleção deste jogo para juntar numa odd só' : `Escolha de 2 a ${BB_MAX} seleções deste jogo e junte numa odd só`}</span></div>`;
+  const q = bbOf(mine);
+  return `<div class="slip-bb bb-panel ${q?.reason ? 'bad' : ''}">
+    <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
+    ${mine.map((s) => { const { sel } = findSel(s.key); return `<div class="bb-leg ${s.key === q?.bad ? 'bad' : ''}"><button class="x" data-remove="${esc(s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(sel ? sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(sel ? sel.marketName : '')}</div></div></div>`; }).join('')}
+    ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
+  </div>`;
 }
 function sportTabsOf(ev) {
   const K = (...ks) => (s) => ks.includes(s.market);
@@ -1157,16 +1200,22 @@ function renderEvent() {
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
-    // Criar aposta: dica no futebol antes do jogo
-    else if (bbOk(ev)) { const n = S.slip.filter((s) => s.evId === ev.id).length; html += `<div class="bb-hint"><span class="bb-tag">Criar aposta</span><span>${n > 1 ? `${n} seleções deste jogo no boletim — a odd é calculada junta` : `Escolha até ${BB_MAX} seleções deste jogo e junte numa odd só (pode juntar com outros jogos)`}</span></div>`; }
     // secções (como na bet365): só aparecem as que têm mercados; "Todos" mostra tudo
     const tabs = eventTabs(ev).filter((t) => t.id === 'all' || sels.some((s) => t.has(s)));
     let tab = S.evTab?.id === ev.id ? S.evTab.tab : 'all';
     if (!tabs.some((t) => t.id === tab)) tab = 'all';
     const cur = tabs.find((t) => t.id === tab);
-    if (tabs.length > 2) html += `<div class="tabs ev-tabs">${tabs.map((t) => `<button class="${t.id === tab ? 'active' : ''}" data-evtab="${t.id}">${esc(t.label)}<span class="tab-cnt">${t.id === 'all' ? Object.keys(groups).length : new Set(sels.filter((s) => t.has(s)).map((s) => s.marketName)).size}</span></button>`).join('')}</div>`;
-    // totais e handicaps aparecem em tabela (uma linha por fila)
-    let entries = Object.entries(groups).filter(([, list]) => cur.has(list[0]));
+    if (tabs.length > 2) html += `<div class="tabs ev-tabs">${tabs.map((t) => `<button class="${t.id === tab ? 'active' : ''}${t.id === 'bb' ? ' bb-tab' : ''}" data-evtab="${t.id}">${esc(t.label)}<span class="tab-cnt">${t.id === 'all' ? Object.keys(groups).length : new Set(sels.filter((s) => t.has(s)).map((s) => s.marketName)).size}</span></button>`).join('')}</div>`;
+    if (tab === 'bb') html += bbPanel(ev);
+    // odds recalculadas com as escolhidas (só as do pedido para as escolhidas de agora)
+    const mineKey = bbKey(S.slip.filter((s) => s.evId === ev.id));
+    bbShow = tab === 'bb' && mineKey && S.bbPrev?.k === mineKey ? S.bbPrev.odds : null;
+    const mine = S.slip.filter((s) => s.evId === ev.id);
+    bbMine = tab === 'bb' && mine.length > 1 ? bbOf(mine)?.odds || null : null;
+    if (tab === 'bb') queueMicrotask(ensurePreview);
+    // totais e handicaps aparecem em tabela (uma linha por fila); no Criar aposta só as seleções que o motor junta
+    let entries = tab === 'bb' ? Object.entries(groups).map(([n, l]) => [n, l.filter((s) => s.bb)]).filter(([, l]) => l.length)
+      : Object.entries(groups).filter(([, list]) => cur.has(list[0]));
     // mercados em par (um por equipa, ex.: "Total de pontos: X"): o da casa logo antes do da visitante
     for (let i = 0; i < entries.length; i++) {
       const nm = entries[i][0];
@@ -1200,6 +1249,7 @@ function renderEvent() {
       html += `<div class="market"><div class="market-head">${esc(name)}${note}</div>${body}${tog}</div>`;
     }
   }
+  bbShow = bbMine = null;
   html += statsPanel(ev);
   const tl = (ev.details || []).filter((d) => d.goal || d.red || d.yellow);
   if (tl.length) {

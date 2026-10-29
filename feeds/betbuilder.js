@@ -6,7 +6,12 @@
 //   escanteios(h1,a1,h2,a2)  — binomial negativa por equipa e tempo
 //   cartões   (h,a)          — binomial negativa por equipa
 // Jogadores: marcador = cada golo da equipa é dele com prob. s; cartão = cada cartão da equipa é dele com prob. t.
+//   Estatísticas (ppFactor): assistência = cada golo da equipa é assistido por ele com prob. a; remates à baliza =
+//   os golos dele + Poisson(sot); remates = remates à baliza + Poisson(sh); desarmes, faltas, passes, defesas =
+//   binomial negativa própria (sem ligação aos golos).
 // Cada seleção é uma função do estado → probabilidade (0..1). Uma combinação = soma dos estados × produto das seleções.
+
+const PLAYERS = require('./players.js'); // cotação de jogador → { estatística, N+, equipa, nome }
 
 const fact = [1]; for (let i = 1; i <= 60; i++) fact[i] = fact[i - 1] * i;
 const pois = (k, l) => Math.exp(-l) * l ** k / fact[k];
@@ -174,11 +179,23 @@ function legOf(m, q) {
     case 'Both Teams to Receive Cards': { if (/Red/.test(q.line)) return null; const n = /2\+/.test(q.line) ? 2 : 1; const f = (s) => s.h >= n && s.a >= n; return L('k', q.side === 'Yes' ? f : (s) => !f(s), 'kboth', g + q.line); }
     // ---------- jogadores ----------
     case 'Goalscorers': case 'Multi Scorers': { const k = tm(q.n2); if (!k) return null;
+      const st = ppOf(m, q); if (st) return st; // marca (N+): mesmo modelo dos remates e assistências
       const kind = q.side === 'Anytime' ? 'any' : q.side === 'First' ? 'first' : q.side === 'Last' ? 'last' : q.side === '2 or More' ? 'two' : q.side === '3 or More' ? 'three' : null;
       return kind && { b: 'g', fam: 'pl', mk: g + q.side, pl: { team: k, kind, name: q.line } }; }
     case 'Cards': { const k = tm(q.n2); if (!k || q.side !== 'Booked') return null; return { b: 'k', fam: 'plk', mk: g + q.side, pl: { team: k, kind: 'card', name: q.line } }; }
   }
-  return null;
+  return ppOf(m, q); // estatísticas de jogador (remates, assistências, desarmes...)
+}
+// cotação de jogador (as mesmas que o site abre) → seleção { pp: { team, stat, n, name } } = "faz n ou mais"
+function ppOf(m, q) {
+  const r = PLAYERS.quote(q, m);
+  if (!r) return null;
+  const stat = r.per.split('|')[0], [n, side, ...nm] = r.pick.split('#'), name = nm.join('#');
+  // sem equipa na cotação (ex.: defesas do guarda-redes): só as estatísticas sem ligação aos golos
+  const team = side === 'home' ? 'h' : side === 'away' ? 'a' : IND.includes(stat) ? 'x' : null;
+  if (!team || !name || stat === 'sent') return null;
+  if (stat === 'booked') return +n === 1 ? { b: 'k', fam: 'plk', mk: 'card' + name, pl: { team, kind: 'card', name } } : null;
+  return { b: 'g', fam: 'pp', mk: `pp|${stat}|${name}|${n}`, pp: { team, stat, n: +n, name } };
 }
 
 /* ---------------- ajuste de um jogo ----------------
@@ -245,7 +262,7 @@ const FIT_K = ['Number Of Cards In Match', 'Team Cards'];
 const CK = 16, KK = 12;
 // parâmetros → estados (também serve para refazer as contas mais tarde, com os parâmetros guardados na aposta)
 function fromParams(P) {
-  const E = { goals: P.goals, G: goalStates(P.goals), corners: P.corners, cards: P.cards, players: P.players || {} };
+  const E = { goals: P.goals, G: goalStates(P.goals), corners: P.corners, cards: P.cards, players: P.players || {}, pp: P.pp || {} };
   if (P.corners) E.C = countStates(P.corners, true, CK);
   if (P.cards) E.K = countStates(P.cards, false, KK);
   return E;
@@ -258,6 +275,7 @@ function build(m) {
   const E = fromParams({ goals, corners, cards });
   E.m = m;
   E.players = fitPlayers(E);
+  E.pp = fitPP(E);
   return E;
 }
 
@@ -281,37 +299,231 @@ function fitPlayers(E) {
     list.forEach((x, i) => { out[x.line] = { team: k, s: ss[i] }; });
   }
   // cartões: t = parte dos cartões da equipa que são dele, pelo "Booked" (escala para que a soma bata com o modelo de cartões)
-  const booked = m.quotes.filter((x) => x.group_name === 'Cards' && x.side === 'Booked');
+  const booked = m.quotes.filter((x) => (x.group_name === 'Cards' && x.side === 'Booked') || x.group_name === 'Player to be Booked');
   for (const x of booked) {
     const k = x.n2 === m.home ? 'h' : x.n2 === m.away ? 'a' : null; if (!k || !E.K) continue;
+    const name = x.group_name === 'Cards' ? x.line : x.label;
+    if (out['card:' + name]) continue; // o mesmo jogador nos dois grupos: fica o primeiro
     const pTarget = 1 / x.odds_dec / 1.12; // margem típica dos cartões de jogador
     // resolve t: Σ P(c) (1 - (1-t)^c) = pTarget
     let lo = 0, hi = 1; for (let i = 0; i < 40; i++) { const t = (lo + hi) / 2; const v = prob(E.K, (s) => 1 - (1 - t) ** s[k]); if (v < pTarget) lo = t; else hi = t; }
-    (out['card:' + x.line] = { team: k, t: (lo + hi) / 2 });
+    (out['card:' + name] = { team: k, t: (lo + hi) / 2 });
+  }
+  return out;
+}
+
+/* estatísticas de jogador: parâmetros de cada um a partir da escada "N ou mais" da bet365 (sem margem: 1/odd/PLM).
+   s (golos) e a (assistências): parte dos golos da equipa; sot: remates à baliza além dos golos (Poisson);
+   sh: remates fora da baliza (Poisson); ind[estatística] = { mu, r } binomial negativa (desarmes, faltas, passes, defesas) */
+const IND = ['tackles', 'fouls', 'fouled', 'passes', 'saves'];
+const lpois = (k, l) => (l <= 0 ? (k === 0 ? 1 : 0) : Math.exp(-l + k * Math.log(l) - lgamma(k + 1)));
+const tailNB = (k, mu, r = 1e9) => { if (k <= 0) return 1; if (mu <= 0) return 0; let s = 0; for (let i = 0; i < k; i++) s += r > 500 ? lpois(i, mu) : nb(i, mu, r); return Math.max(0, 1 - s); };
+const binTail = (n, s, k) => { if (k <= 0) return 1; if (n < k) return 0; let t = 0, c = 1; for (let i = 0; i <= n; i++) { if (i > 0) c = c * (n - i + 1) / i; if (i >= k) t += c * s ** i * (1 - s) ** (n - i); } return t; };
+const bisect = (f, target, lo, hi) => { for (let i = 0; i < 40; i++) { const x = (lo + hi) / 2; if (f(x) < target) lo = x; else hi = x; } return (lo + hi) / 2; };
+function fitPP(E) {
+  const { m, G } = E, out = {};
+  const nd = { h: new Array(GN).fill(0), a: new Array(GN).fill(0) };
+  for (const st of G) { nd.h[st.h] += st.p; nd.a[st.a] += st.p; }
+  // cotações por jogador e estatística: n → probabilidade (a mesma seleção em dois grupos: média)
+  const Q = {};
+  for (const q of m.quotes) {
+    let l; try { l = ppOf(m, q); } catch { continue; }
+    if (!l?.pp || !(q.odds_dec > 1)) continue;
+    const { name, team, stat, n } = l.pp, x = (Q[name] ||= { team, st: {} });
+    if (x.team !== team) continue;
+    const r = ((x.st[stat] ||= {})[n] ||= []); r.push(Math.min(0.97, 1 / q.odds_dec / PLM));
+  }
+  const rungs = (o) => Object.entries(o || {}).map(([n, ps]) => [+n, ps.reduce((a, b) => a + b, 0) / ps.length]).sort((a, b) => a[0] - b[0]);
+  for (const [name, { team, st }] of Object.entries(Q)) {
+    const D = nd[team] || nd.h, P = { team, ind: {} };
+    const teamTail = (k) => D.reduce((t, p, n) => t + (n >= k ? p : 0), 0);
+    // golos: s do "marca a qualquer momento" (fitPlayers) ou da escada de golos dele
+    const g = team === 'x' ? [] : rungs(st.goals);
+    P.s = E.players[name]?.s ?? (g.length ? bisect((s) => D.reduce((t, p, n) => t + p * binTail(n, s, g[0][0]), 0), Math.min(g[0][1], teamTail(g[0][0]) * 0.999), 0, 0.95) : undefined);
+    // assistências (ou, sem elas, do "marca ou assiste" com o s já conhecido)
+    const a = team === 'x' ? [] : rungs(st.assists), ga = team === 'x' ? [] : rungs(st.ga);
+    if (a.length) P.a = bisect((x) => D.reduce((t, p, n) => t + p * binTail(n, x, a[0][0]), 0), Math.min(a[0][1], teamTail(a[0][0]) * 0.999), 0, 0.95);
+    else if (ga.length && P.s != null) P.a = Math.max(0, bisect((x) => D.reduce((t, p, n) => t + p * binTail(n, Math.min(0.99, P.s + x), ga[0][0]), 0), Math.min(ga[0][1], teamTail(ga[0][0]) * 0.999), 0, 0.95 - P.s));
+    // golos dele: Pg[g] (para os remates)
+    const s = P.s || 0, Pg = new Array(GN).fill(0);
+    D.forEach((p, n) => { let c = 1; for (let k = 0; k <= n; k++) { if (k > 0) c = c * (n - k + 1) / k; Pg[k] += p * c * s ** k * (1 - s) ** (n - k); } });
+    const fit1 = (R, model, hi) => minimize(([x]) => R.reduce((e, [k, pt]) => e + (model(k, x) - pt) ** 2, 0), [hi / 8], [hi / 8], [0], [hi], 120).p[0];
+    const sot = team === 'x' ? [] : rungs(st.sot), sh = team === 'x' ? [] : rungs(st.shots);
+    if (sot.length) P.sot = fit1(sot, (k, mu) => Pg.reduce((t, p, gg) => t + p * tailNB(k - gg, mu), 0), 12);
+    if (sh.length) P.sh = fit1(sh, (k, nu) => Pg.reduce((t, p, gg) => t + p * tailNB(k - gg, (P.sot || 0) + nu), 0), 20);
+    for (const stat of IND) {
+      const R = rungs(st[stat]);
+      if (!R.length) continue;
+      const top = Math.max(2, R[R.length - 1][0] * 2);
+      if (R.length === 1) { P.ind[stat] = { mu: bisect((mu) => tailNB(R[0][0], mu), R[0][1], 0, top * 2), r: 1e9 }; continue; }
+      const f = minimize(([mu, lr]) => R.reduce((e, [k, pt]) => e + (tailNB(k, mu, Math.exp(lr)) - pt) ** 2, 0), [R[0][0] + 1, 2], [top / 6, 0.5], [0.05, 0], [top * 2, 7], 200).p;
+      P.ind[stat] = { mu: f[0], r: Math.exp(f[1]) };
+    }
+    out[name] = P;
+  }
+  return out;
+}
+// o motor sabe esta estatística deste jogador?
+function ppHas(E, { stat, name }) {
+  const P = E.pp[name], s = P?.s ?? E.players[name]?.s;
+  if (stat === 'goals') return s > 0;
+  if (stat === 'assists') return P?.a > 0;
+  if (stat === 'ga') return s > 0 && P?.a != null;
+  if (stat === 'sot') return P?.sot != null;
+  if (stat === 'shots') return P?.sh != null;
+  return !!P?.ind?.[stat];
+}
+/* seleções de estatística de jogador → { c (parte sem ligação aos golos), h[n], a[n] (probabilidade com n golos da
+   equipa) } ou null. Cada golo da equipa: marcado por um dos escolhidos (s) ou outro; assistido por outro escolhido
+   (a, nunca quem marcou) ou ninguém da lista. Golos e assistências contam-se até onde as seleções precisam. */
+const LINKED = ['goals', 'assists', 'ga', 'sot', 'shots'];
+// as mesmas seleções de jogador repetem-se muito (odds do Criar aposta aberto): a conta fica guardada no motor
+function ppFactor(E, legs) {
+  const memo = (E.ppm ||= new Map()), key = legs.map((l) => `${l.pp.name}|${l.pp.stat}|${l.pp.n}`).sort().join('~');
+  if (memo.has(key)) return memo.get(key);
+  if (memo.size > 20000) memo.clear();
+  const r = ppFactorRaw(E, legs);
+  memo.set(key, r);
+  return r;
+}
+function ppFactorRaw(E, legs) {
+  const need = {};
+  for (const { pp: { team, stat, n, name } } of legs) {
+    const x = (need[name] ||= { name, team, goals: 0, assists: 0, ga: 0, sot: 0, shots: 0, ind: {} });
+    if (x.team !== team) return null;
+    if (LINKED.includes(stat)) x[stat] = Math.max(x[stat], n); else x.ind[stat] = Math.max(x.ind[stat] || 0, n);
+  }
+  let c = 1;
+  for (const x of Object.values(need)) for (const [stat, n] of Object.entries(x.ind)) { const d = E.pp[x.name]?.ind?.[stat]; if (!d) return null; c *= tailNB(n, d.mu, d.r); }
+  const out = { c };
+  for (const t of ['h', 'a']) {
+    const ps = Object.values(need).filter((x) => x.team === t && LINKED.some((k) => x[k]));
+    if (!ps.length) continue;
+    const S = ps.map((x) => E.pp[x.name]?.s ?? E.players[x.name]?.s ?? 0), A = ps.map((x) => E.pp[x.name]?.a ?? 0);
+    const sum = (v) => v.reduce((a, b) => a + b, 0);
+    const tot = sum(S); if (tot > 1) for (let i = 0; i < S.length; i++) S[i] /= tot;
+    const sOther = Math.max(0, 1 - sum(S));
+    const Q = A.map((a, i) => Math.min(0.95, a / Math.max(0.05, 1 - S[i])));
+    const capG = ps.map((x) => Math.max(x.goals, x.ga, x.sot, x.shots)), capA = ps.map((x) => Math.max(x.assists, x.ga));
+    // remates (à baliza) com g golos dele: P(g + Y ≥ sot e g + Y + Z ≥ shots)
+    const shotOk = ps.map((x, i) => { const P = E.pp[x.name] || {}, mu = P.sot || 0, nu = P.sh || 0;
+      return Array.from({ length: capG[i] + 1 }, (_, g) => { if (!x.sot && !x.shots) return 1;
+        let v = 0; for (let y = 0; y < 40; y++) { const py = lpois(y, mu); if (g + y >= x.sot) v += py * tailNB(x.shots - g - y, nu); if (y > mu && py < 1e-12) break; } return v; }); });
+    const val = (st) => { let v = 1; for (let i = 0; i < ps.length; i++) { const g = st[2 * i], a = st[2 * i + 1], x = ps[i];
+      if (g < x.goals || a < x.assists || g + a < x.ga) return 0; v *= shotOk[i][g]; if (!v) return 0; } return v; };
+    // golo a golo; arr[n] = probabilidade de as seleções baterem com n golos da equipa
+    let dp = new Map([[new Array(2 * ps.length).fill(0).join(','), 1]]);
+    const arr = new Array(GN).fill(0);
+    for (let n = 0; n < GN; n++) {
+      for (const [k, pr] of dp) arr[n] += pr * val(k.split(',').map(Number));
+      if (n === GN - 1) break;
+      const nd = new Map();
+      const add = (st, pr) => { const k = st.join(','); nd.set(k, (nd.get(k) || 0) + pr); };
+      for (const [k, pr] of dp) {
+        const st = k.split(',').map(Number);
+        for (let j = -1; j < ps.length; j++) {
+          const pj = j < 0 ? sOther : S[j]; if (!(pj > 0)) continue;
+          const sj = st.slice(); if (j >= 0) sj[2 * j] = Math.min(capG[j], sj[2 * j] + 1);
+          // assistência: um dos outros escolhidos ou ninguém da lista. Q[i] = a/(1-s): a assistência nos golos que não
+          // são dele, para que no total ele assista a parte a dos golos da equipa (como no ajuste)
+          let rest = 1;
+          for (let i = 0; i < ps.length; i++) { if (i === j || !(Q[i] > 0)) continue; const pa = Math.min(rest, Q[i]); if (!(pa > 0)) continue; rest -= pa;
+            const si = sj.slice(); si[2 * i + 1] = Math.min(capA[i], si[2 * i + 1] + 1); add(si, pr * pj * pa); }
+          if (rest > 0) add(sj, pr * pj * rest);
+        }
+      }
+      dp = nd;
+    }
+    out[t] = arr;
   }
   return out;
 }
 
 /* ---------------- probabilidade de uma combinação ---------------- */
-// legs: { b, f } normais; { ord } primeira/última equipa a marcar; { pl } jogadores.
+// legs: { b, f } normais; { ord } primeira/última equipa a marcar; { pl } jogadores; { pp } estatísticas de jogador.
 // Blocos independentes (golos, escanteios, cartões) multiplicam-se; dentro do bloco soma-se estado a estado.
-function joint(E, legs) {
-  let p = 1;
-  for (const b of ['g', 'c', 'k']) {
-    const L = legs.filter((l) => l.b === b); if (!L.length) continue;
-    const S = b === 'g' ? E.G : b === 'c' ? E.C : E.K; if (!S) return null;
-    const plain = L.filter((l) => !l.pl && !l.ord);
+const BLOCKS = ['g', 'c', 'k'];
+const statesOf = (E, b) => (b === 'g' ? E.G : b === 'c' ? E.C : E.K);
+/* peso de cada estado com as seleções (W.v[bloco][i] = p do estado × seleções; null = bloco sem seleções) e a parte
+   sem estados (W.c). joint = W.c × Π Σ W.v. Guardado, junta-se mais uma seleção sem refazer as outras (jointPlus) */
+function weights(E, legs) {
+  const W = { c: 1, v: {}, sum: {}, legs };
+  for (const b of BLOCKS) {
+    const L = legs.filter((l) => l.b === b);
+    W.v[b] = null; W.sum[b] = 1;
+    if (!L.length) continue;
+    const S = statesOf(E, b); if (!S) return null;
+    const plain = L.filter((l) => !l.pl && !l.ord && !l.pp);
     const spec = prepSpecial(E, L.filter((l) => l.pl || l.ord));
     if (spec === null) return null;
-    if (spec === 0) return 0;
-    p *= prob(S, (s) => {
-      let v = 1;
-      for (const l of plain) { v *= l.f(s); if (!v) return 0; }
-      if (spec) v *= spec(s);
-      return v;
-    });
+    if (spec === 0) { W.zero = true; return W; }
+    const PP = L.filter((l) => l.pp);
+    // 1º/último marcador e estatísticas do mesmo jogador: o modelo não os junta
+    if (PP.length && L.some((l) => l.pl && PP.some((x) => x.pp.name === l.pl.name))) return null;
+    const pf = PP.length ? ppFactor(E, PP) : null;
+    if (PP.length && !pf) return null;
+    if (pf) W.c *= pf.c;
+    const vec = new Float64Array(S.length); let sum = 0;
+    for (let i = 0; i < S.length; i++) {
+      const s = S[i]; let v = s.p;
+      for (const l of plain) { v *= l.f(s); if (!v) break; }
+      if (v && spec) v *= spec(s);
+      if (v && pf) { if (pf.h) v *= pf.h[s.h]; if (pf.a) v *= pf.a[s.a]; }
+      vec[i] = v; sum += v;
+    }
+    W.v[b] = vec; W.sum[b] = sum;
   }
-  return p;
+  return W;
+}
+const wTotal = (W) => (W.zero ? 0 : BLOCKS.reduce((p, b) => p * W.sum[b], W.c));
+function joint(E, legs) { const W = weights(E, legs); return W ? wTotal(W) : null; }
+// joint(E, [...W.legs, l]) sem refazer as seleções de W, quando a nova não mexe nas contas delas
+function jointPlus(E, W, l) {
+  if (!W) return null;
+  if (W.zero) return 0;
+  const legs = W.legs, others = (b) => BLOCKS.reduce((p, x) => (x === b ? p : p * W.sum[x]), W.c);
+  const pass = (b, f) => { const S = statesOf(E, b); if (!S) return null; const v = W.v[b]; let t = 0; for (let i = 0; i < S.length; i++) { const w = v ? v[i] : S[i].p; if (w) t += w * f(S[i]); } return t; };
+  // cartão de um jogador sem outro cartão de jogador da mesma equipa escolhido: só depende dos cartões da equipa
+  // (1 - (1-t)^cartões), como uma seleção normal
+  const card = l.pl?.kind === 'card' ? E.players['card:' + l.pl.name] : null;
+  if (card && !l.f) l.f = (s) => 1 - (1 - card.t) ** s[card.team];
+  // 1º/último marcador ou equipa sem outra seleção destas no bloco (nem estatísticas do mesmo jogador): é só uma
+  // função do estado, que multiplica com as outras (como em weights)
+  const lone = (l.pl || l.ord) && !legs.some((x) => x.b === l.b && (x.pl || x.ord)) && !(l.pl && legs.some((x) => x.pp?.name === l.pl.name));
+  if (lone && !l.f) { const sp = prepSpecial(E, [l]); if (sp === null) return null; l.f = sp === 0 ? () => 0 : sp; }
+  const simple = !l.pp && (lone || (!l.pl && !l.ord) || (card && !legs.some((x) => x.pl?.kind === 'card' && E.players['card:' + x.pl.name]?.team === card.team)));
+  if (simple) {
+    const S = statesOf(E, l.b); if (!S) return null;
+    const fv = (l._fv ||= Float64Array.from(S, (s) => l.f(s))), v = W.v[l.b];
+    // grupo sem seleções neste bloco: a probabilidade da seleção sozinha (guardada; os escanteios têm muitos estados)
+    if (!v) { if (l._m == null) { let m = 0; for (let i = 0; i < S.length; i++) if (fv[i]) m += S[i].p * fv[i]; l._m = m; } return others(l.b) * l._m; }
+    let t = 0; for (let i = 0; i < S.length; i++) { const w = v[i]; if (w && fv[i]) t += w * fv[i]; }
+    return others(l.b) * t;
+  }
+  if (l.pp && !legs.some((x) => x.pp?.name === l.pp.name || x.pl?.name === l.pp.name)) {
+    const { stat, n, name, team } = l.pp;
+    if (!LINKED.includes(stat)) { const d = E.pp[name]?.ind?.[stat]; return d ? wTotal(W) * tailNB(n, d.mu, d.r) : null; }
+    if (!legs.some((x) => x.pp && x.pp.team === team && LINKED.includes(x.pp.stat))) {
+      const pc = (E.ppc ||= new Map()), key = `${name}|${stat}|${n}`;
+      if (!pc.has(key)) pc.set(key, ppFactor(E, [l]));
+      const pf = pc.get(key); if (!pf) return null;
+      const arr = pf[team], t = pass('g', (s) => arr[s[team]]);
+      return t == null ? null : others('g') * pf.c * t;
+    }
+  }
+  // estatística ligada aos golos de uma equipa que já tem escolhidas: pesos sem as seleções de jogador dessa equipa
+  // (guardados) × a conta dos jogadores dela junta com a nova
+  if (l.pp && LINKED.includes(l.pp.stat) && !legs.some((x) => x.pl)) {
+    const team = l.pp.team, mine = legs.filter((x) => x.pp?.team === team);
+    const W0 = ((W.noTeam ||= {})[team] ??= weights(E, legs.filter((x) => !mine.includes(x))));
+    if (!W0) return null;
+    if (W0.zero) return 0;
+    const pf = ppFactor(E, [...mine, l]); if (!pf) return null;
+    const S = E.G, v = W0.v.g, arr = pf[team]; let t = 0;
+    for (let i = 0; i < S.length; i++) { const w = v ? v[i] : S[i].p; if (w) t += w * arr[S[i][team]]; }
+    return BLOCKS.reduce((p, x) => (x === 'g' ? p : p * W0.sum[x]), W0.c) * pf.c * t;
+  }
+  return joint(E, [...legs, l]);
 }
 // junta seleções de ordem e de jogadores numa função do estado
 function prepSpecial(E, L) {
@@ -433,6 +645,20 @@ function corrOf(E, legs) {
 }
 const ladderDown = (o) => { let best = 1; for (const x of LADDER) if (x <= o * 1.0001) best = x; return best; };
 const oddOf = (p, c = 0) => 1 / (Math.exp(CAL.a + c) * p ** CAL.b) / EXTRA;
+/* juntar uma seleção nunca baixa a odd: a combinação paga pelo menos o que paga qualquer parte dela (cada seleção
+   sozinha à odd mostrada; cada grupo menor à odd do modelo). Ex.: Flamengo 1.83 + 3+ escanteios = 1.83, não 1.72.
+   pOf(mask) = probabilidade das seleções do grupo (bits de mask); singles = odd mostrada de cada uma */
+function floorOdds(E, legs, singles, pOf) {
+  const n = legs.length, full = (1 << n) - 1;
+  let best = Math.max(...singles);
+  for (let mask = 1; mask < full; mask++) {
+    if ((mask & (mask - 1)) === 0) continue; // uma seleção só: já está em singles
+    const pt = pOf(mask);
+    if (pt == null || pt < 1e-4) continue;
+    best = Math.max(best, ladderDown(oddOf(pt, corrOf(E, legs.filter((_, i) => (mask >> i) & 1)))));
+  }
+  return best;
+}
 
 // seleção do site (cotação da bet365) → seleção do motor; null se o motor não a sabe calcular
 function legFor(E, q) {
@@ -441,6 +667,7 @@ function legFor(E, q) {
   if (l.b === 'c' && !E.C) return null;
   if (l.b === 'k' && !E.K) return null;
   if (l.pl && !E.players[(l.pl.kind === 'card' ? 'card:' : '') + l.pl.name]) return null;
+  if (l.pp && !ppHas(E, l.pp)) return null;
   l.q = q;
   return l;
 }
@@ -461,15 +688,64 @@ function quote(E, items) {
   const p = joint(E, legs);
   if (p == null) return { reason: 'combinação indisponível' };
   if (p < 1e-4) return { reason: 'estas seleções não podem acontecer juntas' };
-  const odds = ladderDown(oddOf(p, corrOf(E, legs)));
+  // seleção que já está garantida pelas outras (ex.: Flamengo + "Vasco ou Flamengo") só baixava a odd
+  for (let i = 0; i < legs.length; i++) {
+    const rest = joint(E, legs.filter((_, j) => j !== i));
+    if (rest != null && p >= rest * 0.999) return { reason: `"${items[i].name}" já está incluída nas outras seleções`, bad: items[i].key };
+  }
+  const own = ladderDown(oddOf(p, corrOf(E, legs)));
+  const odds = Math.max(own, floorOdds(E, legs, items.map((it) => it.odds), (mask) => joint(E, legs.filter((_, i) => (mask >> i) & 1))));
   if (odds < 1.02) return { reason: 'odd demasiado baixa para esta combinação' };
   return { odds, p, params: paramsOf(E, legs) };
+}
+/* Criar aposta aberto: com as seleções já escolhidas (items), a odd que a aposta fica a valer ao juntar cada
+   candidata (a mesma conta do quote) → { key: odd } com 0 nas que não podem juntar-se. null: as escolhidas não juntam */
+function preview(E, items, cands) {
+  const legs = [];
+  for (const it of items) { const l = it.q && legFor(E, it.q); if (!l) return null; legs.push(l); }
+  const single = (E.p1 ||= new WeakMap()); // odd de cada cotação sozinha no modelo (para o CHECK), guardada no motor
+  // pesos de cada grupo das escolhidas (W[mask]), calculados uma vez: o de todas, os de cada uma sem uma delas
+  // (para ver as redundantes) e os menores (para a odd nunca baixar, floorOdds)
+  const n = legs.length, full = (1 << n) - 1, sub = (mask) => legs.filter((_, i) => (mask >> i) & 1);
+  const W = Array.from({ length: full + 1 }, (_, mask) => weights(E, sub(mask)));
+  const WB = W[full], base = WB ? wTotal(WB) : null;
+  // odd atual das escolhidas (a mesma conta do quote) e o seu chão
+  const floorBase = n ? (n === 1 ? items[0].odds : Math.max(ladderDown(oddOf(base ?? 1, corrOf(E, legs))), floorOdds(E, legs, items.map((it) => it.odds), (mask) => (W[mask] ? wTotal(W[mask]) : null)))) : 0;
+  const out = {};
+  for (const c of cands) {
+    out[c.key] = 0;
+    if (items.length >= MAX_LEGS) continue;
+    const l = c.q && legFor(E, c.q);
+    if (!l) continue;
+    if (!single.has(c.q)) single.set(c.q, joint(E, [l]));
+    const p1 = single.get(c.q);
+    if (!p1 || Math.abs(Math.log(oddOf(p1) * EXTRA / c.odds)) > Math.log(1 + CHECK) + 0.15) continue;
+    const all = [...legs, l];
+    const p = jointPlus(E, WB, l);
+    if (p == null || p < 1e-4) continue;
+    if (base != null && p >= base * 0.999) continue; // já garantida pelas escolhidas: não acrescenta nada
+    // a candidata com cada grupo menor das escolhidas (mask): para as redundantes e para o chão da odd
+    const pm = new Array(full).fill(null);
+    for (let mask = 1; mask < full; mask++) pm[mask] = jointPlus(E, W[mask], l);
+    // ou torna uma das escolhidas redundante (ex.: escolhida "Vasco ou Flamengo", candidata Flamengo)
+    if (legs.some((_, i) => { const r = n === 1 ? p1 : pm[full ^ (1 << i)]; return r != null && p >= r * 0.999; })) continue;
+    // odd nunca abaixo de nenhuma parte: as escolhidas (floorBase), a candidata sozinha e cada grupo menor com ela
+    let odds = Math.max(ladderDown(oddOf(p, corrOf(E, all))), floorBase, c.odds);
+    for (let mask = 1; mask < full; mask++) {
+      const pt = pm[mask];
+      if (pt != null && pt >= 1e-4) odds = Math.max(odds, ladderDown(oddOf(pt, corrOf(E, [...sub(mask), l]))));
+    }
+    if (odds >= 1.02) out[c.key] = odds;
+  }
+  return out;
 }
 // o que fica guardado na aposta para refazer a conta se uma seleção for anulada
 function paramsOf(E, legs) {
   const players = {};
+  const pp = {};
   for (const l of legs) if (l.pl) { const k = (l.pl.kind === 'card' ? 'card:' : '') + l.pl.name; players[k] = E.players[k]; }
-  return { home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players };
+  for (const l of legs) if (l.pp) { pp[l.pp.name] = E.pp[l.pp.name]; if (E.players[l.pp.name]) players[l.pp.name] = E.players[l.pp.name]; }
+  return { home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players, pp };
 }
 // cotação da bet365 → só os campos que o motor usa (vai para a aposta)
 const srcOf = (q) => Object.fromEntries(['group_name', 'side', 'label', 'line', 'handicap', 'n2'].filter((k) => q[k] != null).map((k) => [k, q[k]]));
@@ -485,7 +761,9 @@ function requote(params, kept) {
   if (legs.some((l) => !l)) return kept.reduce((t, k) => t * k.odds, 1); // não devia acontecer: multiplica as odds de cada uma
   const p = joint(E, legs);
   if (!p) return 1;
-  return Math.max(1, ladderDown(oddOf(p, corrOf(E, legs))));
+  // a mesma regra do quote: nunca abaixo de nenhuma parte das que ficaram
+  const floor = floorOdds(E, legs, kept.map((k) => k.odds), (mask) => joint(E, legs.filter((_, i) => (mask >> i) & 1)));
+  return Math.max(1, ladderDown(oddOf(p, corrOf(E, legs))), floor);
 }
 
 /* motor de cada jogo, guardado alguns minutos (montar leva ~60 ms) */
@@ -501,4 +779,4 @@ function engineFor(id, m) {
   return E;
 }
 
-module.exports = { engineFor, quote, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };
+module.exports = { engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };

@@ -995,6 +995,7 @@ function selections(ev) {
       const o = { market: mk.k, pick: s.pick, odds: s.odds, locked: !!s.lock };
       if (s.line != null) o.line = s.line;
       if (s.base) o.base = s.base;
+      if (s.bb) o.bb = 1; // entra no Criar aposta
       const side = (p) => (p === 'home' ? H : A);
       const tt = TENNIS_KINDS.has(mk.k) ? tennisText(mk.k, s, mk.per, H, A) : null;
       if (mk.per != null) o.per = mk.per;

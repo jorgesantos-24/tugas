@@ -66,11 +66,18 @@ function soccerCards(st) {
   const y = [st?.home?.yellow_cards, st?.away?.yellow_cards], r = [st?.home?.red_cards, st?.away?.red_cards];
   if (![...y, ...r].every((v) => fin(v) && v >= 0)) return null;
   const tl = st.timeline;
+  let ylo = y, yhi = y;
   if (Array.isArray(tl) && tl.length) {
-    const ty = ['home', 'away'].map((s) => tl.filter((t) => t.type === 'yellow_card' && t.team === s).length);
-    if (ty[0] !== y[0] || ty[1] !== y[1]) return null;
+    // o 2º amarelo de uma expulsão vem como amarelo sem jogador no minuto do vermelho (Santos x Bahia 25/10, Neymar):
+    // nas estatísticas conta como vermelho, não como mais um amarelo
+    const second = (t) => !t.player && tl.some((x) => x.type === 'red_card' && x.team === t.team && x.minute === t.minute);
+    const ty = ['home', 'away'].map((s) => tl.filter((t) => t.type === 'yellow_card' && t.team === s && !second(t)).length);
+    // estatísticas e lances não batem (Palmeiras x Bragantino 24/10: 2 nas estatísticas, 3 com nome nos lances):
+    // o total fica entre os dois — a liquidação só paga sozinha se der igual nos dois (markets.js partOutcome)
+    ylo = [Math.min(y[0], ty[0]), Math.min(y[1], ty[1])];
+    yhi = [Math.max(y[0], ty[0]), Math.max(y[1], ty[1])];
   }
-  return { lo: y, hi: [y[0] + 2 * r[0], y[1] + 2 * r[1]], reds: r[0] + r[1] };
+  return { lo: ylo, hi: [yhi[0] + 2 * r[0], yhi[1] + 2 * r[1]], reds: r[0] + r[1] };
 }
 
 /* Partes TERMINADAS de um jogo (para o resultado final, ou a meio do jogo):
@@ -89,7 +96,7 @@ function finishedParts(sport, st, score, { live = false, overtime = false } = {}
     if (!live && !overtime && fin(st.home?.corners) && fin(st.away?.corners)) out.corners = [st.home.corners, st.away.corners];
     // cartões do jogo: só no fim (e sem prolongamento); com vermelhos vai também o máximo possível (cardsHi)
     const cards = !live && !overtime ? soccerCards(st) : null;
-    if (cards) { out.cards = cards.lo; if (cards.reds) out.cardsHi = cards.hi; }
+    if (cards) { out.cards = cards.lo; if (cards.hi[0] !== cards.lo[0] || cards.hi[1] !== cards.lo[1]) out.cardsHi = cards.hi; }
   } else if (sport === 'basketball') {
     const q = basketQuarters(st);
     if (q) {
