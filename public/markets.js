@@ -1022,6 +1022,7 @@ function selections(ev) {
         o.lbl = o.name = s.name || '—'; o.marketName = mk.name || 'Outros'; o.cat = mk.cat || 'other';
         if (mk.k === 'x') o.manual = true;
         if (mk.k === 'ptot' || mk.k === 'pspr') { o.cside = s.pick; o.cline = s.line; }
+        if (mk.k === 'pteam' && String(mk.per).includes('|team:')) { o.cside = String(s.pick).split(':')[1]; o.cline = s.line; } // total de uma equipa: tabela Mais | Menos
       }
       else continue;
       if (!three && mk.k === 'ml') o.lbl = s.pick === 'home' ? '1' : '2';

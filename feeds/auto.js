@@ -109,9 +109,19 @@ function rule(q, m, sport) {
     if ((x = /^Alternative (1st|2nd) Half (Line|Totals)$/.exec(g))) return x[2] === 'Line' ? { k: 'pspr', scope: HALF[x[1]], pick: who(q.side), line: lineOf(q) } : { k: 'ptot', scope: HALF[x[1]], pick: ou(q.side), line: lineOf(q) };
     if ((x = /^Alternative (1st|2nd|3rd|4th) Quarter (Line|Totals)$/.exec(g))) return x[2] === 'Line' ? { k: 'pspr', scope: QUARTER[x[1]], pick: who(q.side), line: lineOf(q) } : { k: 'ptot', scope: QUARTER[x[1]], pick: ou(q.side), line: lineOf(q) };
     // a equipa vem em "side" (Team Totals) ou em "n2" (Alternative Team Totals, com side = Over/Under)
-    if (g === 'Team Totals' || g === 'Alternative Team Totals' || g === 'Alternative Team Totals 2') { const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: 'ft', pick: `${w}:${o}`, line: lineOf(q) } : null; }
+    // os três grupos da bet365 (principal + 2 alternativos) juntam-se num mercado por equipa; a linha repetida fica a do principal
+    if (g === 'Team Totals' || g === 'Alternative Team Totals' || g === 'Alternative Team Totals 2') {
+      const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side), line = lineOf(q);
+      return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: 'ft', per: `ft|team:${w}`, pick: `${w}:${o}`, line, main: g === 'Team Totals', mname: `Total de pontos: ${m[w]}`, name: `${o === 'over' ? 'Mais' : 'Menos'} de ${line}` } : null;
+    }
     // intervalo / final (o final inclui prorrogação, como o vencedor do jogo)
-    if (g === 'Double Result') { const [a, b] = String(q.label ?? '').split(' - ').map(who); return a && b && b !== 'draw' ? { k: 'phtft', scope: 'ft', pick: `${a}-${b}` } : null; }
+    // nome curto para caber no botão: "ATL / CLE", "Empate / CLE" (a sigla da NBA quando a há; senão o nome todo)
+    if (g === 'Double Result') {
+      const [a, b] = String(q.label ?? '').split(' - ').map(who);
+      if (!a || !b || b === 'draw') return null;
+      const sh = (w) => (w === 'draw' ? 'Empate' : (/^([A-Z]{2,4}) \S/.exec(m[w]) || [])[1] || m[w]);
+      return { k: 'phtft', scope: 'ft', pick: `${a}-${b}`, mname: 'Intervalo / Final', name: `${sh(a)} / ${sh(b)}` };
+    }
     if (g === 'Odd/Even' && /^match$/i.test(String(q.line ?? ''))) { const p = /^odd$/i.test(String(q.side).trim()) ? 'odd' : /^even$/i.test(String(q.side).trim()) ? 'even' : null; return p ? { k: 'poe', scope: 'ft', pick: p } : null; }
     if ((x = /^(?:Alternative )?(1st|2nd) Half Team Totals$/.exec(g))) { const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: HALF[x[1]], pick: `${w}:${o}`, line: lineOf(q) } : null; }
     if ((x = /^(?:Alternative )?(1st|2nd|3rd|4th) Quarter Team Totals$/.exec(g))) { const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: QUARTER[x[1]], pick: `${w}:${o}`, line: lineOf(q) } : null; }
@@ -161,7 +171,8 @@ function rule(q, m, sport) {
     // vencedor + as duas equipas fazem X pontos: line "Equipa and Yes", side = X
     if (g === "Result and Both Teams to Score 'X' Points") {
       const mm = /^(.+) and (Yes|No)$/i.exec(txt(q.line)), n = Number(q.side), w = mm && who(mm[1]);
-      return (w === 'home' || w === 'away') && Number.isInteger(n) ? cond('ft', [`res=${w}`, `bx=${mm[2].toLowerCase()}:${n}`]) : null;
+      const y = mm && mm[2].toLowerCase();
+      return (w === 'home' || w === 'away') && Number.isInteger(n) ? { ...cond('ft', [`res=${w}`, `bx=${y}:${n}`]), name: `${m[w]} vence e os dois fazem ${n}+: ${y === 'yes' ? 'Sim' : 'Não'}` } : null;
     }
     if ((x = /^(?:(1st Half|2nd Half|1st Quarter|2nd Quarter|3rd Quarter|4th Quarter) )?Both Teams to Score X Points$/i.exec(g))) {
       const s = sc(x[1]), y = yn(q.side), n = Number(q.line);
@@ -171,18 +182,20 @@ function rule(q, m, sport) {
     if ((x = /^(?:Match|(1st Half|2nd Half|1st Quarter|2nd Quarter|3rd Quarter|4th Quarter)) Result and Total$/.exec(g))) {
       const s = sc(x[1]), w = teamOf(), o = ouOf(), n = totOf();
       if (!s || !w || !o || !half(n) || (s === 'ft' && w === 'draw')) return null;
-      return cond(s, [`res=${w}`, `tot=${o === 'over' ? 'gt' : 'lt'}:${n}`]);
+      // nome limpo para o boletim (o da fonte repetia a linha: "ATL Hawks Mais de 239.5 239.5")
+      return { ...cond(s, [`res=${w}`, `tot=${o === 'over' ? 'gt' : 'lt'}:${n}`]), name: `${w === 'draw' ? 'Empate' : m[w]} e ${o === 'over' ? 'Mais' : 'Menos'} de ${n}` };
     }
     // handicap + total: "Equipa +2.5 & Over 140.5"
     if ((x = /^(?:Match|(1st Half|1st Quarter)) Handicap and Total$/.exec(g))) {
       const s = sc(x[1]), mm = /^(.+?)\s+([+-]\d+(?:\.\d+)?)\s*&\s*(Over|Under)\s+(\d+(?:\.\d+)?)$/i.exec(txt(q.label));
       const w = mm && who(mm[1]);
       if (!s || !(w === 'home' || w === 'away') || !half(Number(mm[2])) || !half(Number(mm[4]))) return null;
-      return cond(s, [`hc=${w}:${Number(mm[2])}`, `tot=${/^over$/i.test(mm[3]) ? 'gt' : 'lt'}:${Number(mm[4])}`]);
+      const hc = Number(mm[2]), over = /^over$/i.test(mm[3]);
+      return { ...cond(s, [`hc=${w}:${hc}`, `tot=${over ? 'gt' : 'lt'}:${Number(mm[4])}`]), name: `${m[w]} ${hc > 0 ? '+' : ''}${hc} e ${over ? 'Mais' : 'Menos'} de ${Number(mm[4])}` };
     }
     const SUF = { ft: '', h1: ' (1º tempo)', h2: ' (2º tempo)', q1: ' (1º quarto)', q2: ' (2º quarto)', q3: ' (3º quarto)', q4: ' (4º quarto)' };
     // margem de vitória sem equipa: "1-5" ... "31+" (quem ganhar, com prorrogação)
-    if (g === 'Winning Margin 7-Way') { const b = band(q.label ?? q.line); return b ? { ...cond('ft', [`ad=in:${b}`]), mname: 'Margem de vitória (qualquer equipa)', name: `Por ${b.replace('-999', ' ou mais').replace('-', ' a ')} pontos` } : null; }
+    if (g === 'Winning Margin 7-Way') { const b = band(q.label ?? q.line); return b ? { ...cond('ft', [`ad=in:${b}`]), mname: 'Margem de vitória (qualquer equipa)', name: `${b.replace('-999', '+')} pontos` } : null; }
     /* "Team to Score X Points": as linhas Sim/Não não dizem a equipa. Em cada linha há duas de cada: pela ordem da
        fonte (sel_id) a 1ª é da casa e a 2ª de fora (em blocos ou aos pares, conforme o jogo) — e todas as linhas têm de
        bater com os totais das equipas da mesma parte: quem tem o total mais alto (ou, com totais iguais, o "Mais de"
@@ -321,8 +334,10 @@ function apply(gen, q, m, sport) {
   const r = rule(q, m, sport);
   if (!r || !r.pick || ('line' in r && !isFinite(r.line))) return gen;
   // sub: o mesmo grupo da fonte dividido em mercados (ex.: "3-Way" do hóquei = vencedor + handicap + total)
-  const s = { ...gen, k: r.k, per: `${r.scope}|${q.group_id}${r.sub ? ':' + r.sub : ''}`, pick: r.pick };
-  if (r.mname) { s.mname = r.mname; s.name = r.name; }
+  // per: o mesmo mercado pode juntar vários grupos da fonte (ex.: totais de uma equipa)
+  const s = { ...gen, k: r.k, per: r.per || `${r.scope}|${q.group_id}${r.sub ? ':' + r.sub : ''}`, pick: r.pick };
+  if (r.mname) { s.mname = r.mname; s.name = r.name; } else if (r.name) s.name = r.name;
+  if (r.main) s.main = true;
   if (r.line != null) s.line = r.line;
   return s;
 }

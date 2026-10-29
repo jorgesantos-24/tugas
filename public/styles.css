@@ -187,6 +187,8 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .market{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
 .market-head{padding:11px 14px;font-weight:700;background:var(--panel2);display:flex;justify-content:space-between;align-items:center}
 .market-head small{color:var(--muted);font-weight:500}
+.mkt-tog{display:block;width:100%;padding:9px;border:0;border-top:1px solid var(--line);background:var(--panel2);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer}
+.mkt-tog:hover{color:var(--green)}
 .market-body{display:flex;gap:8px;padding:12px;flex-wrap:wrap}
 /* totais e handicaps em tabela: uma linha por fila */
 .lines-tbl{padding:8px 12px 12px;display:flex;flex-direction:column;gap:6px}
@@ -202,6 +204,14 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .lines-tbl.tot .ln-head,.lines-tbl.tot .ln-row{grid-template-columns:64px 1fr 1fr}
 .lines-tbl .ln-head span{font-size:12px;color:var(--muted);font-weight:600;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lines-tbl .ln{font-weight:800;color:var(--yellow);text-align:center}
+.pl-wrap{overflow-x:auto;padding:8px 12px 12px}
+.pl-grid{display:grid;grid-template-columns:minmax(170px,1.6fr) repeat(var(--n),minmax(58px,1fr));gap:6px;align-items:center}
+.pl-grid .pl-h{font-size:12px;color:var(--muted);font-weight:600;text-align:center}
+.pl-grid .pl-name{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;position:sticky;left:0;background:var(--panel);z-index:1;padding-right:6px;align-self:stretch;display:flex;align-items:center}
+.pl-grid .pl-team{grid-column:1/-1;font-size:12px;font-weight:700;color:var(--yellow);padding-top:6px}
+.pl-grid .wide-odd{min-width:0;width:100%;justify-content:center}
+.lines-tbl.combo .ln-head,.lines-tbl.combo .ln-row{grid-template-columns:minmax(96px,1.1fr) 1fr 1fr}
+.lines-tbl .ln-team{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lines-tbl .wide-odd{min-width:0;width:100%}
 .timeline{background:var(--panel);border-radius:12px;padding:6px 14px}
 .tl-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
