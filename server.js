@@ -736,14 +736,8 @@ function trackOf(ev, R) {
 const BPL = require('./feeds/bplayers.js');
 function basketTrack(ev, R) {
   if (ev.state === 'post') return R?.bp ? { bp: R.bp } : null;
-  const st = ev.state === 'in' ? FEED.liveStats(ev.id) : null, list = st ? BPL.roster(st) : null;
-  if (!list) return null;
-  // 1º quarto: durante o quarto é o próprio box score; depois, o da ESPN (lance a lance), se houver
-  const eb = espnLive.get(ev.id)?.box || [];
-  return { bp: list.map(({ key, side, played, pts, reb, ast, tpm, stl, blk }) => {
-    const e = eb.find((x) => x.key === key && x.side === side), q = Number(st.period) === 1 ? { q1pts: pts, q1reb: reb, q1ast: ast } : e && Number.isFinite(e.q1pts) ? { q1pts: e.q1pts, q1reb: e.q1reb, q1ast: e.q1ast } : {};
-    return { key, side, played, pts, reb, ast, tpm, stl, blk, ...q };
-  }) };
+  const list = ev.state === 'in' ? BPL.roster(FEED.liveStats(ev.id)) : null;
+  return list ? { bp: list.map(({ key, side, played, pts, reb, ast, tpm, stl, blk }) => ({ key, side, played, pts, reb, ast, tpm, stl, blk })) } : null;
 }
 // versão para a lista de jogos: só os mercados da linha do jogo + o número de seleções
 function lightEvent(e) {

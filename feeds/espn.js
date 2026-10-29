@@ -195,7 +195,7 @@ async function basketBox(ev, fin, bpKey, live = false) {
       }
       const sum = (sd) => out.filter((p) => p.side === sd).reduce((q, p) => q + p.pts, 0);
       if (!out.length || sum('home') !== fin[0] || sum('away') !== fin[1]) return null;
-      firstQuarter(d, out, H, A, swap);
+      firsts(d, out);
       for (const p of out) { delete p.id; delete p.starter; }
       return out;
     }
@@ -203,41 +203,22 @@ async function basketBox(ev, fin, bpKey, live = false) {
   return null;
 }
 
-/* 1º quarto de cada jogador (q1pts, q1reb, q1ast, q1played, q1done) e primeiro cesto (fb, fbFt) a partir do lance a lance da ESPN:
-   pontos = cestos (quem marcou), assistências = 2º participante do cesto, rebotes = jogadas de ressalto.
-   Só entra se o lance a lance do jogo todo der exatamente o box score de TODOS os jogadores (pontos, rebotes e
-   assistências) e os pontos do 1º quarto somarem o placar do quarto de cada equipa. Senão, os campos ficam de fora
-   (as apostas do 1º quarto esperam). Testado em 12 jogos da NBA de 28/10/2026: 256 jogadores, 0 diferenças. */
-function firstQuarter(d, out, H, A, swap) {
-  const acc = new Map(), q1on = new Set();
-  const get = (id) => { if (!acc.has(id)) acc.set(id, { pts: 0, reb: 0, ast: 0, q1pts: 0, q1reb: 0, q1ast: 0 }); return acc.get(id); };
-  let after = false, first = null, fa = null, fr = null;
+/* Primeiro cesto (fb: lance livre conta) e primeira assistência (fa) de cada jogador, pelo lance a lance da ESPN.
+   Só entra se o lance a lance do jogo todo der exatamente o box score de TODOS os jogadores (pontos = cestos de quem
+   marcou, assistências = 2º participante do cesto, rebotes = jogadas de ressalto); senão os campos ficam de fora e
+   as apostas esperam. Testado em 12 jogos da NBA de 28/10/2026: 256 jogadores, 0 diferenças. */
+function firsts(d, out) {
+  const acc = new Map(), z = { pts: 0, reb: 0, ast: 0 };
+  const get = (id) => { if (!acc.has(id)) acc.set(id, { ...z }); return acc.get(id); };
+  let fb = null, fa = null;
   for (const p of d.plays || []) {
-    const pid = (i) => String(p.participants?.[i]?.athlete?.id ?? '');
-    if (!first && p.scoringPlay) first = { id: pid(0), ft: /free throw/i.test(p.type?.text || '') };
-    if (!fa && p.scoringPlay && pid(1) && /assists\)/i.test(p.text || '')) fa = pid(1);
-    if (!fr && /rebound/i.test(p.type?.text || '')) fr = { id: pid(0) }; // sem jogador = rebote da equipa
-    const ids = (p.participants || []).map((x) => String(x.athlete?.id ?? '')).filter(Boolean), per = Number(p.period?.number);
-    if (per >= 2 || (per === 1 && /^end period$/i.test(p.type?.text || ''))) after = true;
-    if (per === 1) ids.forEach((id) => q1on.add(id));
-    const add = (id, k, v) => { const o = get(id); o[k] += v; if (per === 1) o['q1' + k] += v; };
-    if (p.scoringPlay && ids[0]) { add(ids[0], 'pts', Number(p.scoreValue) || 0); if (ids[1] && /assists\)/i.test(p.text || '')) add(ids[1], 'ast', 1); }
-    if (/rebound/i.test(p.type?.text || '') && ids[0]) add(ids[0], 'reb', 1);
+    const ids = (p.participants || []).map((x) => String(x.athlete?.id ?? '')), ast = p.scoringPlay && ids[1] && /assists\)/i.test(p.text || '');
+    if (p.scoringPlay && ids[0]) { get(ids[0]).pts += Number(p.scoreValue) || 0; if (!fb) fb = ids[0]; }
+    if (ast) { get(ids[1]).ast++; if (!fa) fa = ids[1]; }
+    if (/rebound/i.test(p.type?.text || '') && ids[0]) get(ids[0]).reb++;
   }
-  const z = { pts: 0, reb: 0, ast: 0, q1pts: 0, q1reb: 0, q1ast: 0 };
-  if (!out.every((o) => { const a = acc.get(o.id) || z; return o.id && a.pts === o.pts && a.reb === o.reb && a.ast === o.ast; })) return;
-  const cs = d.header?.competitions?.[0]?.competitors || [];
-  const q1 = (id) => Number(cs.find((c) => String(c.id ?? c.team?.id) === String(id))?.linescores?.[0]?.displayValue);
-  const want = swap ? { home: q1(A.team?.id), away: q1(H.team?.id) } : { home: q1(H.team?.id), away: q1(A.team?.id) };
-  for (const sd of ['home', 'away']) if (out.filter((o) => o.side === sd).reduce((s, o) => s + (acc.get(o.id) || z).q1pts, 0) !== want[sd]) return;
-  for (const o of out) {
-    const a = acc.get(o.id) || z;
-    Object.assign(o, { q1pts: a.q1pts, q1reb: a.q1reb, q1ast: a.q1ast, q1played: o.starter || q1on.has(o.id), q1done: after });
-    // primeiro cesto: fbFt = os primeiros pontos foram de lance livre (não se sabe se contam: devolvida)
-    if (first?.id) Object.assign(o, { fb: o.id === first.id ? 1 : 0, fbFt: first.ft });
-    if (fa) o.fa = o.id === fa ? 1 : 0;
-    if (fr) Object.assign(o, { fr: fr.id && o.id === fr.id ? 1 : 0, frTeam: !fr.id }); // 1º rebote da equipa: devolvida
-  }
+  if (!out.every((o) => { const x = acc.get(o.id) || z; return o.id && x.pts === o.pts && x.reb === o.reb && x.ast === o.ast; })) return;
+  for (const o of out) { if (fb) o.fb = o.id === fb ? 1 : 0; if (fa) o.fa = o.id === fa ? 1 : 0; }
 }
 
 /* Hóquei (NHL): marcadores para os mercados de jogadores. goals = gols de cada equipa sem os pênaltis [c, f].

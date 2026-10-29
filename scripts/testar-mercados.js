@@ -687,7 +687,7 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
       const byPlayer = new Map();
       for (const s of mk.sels) { const nm = String(s.pick).split('#').slice(2).join('#'); if (!byPlayer.has(nm)) byPlayer.set(nm, []); byPlayer.get(nm).push(s); }
       for (const [nm, list] of byPlayer) for (const v of [0, 1, 5, 9, 10, 12, 25, 40]) {
-        const p = { key: M.bpKey(nm), side: '', played: true, pts: v, reb: v, ast: v, tpm: v, stl: v, blk: v, q1pts: v, q1reb: v, q1ast: v, q1played: true, q1done: true, fb: v > 0 ? 1 : 0, fbFt: false, fa: v > 0 ? 1 : 0, fr: v > 0 ? 1 : 0, frTeam: false };
+        const p = { key: M.bpKey(nm), side: '', played: true, pts: v, reb: v, ast: v, tpm: v, stl: v, blk: v, fb: v > 0 ? 1 : 0, fa: v > 0 ? 1 : 0 };
         const RR = { done: true, h: 100, a: 100, bp: [p] };
         const outs = list.map((s) => M.legOutcome({ market: 'bp', per: mk.per, pick: s.pick }, RR));
         sels += list.length;
@@ -858,43 +858,39 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   check(run(n, 'r3') && n.value === 1, 'corrida ao vivo: fim do 1º quarto 22-20 → "Nenhuma" (25) ganha');
 }
 
-/* ================= 8d) basquete: jogadores no 1º quarto (lance a lance da ESPN) ================= */
+/* ================= 8d) basquete: primeiro cesto e primeira assistência (lance a lance da ESPN) =================
+   Lance livre conta como primeiro cesto; primeiro rebote e jogadores por quarto não se oferecem (decisão de 2026-10-29). */
 {
   const BPL = require(path.join(__dirname, '..', 'feeds', 'bplayers.js'));
   const m = { home: 'ATL Hawks', away: 'CLE Cavaliers' };
-  const s = BPL.quote({ group_name: '1st Quarter Points', group_id: '77', side: '7', line: 'James Harden', n2: 'CLE Cavaliers' }, m);
-  check(s && s.per === 'q1pts|77' && s.pick === '7#away#James Harden', `1º quarto: leitura da cotação (${JSON.stringify(s)})`);
-  const P = (o) => ({ key: M.bpKey('James Harden'), side: 'away', played: true, pts: 20, reb: 5, ast: 6, tpm: 2, stl: 1, blk: 0, q1pts: 8, q1reb: 1, q1ast: 3, q1played: true, q1done: true, ...o });
-  const Q = (pick, stat, bp, want, what) => eq({ market: 'bp', per: `${stat}|77`, pick }, { done: true, h: 100, a: 99, bp: [bp] }, want, `1º quarto: ${what}`);
-  Q('7#away#James Harden', 'q1pts', P(), 1, '8 pontos no 1º quarto → 7 ou mais ganha');
-  Q('10#away#James Harden', 'q1pts', P(), -1, '8 pontos → 10 ou mais perde (20 no jogo não conta)');
-  Q('3#away#James Harden', 'q1ast', P(), 1, '3 assistências no 1º quarto');
-  Q('3#away#James Harden', 'q1reb', P({ q1played: false, q1pts: 0, q1reb: 0, q1ast: 0 }), 0, 'não jogou no 1º quarto → devolvida');
-  Q('3#away#James Harden', 'q1reb', P({ q1pts: undefined, q1reb: undefined, q1ast: undefined }), null, 'sem lance a lance conferido → espera');
-  const fbq = BPL.quote({ group_name: 'Player First', group_id: '78', side: 'Basket', line: 'James Harden', n2: 'CLE Cavaliers' }, m);
-  check(fbq && fbq.per === 'fb|78' && fbq.pick === '1#away#James Harden', 'primeiro cesto: leitura da cotação');
-  Q('1#away#James Harden', 'fb', P({ fb: 1, fbFt: false }), 1, 'primeiro cesto foi dele');
-  Q('1#away#James Harden', 'fb', P({ fb: 0, fbFt: false }), -1, 'primeiro cesto de outro');
-  Q('1#away#James Harden', 'fb', P({ fb: 0, fbFt: true }), 0, 'primeiros pontos de lance livre → devolvida');
-  Q('1#away#James Harden', 'fb', P({ fb: 0, played: false }), 0, 'não jogou → devolvida');
+  const fq = (side, group = 'Player First') => BPL.quote({ group_name: group, group_id: '78', side, line: 'James Harden', n2: 'CLE Cavaliers' }, m);
+  check(fq('Basket')?.per === 'fb|78' && fq('Basket')?.pick === '1#away#James Harden', 'primeiro cesto: leitura da cotação');
+  check(fq('Assist')?.per === 'fa|78', 'primeira assistência: leitura da cotação');
+  check(!fq('Rebound') && BPL.isPlayerGroup('Player First'), 'primeiro rebote: não se oferece');
+  for (const g of ['1st Quarter Points', '1st Quarter Rebounds', '1st Quarter Assists']) check(!fq('7', g) && BPL.isPlayerGroup(g), `${g}: não se oferece`);
+  const P = (o) => ({ key: M.bpKey('James Harden'), side: 'away', played: true, pts: 20, reb: 5, ast: 6, tpm: 2, stl: 1, blk: 0, fb: 0, fa: 0, ...o });
+  const F = (stat, bp, want, what) => eq({ market: 'bp', per: `${stat}|78`, pick: '1#away#James Harden' }, { done: true, h: 100, a: 99, bp: [bp] }, want, `primeiros: ${what}`);
+  F('fb', P({ fb: 1 }), 1, 'primeiro cesto foi dele (lance livre conta)');
+  F('fb', P(), -1, 'primeiro cesto de outro');
+  F('fa', P({ fa: 1 }), 1, 'primeira assistência foi dele');
+  F('fb', P({ played: false }), 0, 'não jogou → devolvida');
+  F('fb', P({ fb: undefined }), null, 'sem lance a lance conferido → espera');
   // ao vivo: só a ESPN decide
   process.env.EARLY_SETTLE_S = process.env.EARLY_SETTLE_S || '150';
   const mk = require(path.join(__dirname, '..', 'early.js'));
   let T = 3e12, eb = null;
-  const ev = { id: 'q1e', sport: 'basketball', league: 'nba', state: 'in', home: { name: 'ATL Hawks', score: 30 }, away: { name: 'CLE Cavaliers', score: 28 }, markets: [{ k: 'ml', sels: [{ lock: false }] }] };
+  const ev = { id: 'fb1', sport: 'basketball', league: 'nba', state: 'in', home: { name: 'ATL Hawks', score: 2 }, away: { name: 'CLE Cavaliers', score: 0 }, markets: [{ k: 'ml', sels: [{ lock: false }] }] };
   const E = mk({ M, TEN: require(path.join(__dirname, '..', 'feeds', 'tennis.js')), events: new Map([[ev.id, ev]]), liveStats: () => ({ players: [] }), now: () => T, espnBox: () => eb });
   const run = (leg, id) => { let r = false; for (let i = 0; i < 4 && !r; i++) { r = E.check(id, leg); T += 15000; } return r; };
-  const L = (pick, stat) => ({ evId: ev.id, market: 'bp', per: `${stat}|77`, pick });
-  eb = [P({ q1pts: 7, q1done: false })];
-  const a = L('7#away#James Harden', 'q1pts'), b = L('u7#away#James Harden', 'q1pts'), c = L('10#away#James Harden', 'q1pts');
-  check(run(a, 'q1a') && a.value === 1, '1º quarto ao vivo: chegou a 7 → paga');
-  check(run(b, 'q1b') && b.value === -1, '1º quarto ao vivo: "menos de 7" perde');
-  check(!run(c, 'q1c') && !c.result, '1º quarto ao vivo: 10 ainda em aberto durante o quarto');
-  eb = [P({ q1pts: 8, q1done: true })];
-  check(run(c, 'q1c') && c.value === -1, '1º quarto ao vivo: quarto acabado com 8 → "10 ou mais" perde');
+  const L = (stat) => ({ evId: ev.id, market: 'bp', per: `${stat}|78`, pick: '1#away#James Harden' });
+  eb = [P({ fb: 1 })];
+  const a = L('fb'); check(run(a, 'fb1') && a.value === 1, 'primeiro cesto ao vivo: paga logo');
+  eb = [P({ fb: 0, played: false })];
+  const b = L('fb'); check(!run(b, 'fb2') && !b.result, 'primeiro cesto ao vivo: de outro, mas ele ainda não jogou → espera pelo fim');
+  eb = [P({ fb: 0 })];
+  check(run(b, 'fb2') && b.value === -1, 'primeiro cesto ao vivo: de outro e ele já jogou → perde');
   eb = null;
-  const d = L('5#away#James Harden', 'q1pts');
-  check(!run(d, 'q1d') && !d.result, '1º quarto ao vivo: sem a ESPN → espera');
+  const c = L('fa'); check(!run(c, 'fb3') && !c.result, 'primeira assistência ao vivo: sem a ESPN → espera');
 }
 
 /* ================= 9) hóquei: mercados que eram da equipa =================

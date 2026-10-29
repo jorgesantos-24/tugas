@@ -155,17 +155,12 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     if (leg.market !== 'bp' || ev.sport !== 'basketball') return null;
     const stat = String(leg.per ?? '').split('|')[0], get = M.BP_FIELD[stat], n = M.bpNeed(leg);
     if (!get || !n) return null;
-    // 1º quarto e primeiro cesto: só a ESPN (lance a lance conferido com o box score); passou a linha → decide;
-    // quarto acabado → decide tudo; primeiro cesto: decide logo (lance livre → devolvida; perde só quem já jogou)
-    if (/^(q1|fb$|fa$|fr$)/.test(stat)) {
-      const eb = espnBox(ev.id), b = eb ? M.bpPlayer(leg, eb) : null, vb = b ? get(b) : NaN;
+    // primeiro cesto / assistência: só a ESPN (lance a lance conferido com o box score); decide logo a seguir ao lance
+    // (perde só quem já jogou — quem não for a jogo fica devolvido no fim)
+    if (stat === 'fb' || stat === 'fa') {
+      const eb = espnBox(ev.id), b = eb ? M.bpPlayer(leg, eb) : null, vb = b ? get(b) : NaN, lab = BPL.STAT_PT[stat];
       if (!b || !Number.isFinite(vb)) return null;
-      const lab = BPL.STAT_PT[stat] || stat;
-      if (stat === 'fb' || stat === 'fa' || stat === 'fr') return (stat === 'fb' && b.fbFt) || (stat === 'fr' && b.frTeam) ? { v: 0, sig: `${stat}:devolvida`, text: stat === 'fb' ? 'primeiros pontos de lance livre' : 'primeiro rebote da equipa', ms: 30000 }
-        : vb >= 1 ? { v: 1, sig: `${stat}:sim`, text: lab, ms: 30000 } : b.played ? { v: -1, sig: `${stat}:nao`, text: `${lab}: outro jogador`, ms: 30000 } : null;
-      if (vb >= n.need) return { v: n.under ? -1 : 1, sig: `${stat}:passou`, text: `${lab} ${vb}`, ms: 30000 };
-      if (b.q1done && b.q1played) return { v: n.under ? 1 : -1, sig: `${stat}:fim`, text: `${lab} ${vb}`, ms: 30000 };
-      return null;
+      return vb >= 1 ? { v: 1, sig: `${stat}:sim`, text: lab, ms: 30000 } : b.played ? { v: -1, sig: `${stat}:nao`, text: `${lab}: outro jogador`, ms: 30000 } : null;
     }
     const ro = BPL.roster(liveStats(ev.id)) || [];
     const a = M.bpPlayer(leg, ro), va = a ? get(a) : NaN;
