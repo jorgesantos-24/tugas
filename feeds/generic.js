@@ -26,6 +26,9 @@ const PHRASES = [
   ['Teams To Score', 'Equipas que marcam'], ['To Score In Half', 'Marca no tempo'], ['To Score In Both Halves', 'Marca nos dois tempos'],
   ['Clean Sheet', 'Sem sofrer gols'], ['Winning Margin', 'Margem de vitória'], ['Method Of Victory', 'Forma de vitória'], ['Goal Method', 'Tipo de gol'],
   ['Goalscorers', 'Marcadores'], ['Team Goalscorer', 'Marcador da equipa'], ['Multi Scorers', 'Marca várias vezes'], ['Either to Score', 'Um dos dois marca'],
+  // ao vivo os mercados de jogadores vêm com "Player ..." à frente: mesmos nomes de antes do jogo
+  ['Player to Score or Assist', 'Marca ou assiste'], ['Player to be Booked', 'Recebe cartão'], ['Player Shots on Target', 'Remates à baliza'],
+  ['Player Shots', 'Remates'], ['Player Fouls Committed', 'Faltas cometidas'], ['Player To Be Fouled', 'Sofre faltas'], ['Player Assists', 'Assistências'],
   ['Score or Assist', 'Marca ou assiste'], ['Shots On Target', 'Remates à baliza'], ['Shots on Target', 'Remates à baliza'], ['Headed Shots', 'Cabeceamentos'],
   ['Outside Box', 'de fora da área'], ['Goalkeeper Saves', 'Defesas do guarda-redes'], ['To Be Fouled', 'Sofre faltas'], ['Fouls Committed', 'Faltas cometidas'],
   ['Throw Ins', 'Lançamentos laterais'], ['Free Kicks', 'Livres'], ['Goal Kicks', 'Pontapés de baliza'], ['Offsides', 'Foras de jogo'],
@@ -49,7 +52,7 @@ const PHRASES = [
   ['Player', 'Jogador'], ['Team', 'Equipa'], ['To Win', 'Vencer'], ['Both Teams', 'Ambas as equipas'], ['Either Team', 'Qualquer equipa'],
   ['Set', 'Set'], ['Game', 'Game'], ['Point Betting', 'Ponto a ponto'], ['Tie Break', 'Tie-break'], ['Score', 'Placar'],
 ];
-const WORDS = [['Over or Exactly', 'Mais ou exatamente'], ['Over', 'Mais de'], ['Under', 'Menos de'], ['Exactly', 'Exatamente'], ['Yes', 'Sim'], ['No', 'Não'],
+const WORDS = [['To Score or Assist', 'Marca ou assiste'], ['Score or Assist', 'Marca ou assiste'], ['Over or Exactly', 'Mais ou exatamente'], ['Over', 'Mais de'], ['Under', 'Menos de'], ['Exactly', 'Exatamente'], ['Yes', 'Sim'], ['No', 'Não'],
   ['Draw', 'Empate'], ['Tie', 'Empate'], ['Odd', 'Ímpar'], ['Even', 'Par'], ['First', 'Primeiro'], ['Last', 'Último'], ['Anytime', 'A qualquer momento'],
   ['No Goals', 'Sem gols'], ['Goals', 'gols'], ['Goal', 'gol'], ['or More', 'ou mais'], ['Any Other', 'Outro'], ['Only', 'só'], ['Booked', 'Recebe cartão']];
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

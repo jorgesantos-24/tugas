@@ -12,6 +12,7 @@
 // Cada seleção é uma função do estado → probabilidade (0..1). Uma combinação = soma dos estados × produto das seleções.
 
 const PLAYERS = require('./players.js'); // cotação de jogador → { estatística, N+, equipa, nome }
+const M = require('../public/markets.js'); // nomes e estatísticas dos jogadores (ao vivo)
 
 const fact = [1]; for (let i = 1; i <= 60; i++) fact[i] = fact[i - 1] * i;
 const pois = (k, l) => Math.exp(-l) * l ** k / fact[k];
@@ -85,7 +86,7 @@ function minimize(err, p0, step, lo, hi, iters = 250) {
    devolve { b: bloco ('g' golos, 'c' escanteios, 'k' cartões, 'x' sem modelo), f, mk: id do mercado, fam: família,
              pl?: {team, kind, name} para jogadores } ou null se não sabemos modelar */
 const RX = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-function legOf(m, q) {
+function legPre(m, q) {
   const H = m.home, A = m.away, g = q.group_name;
   const tm = (s) => (s === H ? 'h' : s === A ? 'a' : s === 'Draw' || s === 'Tie' ? 'd' : null);
   const res = (k, x = 'h', y = 'a') => (k === 'h' ? (s) => s[x] > s[y] : k === 'a' ? (s) => s[x] < s[y] : (s) => s[x] === s[y]);
@@ -186,8 +187,100 @@ function legOf(m, q) {
   }
   return ppOf(m, q); // estatísticas de jogador (remates, assistências, desarmes...)
 }
+function legOf(m, q) {
+  if (!m.live) return legPre(m, q);
+  const x = q._a ? q : liveQ(m, q);
+  if (!x) return null;
+  const l = legPre(m, x);
+  return l && liveLeg(m, x, l);
+}
+
+/* ---------------- ao vivo ----------------
+   O motor ao vivo modela só o que FALTA jogar (gols, escanteios e cartões que ainda podem acontecer, ajustados às
+   odds ao vivo da bet365) e cada seleção vê o total final = o que já aconteceu (m.live) + o que falta.
+   m.live = { score: [c, f], ht: [c, f] | null, half: 1 | 2, minute, corners: [c, f] | null, cards: [c, f] | null,
+              roster: jogadores com as estatísticas de agora }
+   Os mercados ao vivo da bet365 têm outros nomes: liveQ traduz cada um para o nome do mercado de antes do jogo
+   (null = fora do Criar aposta ao vivo: handicaps asiáticos que contam a partir da aposta, próximo gol, minutos...). */
+const LIVE_SAME = new Set(['Double Chance', 'Half Time Result', 'Half Time/Full Time', 'Goals Odd/Even', 'Asian Corners', '1st Half Corners', '1st Half Asian Corners']);
+const LIVE_PLAYER = new Set(['Player Fouls Committed', 'Player To Be Fouled', 'Player Shots', 'Player Shots on Target', 'Player Assists', 'Player to Score or Assist', 'Player to be Booked', 'Goalscorers', 'Multi Scorers']);
+function liveQ(m, q) {
+  const g = String(q.group_name ?? ''), L = m.live, H = m.home, A = m.away;
+  const as = (o) => ({ ...q, ...o, _a: 1 });
+  const csSide = (sd) => (sd === '1' ? H : sd === '2' ? A : sd === 'X' ? 'Draw' : null);
+  // jogadores ao vivo: a cotação não traz a equipa → vem da lista de jogadores do jogo
+  const teamOf = (name) => { const p = rosterOf(L, name); return p?.side === 'home' ? H : p?.side === 'away' ? A : null; };
+  if (LIVE_PLAYER.has(g)) {
+    if (g === 'Player to Score or Assist') return /^to score or assist$/i.test(String(q.side ?? '').trim()) ? as({ group_name: 'Score or Assist', side: 'Score or Assist', n2: q.n2 || teamOf(q.line) }) : null;
+    const name = g === 'Player to be Booked' ? q.label : /^Player /.test(g) ? q.side : q.line;
+    return as({ n2: q.n2 || teamOf(name) });
+  }
+  if (LIVE_SAME.has(g)) return as({});
+  switch (g) {
+    case 'Fulltime Result': return as({ group_name: 'Full Time Result' });
+    case 'Match Goals': case 'Alternative Match Goals': return as({ group_name: 'Goals Over/Under' });
+    case 'Final Score': return csSide(q.side) ? as({ group_name: 'Correct Score', side: csSide(q.side) }) : null;
+    case 'Half Time Correct Score': return csSide(q.side) ? as({ side: csSide(q.side) }) : null;
+    case 'Both Teams to Score': return as({ group_name: 'Both Teams To Score' });
+    case 'Both Teams to Score in 1st Half': return as({ group_name: 'Both Teams To Score In 1st Half' });
+    case 'Both Teams to Score in 2nd Half': return as({ group_name: 'Both Teams To Score In 2nd Half' });
+    case 'First Half Goals': return as({ group_name: '1st Half Goals' });
+    case 'To Win 2nd Half': return as({ group_name: '2nd Half Result (Incl. Draw)' });
+    case 'Team Clean Sheet': return as({ group_name: 'Clean Sheet' });
+    case 'Team to Score in 2nd Half': return /^(Yes|No)$/.test(q.label) ? as({ group_name: 'To Score In Half', n2: q.side, line: '2nd Half', side: q.label }) : null;
+    case 'Match Corners': return as({ group_name: 'Corners' });
+    case '2-Way Corners': return as({ group_name: 'Corners 2-Way' });
+    case '2nd Half Corners': return as({});
+    case 'Most Corners': return as({ group_name: 'Team to Get Most', side: q.label, line: 'Corners' });
+    case 'Number of Cards': return as({ group_name: 'Number Of Cards In Match' });
+  }
+  // "<equipa> Goals" (mais/menos gols da equipa) e "<equipa> Exact Goals"
+  if (g === `${H} Goals` || g === `${A} Goals`) return /^(Over|Under)$/.test(q.side) ? as({ group_name: 'Team Total Goals', side: g === `${H} Goals` ? H : A, label: `${q.side} ${q.line}` }) : null;
+  if (g === `${H} Exact Goals`) return as({ group_name: 'Home Team Exact Goals' });
+  if (g === `${A} Exact Goals`) return as({ group_name: 'Away Team Exact Goals' });
+  return null;
+}
+const rosterOf = (L, name) => { const k = M.ppNorm(name), f = (L.roster || []).filter((p) => p.key === k); return f.length === 1 ? f[0] : null; };
+// estado do que falta → estado final (o que já aconteceu + o que falta), só com os campos que o estado traz
+function shift(base, half, ht, s) {
+  const o = {};
+  if ('h' in s) { o.h = s.h + base[0]; o.a = s.a + base[1]; }
+  if (half === 1) {
+    if ('h1' in s) { o.h1 = s.h1 + base[0]; o.a1 = s.a1 + base[1]; }
+    if ('h2' in s) { o.h2 = s.h2; o.a2 = s.a2; }
+  } else {
+    if ('h1' in s) { o.h1 = ht[0]; o.a1 = ht[1]; }
+    if ('h2' in s) { o.h2 = s.h2 + base[0] - ht[0]; o.a2 = s.a2 + base[1] - ht[1]; }
+  }
+  return o;
+}
+function liveLeg(m, q, l) {
+  const L = m.live;
+  if (l.ord || l.fam === 'combo') return null; // 1ª/última equipa a marcar: depende da ordem dos gols
+  if (l.pp) return l; // jogadores: ppOf já conta só o que falta
+  if (l.pl) { // marcador / cartão de jogador (sem escada): só quem ainda não o fez
+    const p = rosterOf(L, l.pl.name), v = p && (l.pl.kind === 'card' ? M.PP_FIELD.booked(p) : p.goals);
+    if (!p || !['any', 'card'].includes(l.pl.kind) || !(v === 0 || (v == null && !p.played))) return null;
+    return l;
+  }
+  const f0 = l.f;
+  if (l.b === 'g') { const { score, half, ht } = L; l.f = (s) => f0(shift(score, half, ht, s)); }
+  else if (l.b === 'c') {
+    if (!L.corners) return null;
+    // escanteios por tempo só no 1º tempo (no 2º não se sabe quantos houve ao intervalo)
+    if (L.half === 2 && /1st Half|2nd Half/.test(q.group_name)) return null;
+    l.f = (s) => f0(shift(L.corners, 1, null, s));
+  } else if (l.b === 'k') {
+    if (!L.cards) return null;
+    l.f = (s) => f0(shift(L.cards, 1, null, s));
+  } else return null;
+  return l;
+}
+
 // cotação de jogador (as mesmas que o site abre) → seleção { pp: { team, stat, n, name } } = "faz n ou mais"
+// (ao vivo: n = o que ainda falta fazer; já feito → null, fora do Criar aposta)
 function ppOf(m, q) {
+  if (m.live && !q._a) { q = liveQ(m, q); if (!q) return null; }
   const r = PLAYERS.quote(q, m);
   if (!r) return null;
   const stat = r.per.split('|')[0], [n, side, ...nm] = r.pick.split('#'), name = nm.join('#');
@@ -195,14 +288,21 @@ function ppOf(m, q) {
   const team = side === 'home' ? 'h' : side === 'away' ? 'a' : IND.includes(stat) ? 'x' : null;
   if (!team || !name || stat === 'sent') return null;
   if (stat === 'booked') return +n === 1 ? { b: 'k', fam: 'plk', mk: 'card' + name, pl: { team, kind: 'card', name } } : null;
-  return { b: 'g', fam: 'pp', mk: `pp|${stat}|${name}|${n}`, pp: { team, stat, n: +n, name } };
+  let need = +n;
+  if (m.live) {
+    const p = rosterOf(m.live, name), v = p && M.PP_FIELD[stat]?.(p);
+    if (!p || (!Number.isFinite(v) && p.played)) return null; // sem a estatística de agora não se sabe quanto falta
+    need -= Number.isFinite(v) ? v : 0;
+    if (need <= 0) return null;
+  }
+  return { b: 'g', fam: 'pp', mk: `pp|${stat}|${name}|${n}`, pp: { team, stat, n: need, name } };
 }
 
 /* ---------------- ajuste de um jogo ----------------
    Para ser rápido, o ajuste não usa os estados completos: cada alvo depende só do placar final, só do 1º tempo ou só
    do 2º tempo, e soma-se numa grelha pequena (máscara pré-calculada). Os estados completos montam-se uma vez no fim. */
 const GN = 2 * KG - 1;
-const H1G = new Set(['Half Time Result', '1st Half Goals']), H2G = new Set(['2nd Half Goals']), C1G = new Set(['1st Half Corners']);
+const H1G = new Set(['Half Time Result', '1st Half Goals', 'Half Time Correct Score']), H2G = new Set(['2nd Half Goals', '2nd Half Result (Incl. Draw)']), C1G = new Set(['1st Half Corners', '1st Half Asian Corners']);
 function maskOf(f, grid, n) {
   const idx = [];
   for (let x = 0; x < n; x++) for (let y = 0; y < n; y++) {
@@ -211,7 +311,7 @@ function maskOf(f, grid, n) {
   }
   return idx;
 }
-function fitGoals(m, groups) {
+function fitGoals(m, groups, o = {}) {
   const T = [];
   for (const g of groups) {
     const sets = {};
@@ -231,10 +331,10 @@ function fitGoals(m, groups) {
     for (const t of T) { const G = t.grid === 'ft' ? F : t.grid === 'h1' ? A1 : B1; let s = 0; for (const i of t.idx) s += G[i]; e += t.w * (s - t.pt) ** 2; }
     return e;
   };
-  const P = minimize(err, [1.4, 1.1, 0.45, 0], [0.4, 0.4, 0.05, 0.08], [0.1, 0.1, 0.3, -0.25], [5, 5, 0.6, 0.25], 400).p;
+  const P = minimize(err, o.p0 || [1.4, 1.1, 0.45, 0], o.step || [0.4, 0.4, 0.05, 0.08], o.lo || [0.1, 0.1, 0.3, -0.25], o.hi || [5, 5, 0.6, 0.25], 400).p;
   return { lh: P[0], la: P[1], f: P[2], rho: P[3] };
 }
-function fitCount(m, groups, b, K, def) {
+function fitCount(m, groups, b, K, def, o = {}) {
   const T = [];
   for (const g of groups) {
     const sets = {};
@@ -253,8 +353,8 @@ function fitCount(m, groups, b, K, def) {
     for (const t of T) { const X = t.grid === 'ft' ? H : H1, Y = t.grid === 'ft' ? A : A1; let s = 0; for (const i of t.idx) s += X[(i / K) | 0] * Y[i % K]; e += t.w * (s - t.pt) ** 2; }
     return e;
   };
-  const P = minimize(err, [def[0], def[1], Math.log(def[2]), def[3]], [1, 1, 0.5, 0.05], [0.3, 0.3, 0, 0.3], [15, 15, 6, 0.6], 400).p;
-  return { mh: P[0], ma: P[1], r: Math.exp(P[2]), f: has1 ? P[3] : def[3] };
+  const P = minimize(err, [def[0], def[1], Math.log(def[2]), def[3]], [1, 1, 0.5, 0.05], o.lo || [0.3, 0.3, 0, 0.3], o.hi || [15, 15, 6, 0.6], 400).p;
+  return { mh: P[0], ma: P[1], r: Math.exp(P[2]), f: has1 ? P[3] : def[3], ...(o.halves === false ? { nohalf: 1 } : {}) };
 }
 const FIT_G = ['Full Time Result', 'Goals Over/Under', 'Alternative Total Goals', 'Both Teams To Score', 'Team Total Goals', 'Half Time Result', '1st Half Goals', '2nd Half Goals', 'Correct Score'];
 const FIT_C = ['Corners', 'Alternative Corners', 'Corners 2-Way', 'Team Corners', '1st Half Corners'];
@@ -262,18 +362,44 @@ const FIT_K = ['Number Of Cards In Match', 'Team Cards'];
 const CK = 16, KK = 12;
 // parâmetros → estados (também serve para refazer as contas mais tarde, com os parâmetros guardados na aposta)
 function fromParams(P) {
-  const E = { goals: P.goals, G: goalStates(P.goals), corners: P.corners, cards: P.cards, players: P.players || {}, pp: P.pp || {} };
-  if (P.corners) E.C = countStates(P.corners, true, CK);
+  const E = { goals: P.goals, G: goalStates(P.goals), corners: P.corners, cards: P.cards, players: P.players || {}, pp: P.pp || {}, live: P.live || null };
+  if (P.corners) E.C = countStates(P.corners, !P.corners.nohalf, CK);
   if (P.cards) E.K = countStates(P.cards, false, KK);
   return E;
 }
 function build(m) {
+  if (m.live) return buildLive(m);
   const goals = fitGoals(m, FIT_G);
   if (!goals) return null;
   const corners = fitCount(m, FIT_C, 'c', 26, [5.5, 4.5, 20, 0.47]);
   const cards = fitCount(m, FIT_K, 'k', KK, [2, 2, 20, 0.45]);
   const E = fromParams({ goals, corners, cards });
   E.m = m;
+  E.players = fitPlayers(E);
+  E.pp = fitPP(E);
+  return E;
+}
+
+/* ao vivo: o mesmo ajuste, mas do que falta jogar. f = parte do que falta que cai no tempo atual (1º tempo; no 2º
+   tempo é 0). As cotações traduzidas (liveQ) e só as abertas entram no ajuste. */
+const LIVE_G = ['Full Time Result', 'Goals Over/Under', 'Both Teams To Score', 'Team Total Goals', 'Correct Score', 'Half Time Result', '1st Half Goals', 'Half Time Correct Score', '2nd Half Result (Incl. Draw)'];
+const LIVE_C = ['Corners', 'Corners 2-Way', 'Asian Corners', 'Team to Get Most', '1st Half Corners', '1st Half Asian Corners'];
+function buildLive(m0) {
+  const L = m0.live;
+  const quotes = m0.quotes.filter((q) => !q.suspended && q.odds_dec > 1).map((q) => liveQ(m0, q)).filter(Boolean);
+  const m = { ...m0, quotes };
+  // parte do que falta no tempo atual: minutos que faltam do 1º tempo sobre os que faltam do jogo (+ acréscimos)
+  const left1 = L.half === 1 ? Math.max(0, 47 - L.minute) : 0, left = Math.max(1, (L.half === 1 ? 47 - L.minute + 48 : 95 - L.minute));
+  const f0 = Math.min(0.8, left1 / left);
+  const one = L.half === 1;
+  const goals = fitGoals(m, LIVE_G, one
+    ? { p0: [0.8, 0.8, Math.max(0.02, f0), 0], step: [0.3, 0.3, 0.05, 0.05], lo: [0.01, 0.01, 0.01, -0.2], hi: [5, 5, 0.8, 0.2] }
+    : { p0: [0.6, 0.6, 0, 0], step: [0.3, 0.3, 0.05, 0.05], lo: [0.01, 0.01, 0, -0.2], hi: [5, 5, 0, 0.2] });
+  if (!goals) return null;
+  const corners = L.corners ? fitCount(m, one ? LIVE_C : LIVE_C.filter((g) => !C1G.has(g)), 'c', 26, [3, 3, 20, Math.max(0.05, f0)], one ? { lo: [0.01, 0.01, 0, 0.02], hi: [15, 15, 6, 0.8] } : { lo: [0.01, 0.01, 0, 0.3], hi: [15, 15, 6, 0.6], halves: false }) : null;
+  const cards = L.cards ? fitCount(m, FIT_K, 'k', KK, [1, 1, 20, 0.45], { lo: [0.01, 0.01, 0, 0.3] }) : null;
+  const E = fromParams({ goals, corners, cards });
+  E.m = m; E.live = L;
   E.players = fitPlayers(E);
   E.pp = fitPP(E);
   return E;
@@ -675,6 +801,7 @@ function legRaw(E, q) {
   if (l.pl && !E.players[(l.pl.kind === 'card' ? 'card:' : '') + l.pl.name]) return null;
   if (l.pp && !ppHas(E, l.pp)) return null;
   l.q = q;
+  if (E.live) { const p = joint(E, [l]); if (p == null || p > 0.995 || p < 0.002) return null; }
   return l;
 }
 
@@ -758,10 +885,12 @@ function paramsOf(E, legs) {
   const pp = {};
   for (const l of legs) if (l.pl) { const k = (l.pl.kind === 'card' ? 'card:' : '') + l.pl.name; players[k] = E.players[k]; }
   for (const l of legs) if (l.pp) { pp[l.pp.name] = E.pp[l.pp.name]; if (E.players[l.pp.name]) players[l.pp.name] = E.players[l.pp.name]; }
-  return { home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players, pp };
+  return { home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players, pp, ...(E.live ? { live: liveOf(E.live, legs.filter((l) => l.pp || l.pl).map((l) => (l.pp || l.pl).name)) } : {}) };
 }
+// estado ao vivo para guardar (só os jogadores pedidos; todos para o navegador)
+const liveOf = (L, names) => ({ ...L, roster: (L.roster || []).filter((p) => !names || names.some((n) => M.ppNorm(n) === p.key)).map((p) => Object.fromEntries(['key', 'name', 'side', 'played', 'goals', 'assists', 'shots', 'shots_on_target', 'fouls', 'fouls_drawn', 'tackles', 'saves', 'passes', 'yellow_cards', 'red_cards'].filter((k) => p[k] != null).map((k) => [k, p[k]]))) });
 // o motor inteiro do jogo, para o navegador calcular as odds da aba Criar aposta sem esperar pelo servidor
-const modelOf = (E) => ({ v: E.v, home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players: E.players, pp: E.pp });
+const modelOf = (E) => ({ v: E.v, home: E.m.home, away: E.m.away, goals: E.goals, corners: E.corners || null, cards: E.cards || null, players: E.players, pp: E.pp, ...(E.live ? { live: liveOf(E.live) } : {}) });
 // cotação da bet365 → só os campos que o motor usa (vai para a aposta)
 const srcOf = (q) => Object.fromEntries(['group_name', 'side', 'label', 'line', 'handicap', 'n2'].filter((k) => q[k] != null).map((k) => [k, q[k]]));
 
@@ -771,7 +900,7 @@ function requote(params, kept) {
   if (!kept.length) return 1;
   if (kept.length === 1) return kept[0].odds;
   const E = fromParams(params);
-  E.m = { home: params.home, away: params.away, quotes: [] };
+  E.m = { home: params.home, away: params.away, quotes: [], live: params.live || null };
   const legs = kept.map((k) => { const l = legOf(E.m, k.src); if (l) l.q = k.src; return l; });
   if (legs.some((l) => !l)) return kept.reduce((t, k) => t * k.odds, 1); // não devia acontecer: multiplica as odds de cada uma
   const p = joint(E, legs);
@@ -783,16 +912,16 @@ function requote(params, kept) {
 
 /* motor de cada jogo, guardado alguns minutos (montar leva ~60 ms) */
 const cache = new Map();
-const TTL = 3 * 60000;
-function engineFor(id, m) {
-  const c = cache.get(id);
-  if (c && Date.now() - c.at < TTL && c.n === m.quotes.length) return c.E;
+const TTL = 3 * 60000, LIVE_TTL = 8000; // ao vivo as odds mexem a cada segundo
+function engineFor(id, m, maxAge) {
+  const c = cache.get(id), sig = m.live ? JSON.stringify([m.live.score, m.live.ht, m.live.corners, m.live.cards, m.live.half]) : '';
+  if (c && Date.now() - c.at < (maxAge ?? (m.live ? LIVE_TTL : TTL)) && c.n === m.quotes.length && c.sig === sig) return c.E;
   let E = null;
   try { E = build(m); } catch (e) { console.error('[Criar aposta]', id, e.message); }
   if (E) E.v = Date.now(); // versão do motor (o navegador refaz o seu quando muda)
-  cache.set(id, { E, at: Date.now(), n: m.quotes.length });
+  cache.set(id, { E, at: Date.now(), n: m.quotes.length, sig });
   if (cache.size > 400) for (const [k, v] of cache) if (Date.now() - v.at > TTL) cache.delete(k);
   return E;
 }
 
-module.exports = { modelOf, engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };
+module.exports = { modelOf, liveQ, engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };

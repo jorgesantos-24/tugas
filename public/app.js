@@ -325,7 +325,7 @@ function toggleSel(key) {
     if (!sel || sel.locked || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
     if (S.slip.length >= 20) { toast('Máximo de 20 seleções', 'err'); return; }
     const same = S.slip.filter((s) => s.evId === ev.id).length;
-    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é no futebol, antes do jogo)', 'err');
+    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é só no futebol)', 'err');
     else if (same >= BB_MAX) { toast(`Criar aposta: máximo de ${BB_MAX} seleções por jogo`, 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
     // Criar aposta: o boletim mostra logo a odd calculada aqui; a do servidor substitui-a quando chegar
@@ -347,7 +347,7 @@ function toggleSel(key) {
 
 /* Criar aposta: seleções do mesmo jogo de futebol (antes do início) numa odd só, calculada pelo servidor */
 const BB_MAX = 6;
-const bbOk = (ev) => !!ev && ev.sport === 'soccer' && ev.state === 'pre' && !ev.manual;
+const bbOk = (ev) => !!ev && ev.sport === 'soccer' && (ev.state === 'pre' || (ev.state === 'in' && !ev.awaiting)) && !ev.manual;
 const slipGroups = () => { const g = new Map(); for (const s of S.slip) g.set(s.evId, [...(g.get(s.evId) || []), s]); return g; };
 const bbKey = (list) => list.map((s) => s.key).sort().join('~');
 const bbOf = (list) => S.bbq[bbKey(list)] || null;
@@ -379,7 +379,8 @@ const bbLoading = new Set();
 async function ensureModel(ev, force = false) {
   if (!window.BBE || !bbOk(ev) || bbLoading.has(ev.id)) return;
   const c = bbM.get(ev.id);
-  if (c && Date.now() - c.at < (force ? 5000 : 90000)) return;
+  // ao vivo as odds e o jogo mudam a cada segundo: modelo novo a cada 5 s (o servidor refá-lo a cada 8 s)
+  if (c && Date.now() - c.at < (force ? 5000 : ev.state === 'in' ? 5000 : 90000)) return;
   bbLoading.add(ev.id);
   try {
     const r = await api('GET', `/api/betbuilder/model?ev=${encodeURIComponent(ev.id)}`);
@@ -388,7 +389,7 @@ async function ensureModel(ev, force = false) {
     if (c?.E && c.v === r.model.v) c.at = Date.now();
     else {
       const E = BBE.fromParams(r.model);
-      E.m = { home: r.model.home, away: r.model.away, quotes: [] };
+      E.m = { home: r.model.home, away: r.model.away, quotes: [], live: r.model.live || null };
       E.v = r.model.v;
       bbM.set(ev.id, { at: Date.now(), v: r.model.v, E, src: r.src || {}, memo: new Map() });
       // primeira conta já agora (prepara cada seleção do jogo no motor; os cliques seguintes ficam em milissegundos)
@@ -403,7 +404,7 @@ function bbLocal(ev, mine) {
   const c = bbM.get(ev.id);
   if (!c?.E || !mine.length) return undefined;
   const k = bbKey(mine), hit = c.memo.get(k);
-  if (hit && Date.now() - hit.at < 5000) return hit;
+  if (hit && Date.now() - hit.at < (ev.state === 'in' ? 2000 : 5000)) return hit;
   const items = mine.map((s) => { const { sel } = findSel(s.key); return { key: s.key, name: sel?.name || '', q: c.src[s.key] || null, odds: sel?.odds ?? s.odds }; });
   const chosen = new Set(mine.map((s) => s.key));
   const cands = selections(ev).filter((s) => s.bb && !s.locked && !chosen.has(s.key)).map((s) => ({ key: s.key, q: c.src[s.key] || null, odds: s.odds }));

@@ -694,7 +694,22 @@ function findSel(key) {
 /* ---------------- Criar aposta ----------------
    Várias seleções do mesmo jogo de futebol (antes do início) numa só odd, calculada pelo motor (feeds/betbuilder.js)
    a partir de todas as odds da bet365 desse jogo. Pode juntar-se a outros jogos numa múltipla. */
-const bbEligible = (ev) => !!ev && !ev.manual && ev.sport === 'soccer' && ev.state === 'pre' && !M.isSuspended(ev) && now() < +ev.date;
+const bbEligible = (ev) => !!ev && !ev.manual && ev.sport === 'soccer' && !M.isSuspended(ev) && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting));
+const BB_OFF = 'Criar aposta: só no futebol, antes do jogo ou ao vivo';
+/* ao vivo: cotações de agora + o que já aconteceu (placar do site, intervalo, escanteios, cartões, jogadores).
+   Só no tempo regulamentar; com expulsões os cartões ficam de fora (as casas contam o vermelho de formas diferentes). */
+function bbLiveMatch(ev) {
+  const x = FEED.bbLive(ev.id);
+  if (!x) return null;
+  const score = [ev.home.score, ev.away.score];
+  if (!score.every(Number.isFinite) || !(x.minute >= 0) || x.minute > 88) return null; // perto do fim: tudo muda em segundos
+  const st = x.st, ht = PARTS.soccerHT(st);
+  if (ht && !(ht[0] <= score[0] && ht[1] <= score[1])) return null;
+  const corners = Number.isFinite(st.home?.corners) && Number.isFinite(st.away?.corners) ? [st.home.corners, st.away.corners] : null;
+  const cd = PARTS.soccerCards(st), cards = cd && !cd.reds && cd.lo[0] === cd.hi[0] && cd.lo[1] === cd.hi[1] ? cd.lo : null;
+  return { home: x.home, away: x.away, quotes: x.quotes, live: { score, ht, half: ht ? 2 : 1, minute: x.minute, corners, cards, roster: PLAYERS.roster(st) || [] } };
+}
+const bbMatchOf = (ev) => (ev.state === 'in' ? bbLiveMatch(ev) : FEED.bbMatch(ev.id));
 // seleção do site → cotação da bet365 de onde veio
 function srcQuote(ev, o) {
   for (const mk of ev.markets || []) {
@@ -705,11 +720,12 @@ function srcQuote(ev, o) {
   return null;
 }
 // odd de um grupo de seleções do mesmo jogo → { odds, params, items } ou { reason, bad? }
-function bbQuote(keys) {
+// maxAge: idade máxima do motor (na aceitação de uma aposta ao vivo: refeito com as cotações de agora)
+function bbQuote(keys, maxAge) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
-  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
-  const m = FEED.bbMatch(evId);
-  const E = m && BB.engineFor(evId, m);
+  if (!bbEligible(ev)) return { reason: BB_OFF };
+  const m = bbMatchOf(ev);
+  const E = m && BB.engineFor(evId, m, maxAge);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const items = [];
   for (const key of keys) {
@@ -724,8 +740,8 @@ function bbQuote(keys) {
 // aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
 function bbPreview(keys) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
-  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
-  const m = FEED.bbMatch(evId);
+  if (!bbEligible(ev)) return { reason: BB_OFF };
+  const m = bbMatchOf(ev);
   const E = m && BB.engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const items = [];
@@ -745,8 +761,8 @@ function bbPreview(keys) {
 const BB_FIELDS = ['group_name', 'group_id', 'side', 'label', 'line', 'handicap', 'n2'];
 function bbModel(evId) {
   const ev = events.get(evId);
-  if (!bbEligible(ev)) return { reason: 'Criar aposta: só no futebol, antes do jogo começar' };
-  const m = FEED.bbMatch(evId);
+  if (!bbEligible(ev)) return { reason: BB_OFF };
+  const m = bbMatchOf(ev);
   const E = m && BB.engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const src = {};
@@ -1606,7 +1622,7 @@ const routes = {
         const bbq = {};
         for (const [evId, ks] of tk.byEv) {
           if (ks.length < 2) continue;
-          const q = bbQuote(ks);
+          const q = bbQuote(ks, events.get(evId)?.state === 'in' ? 2000 : undefined);
           if (q.reason) { reason = q.reason; break; }
           if (!acceptAny && tk.bbSeen[evId] != null && Number(tk.bbSeen[evId]) !== q.odds) { reason = 'odds alteradas'; break; }
           bbq[evId] = q;

@@ -24,6 +24,8 @@ function quote(q, m) {
     case 'Goalscorers': return /^anytime$/i.test(String(q.side ?? '').trim()) ? mk('goals', 1, q.line, q.n2) : null;
     case 'Multi Scorers': { const n = Number((/^(\d) or More$/i.exec(String(q.side ?? '').trim()) || [])[1]); return n ? mk('goals', n, q.line, q.n2) : null; }
     case 'Score or Assist': { const s = String(q.side ?? '').trim(); const stat = /^score or assist$/i.test(s) ? 'ga' : /^score$/i.test(s) ? 'goals' : /^assist$/i.test(s) ? 'assists' : null; return stat ? mk(stat, 1, q.line, q.n2) : null; }
+    // ao vivo a bet365 chama-lhe outro nome e traz a lista toda (antes do jogo, só uns 6 em destaque)
+    case 'Player to Score or Assist': return /^to score or assist$/i.test(String(q.side ?? '').trim()) ? mk('ga', 1, q.line, q.n2) : null;
     case 'Shots': return mk('shots', plus(q.side), q.line, q.n2);
     case 'Shots On Target': return mk('sot', plus(q.side), q.line, q.n2);
     case 'Tackles': return mk('tackles', plus(q.side), q.line, q.n2);

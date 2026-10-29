@@ -408,6 +408,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     Object.defineProperty(sel, 'q', { value: q }); // cotação de origem (Criar aposta); fora do JSON
     // futebol antes do jogo: seleção que entra no Criar aposta (aba própria na página do jogo)
     if (sport === 'soccer' && !live) { try { const l = BB.legOf(m, q); if (l && l.fam !== 'combo') sel.bb = 1; } catch { /* cotação fora do formato */ } }
+    // ao vivo: os mercados que o motor ao vivo sabe traduzir (o motor ainda decide, com o estado do jogo, se entra)
+    else if (sport === 'soccer' && live && BB.liveQ({ home: m.home, away: m.away, live: {} }, q)) sel.bb = 1;
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
@@ -438,6 +440,14 @@ function toEvent(m0, serverNow, sport, full = true) {
     mk.sels = mk.sels.filter((x) => !conflict.has(x));
     if (!mk.sels.length) byK.delete(key);
   }
+  // jogadores: a bet365 repete grupos (ao vivo, "Goalscorers" e "Player Assists" vêm duas vezes com as mesmas cotações):
+  // cada jogador/estatística/N aparece uma vez só, na lista maior (os "Marca" de "Marca ou assiste" já estão nos Marcadores)
+  { const seen = new Set();
+    for (const [key, mk] of [...byK].filter(([, x]) => x.k === 'pp').sort((a, b) => b[1].sels.length - a[1].sels.length)) {
+      const stat = mk.per.split('|')[0];
+      mk.sels = mk.sels.filter((x) => { const id = `${stat}|${x.pick}`; if (seen.has(id)) return false; seen.add(id); return true; });
+      if (!mk.sels.length) byK.delete(key);
+    } }
   for (const [k, n] of Object.entries(NEED[sport] || {})) if (byK.get(k) && byK.get(k).sels.length !== n) byK.delete(k);
   // mercados com uma seleção só (a outra caiu por odd 1.00) não fazem sentido: saem, exceto os de "N ou mais" (aces...)
   if (sport === 'tennis') for (const [key, mk] of byK) if (mk.sels.length < 2 && !['tace', 'tdf'].includes(mk.k)) byK.delete(key);
@@ -757,6 +767,16 @@ module.exports = {
   // WebSocket: start(cb) liga e avisa os jogos que mudaram; want(ids) diz quais seguir; fromWs(id) dá o evento atualizado
   guardRemoved, liveStats: (id) => WS.stats(id),
   // Criar aposta: jogo de futebol antes do início com todos os grupos de mercados ({ home, away, quotes }) ou null
+  // Criar aposta ao vivo: cotações da bet365 de agora (WebSocket, sem os grupos desatualizados) e estatísticas do jogo
+  bbLive: (id) => {
+    const meta = lastMeta.get(String(id)), w = WS.get(id), st = WS.stats(id) || meta?.m?.stats || null;
+    if (!meta?.m?.in_play || !w || !st) return null;
+    const quotes = [...w.quotes.values()].filter((q) => !w.status?.[q.group_id]?.stale);
+    // minuto de agora: o relógio da fonte diz o minuto quando foi lido (ref) e se está a contar
+    const c = meta.m.clock || {}, ref = Date.parse(c.ref);
+    const minute = Number(c.min) + (c.ticking && ref ? Math.max(0, (WS.now() - ref) / 60000) : 0);
+    return { home: meta.m.home, away: meta.m.away, quotes, st, minute: Math.floor(minute) };
+  },
   bbMatch: (id) => { const meta = lastMeta.get(String(id)), f = fullQuotes.get(String(id)); return meta && f && Date.now() - f.at < EXTRA_PRE_MS ? { home: meta.m.home, away: meta.m.away, quotes: f.quotes } : null; },
   // última leitura da bet365 pela MoviOdds para este jogo (ms, relógio da fonte), pelo WebSocket; null sem WebSocket
   // e a idade dessa leitura em ms, no relógio da fonte (o nosso pode estar adiantado ou atrasado)
