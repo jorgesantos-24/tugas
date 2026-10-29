@@ -1,9 +1,10 @@
 'use strict';
 /* Estatísticas ao vivo da MoviOdds (mensagens "stats" do WebSocket) → formato único para a página do jogo:
-   { rows: [[rótulo, casa, fora, pct?]], periods: { labels, home, away }, point: ['30','15'], serve: 'home'|'away',
+   { rows: [[rótulo, casa, fora, pct?]], periods: { labels, home, away }, players: { home, away } (basquete), point: ['30','15'], serve: 'home'|'away',
      details: [lances], form: { home, away }, clock: texto extra para o relógio, score: [casa, fora] }
    Só entra o que a fonte trouxer; um valor que falta não aparece. */
 
+const BP = require('./bplayers.js');
 const fin = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 function rowsOf(h, a, spec) {
   const out = [];
@@ -69,6 +70,11 @@ function build(sport, st, m) {
     const p = fin(st.period);
     if (p) out.clock = p <= 4 ? `${ord(p)} quarto` : 'Prorrogação';
     if (fin(h.points) != null && fin(a.points) != null) out.score = [h.points, a.points];
+    // jogadores (box score ao vivo): quem já entrou em quadra, por pontos
+    const pl = (side) => (st.players || []).filter((x) => x?.team === side && x.box_score && (BP.mins(x.box_score.minutes) > 0 || x.box_score.on_court || x.box_score.points > 0))
+      .map((x) => ({ n: String(x.name || ''), on: !!x.box_score.on_court, p: x.box_score.points || 0, r: x.box_score.rebounds || 0, a: x.box_score.assists || 0, t: x.box_score.three_pointers_made || 0 }))
+      .sort((x, y) => y.p - x.p || y.r + y.a - x.r - x.a);
+    if ((st.players || []).length) { const ph = pl('home'), pa = pl('away'); if (ph.length || pa.length) out.players = { home: ph, away: pa }; }
   } else if (sport === 'tennis') {
     out.rows = rowsOf(h, a, TENNIS);
     if (Array.isArray(h.sets) && Array.isArray(a.sets) && h.sets.length) out.periods = { labels: h.sets.map((_, i) => `${i + 1}º set`), home: h.sets, away: a.sets.slice(0, h.sets.length) };

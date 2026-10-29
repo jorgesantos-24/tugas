@@ -842,6 +842,19 @@ function sportTabsOf(ev) {
       { id: 'players', label: 'Jogadores', has: K('tpto', 'tpgw', 'tace', 'tdf') },
     ];
   }
+  if (ev.sport === 'tabletennis') {
+    return [all,
+      { id: 'pop', label: 'Principais', has: K('ml', 'ttsh', 'ttcs', 'ttpt') },
+      { id: 'sets', label: 'Sets', has: K('ttcs', 'ttgw', 'ttgh', 'ttgt', 'ttgwt', 'ttgp', 'ttgm', 'ttgx', 'ttdr') },
+      { id: 'pts', label: 'Pontos', has: K('ttpt', 'ttph', 'ttgt', 'ttgh', 'ttgp', 'ttmp', 'ttoe', 'ttrt') },
+    ];
+  }
+  if (ev.sport === 'mma') {
+    return [all,
+      { id: 'pop', label: 'Principais', has: K('ml', 'fmov') },
+      { id: 'rounds', label: 'Rounds', has: K('total', 'fround', 'fdist') },
+    ];
+  }
   if (ev.sport === 'soccer') {
     return [all,
       { id: 'pop', label: 'Principais', has: K('ml', 'dc', 'dnb', 'btts') },
@@ -961,7 +974,7 @@ function renderEvent() {
 /* Estatísticas ao vivo (vêm da fonte pelo servidor, já traduzidas): parciais por período/set/mapa e barras casa x fora */
 function statsPanel(ev) {
   const st = ev.state === 'in' ? ev.stats : null;
-  if (!st || (!st.rows?.length && !st.periods)) return '';
+  if (!st || (!st.rows?.length && !st.periods && !st.players)) return '';
   let html = `<div class="section-head" style="margin-top:16px"><h2 style="font-size:16px">Estatísticas ao vivo</h2></div><div class="live-stats">`;
   const p = st.periods;
   if (p && p.labels?.length) {
@@ -976,13 +989,29 @@ function statsPanel(ev) {
     html += `<div class="ls-row"><div class="ls-vals"><b>${fmt(h)}</b><span>${esc(label)}</span><b>${fmt(a)}</b></div>` +
       `<div class="ls-bar"><i style="width:${wh}%"></i><i style="width:${100 - wh}%"></i></div></div>`;
   }
-  return html + '</div>';
+  return html + '</div>' + playersPanel(ev, st.players);
+}
+/* Basquete: pontos, rebotes e assistências de cada jogador ao vivo; a barra cresce com os pontos (o maior do jogo = cheia) */
+function playersPanel(ev, P) {
+  if (!P) return '';
+  const all = [...(P.home || []), ...(P.away || [])];
+  const top = Math.max(10, ...all.map((x) => x.p));
+  const team = (t, list) => !list?.length ? '' : `<div class="lp-team">${crest(t)}<b>${esc(t.short || t.name)}</b><span class="lp-h">PTS · REB · AST</span></div>` +
+    list.map((x) => `<div class="lp-row"><div class="lp-vals"><span class="lp-n">${x.on ? '<i class="lp-on" title="Em quadra"></i>' : ''}${esc(x.n)}</span>` +
+      `<b>${x.p}</b><span>${x.r}</span><span>${x.a}</span></div><div class="trk-bar"><i style="width:${Math.round((100 * x.p) / top)}%"></i></div></div>`).join('');
+  return `<div class="section-head" style="margin-top:16px"><h2 style="font-size:16px">Jogadores ao vivo</h2></div><div class="live-stats lp">${team(ev.home, P.home)}${team(ev.away, P.away)}</div>`;
 }
 
 /* ---------------- render: apostas ---------------- */
 /* Acompanhamento da seleção, como na bet365: quantos já há (cur) e o número que a decide (need).
    "Mais de 2.5 escanteios" com 1 → 1/3 (33%); "Menos de" perde ao chegar a need. null = mercado sem contagem. */
 function legTrack(l, ev) {
+  if (l.market === 'bp') { // basquete: pontos/rebotes/assistências do jogador, a crescer ao vivo
+    const get = BP_FIELD[String(l.per ?? '').split('|')[0]], n = bpNeed(l);
+    const p = ev && ev.state !== 'pre' && get && n && ev.track?.bp ? bpPlayer(l, ev.track.bp) : null;
+    const v = p ? get(p) : null;
+    return Number.isFinite(v) ? { cur: v, need: n.need, under: n.under } : null;
+  }
   if (!ev || ev.sport !== 'soccer' || ev.state === 'pre') return null;
   const T = ev.track || {};
   const sc = [ev.home.score, ev.away.score];

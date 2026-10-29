@@ -143,4 +143,109 @@ async function shootout(ev) {
   return null;
 }
 
-module.exports = { extraTime, shootout };
+/* Box score do basquete (NBA/WNBA), reserva da MoviOdds para os mercados de jogadores.
+   fin = placar final do site [c, f] → [{ key, side, played, pts, reb, ast, tpm, stl, blk }] (lados do site), ou null
+   se o jogo não estiver terminado na ESPN, se o placar não bater certo ou se os pontos dos jogadores não somarem o placar. */
+async function basketBox(ev, fin, bpKey) {
+  if (OFF) return null;
+  const slug = ESPN_LEAGUE[ev.league];
+  if (!slug || !/^basketball\/(nba|wnba)$/.test(slug)) return null;
+  const t = +ev.date;
+  for (const day of [0, -1, 1].map((d) => new Date(t + d * 86400000).toISOString().slice(0, 10).replace(/-/g, ''))) {
+    let list;
+    try { list = await scoreboard(slug, day); } catch { continue; }
+    for (const e of list) {
+      const c = e.competitions?.[0];
+      if (!c || Math.abs(Date.parse(c.date || e.date) - t) > 6 * 3600000) continue;
+      const H = c.competitors?.find((x) => x.homeAway === 'home'), A = c.competitors?.find((x) => x.homeAway === 'away');
+      if (!H || !A) continue;
+      let swap;
+      if (same(ev.home.name, H.team?.displayName) && same(ev.away.name, A.team?.displayName)) swap = false;
+      else if (same(ev.home.name, A.team?.displayName) && same(ev.away.name, H.team?.displayName)) swap = true;
+      else continue;
+      if (!c.status?.type?.completed) return null;
+      const r = await fetch(`${BASE}${slug}/summary?event=${encodeURIComponent(e.id)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const out = [];
+      for (const tm of d.boxscore?.players || []) {
+        const espnHome = String(tm.team?.id) === String(H.team?.id), espnAway = String(tm.team?.id) === String(A.team?.id);
+        if (!espnHome && !espnAway) return null;
+        const side = espnHome !== swap ? 'home' : 'away';
+        const s = tm.statistics?.[0];
+        const ix = (k) => (s?.keys || []).indexOf(k);
+        const iP = ix('points'), iR = ix('rebounds'), iA = ix('assists'), i3 = ix('threePointFieldGoalsMade-threePointFieldGoalsAttempted'), iS = ix('steals'), iB = ix('blocks'), iM = ix('minutes');
+        if ([iP, iR, iA, i3, iS, iB].some((i) => i < 0)) return null;
+        for (const x of s.athletes || []) {
+          const n = x.athlete?.displayName;
+          if (!n) continue;
+          const v = (i) => (x.didNotPlay || !x.stats?.length ? 0 : parseInt(String(x.stats[i]).split('-')[0], 10));
+          const o = { key: bpKey(n), name: n, side, pts: v(iP), reb: v(iR), ast: v(iA), tpm: v(i3), stl: v(iS), blk: v(iB), min: v(iM) };
+          o.played = !x.didNotPlay && ((o.min || 0) > 0 || [o.pts, o.reb, o.ast, o.stl, o.blk].some((y) => y > 0));
+          if ([o.pts, o.reb, o.ast, o.tpm, o.stl, o.blk].some((y) => !Number.isFinite(y))) return null;
+          out.push(o);
+        }
+      }
+      const sum = (sd) => out.filter((p) => p.side === sd).reduce((q, p) => q + p.pts, 0);
+      return out.length && sum('home') === fin[0] && sum('away') === fin[1] ? out : null;
+    }
+  }
+  return null;
+}
+
+/* Hóquei (NHL): marcadores para os mercados de jogadores. goals = gols de cada equipa sem os pênaltis [c, f].
+   → { players: [{ key, side, goals }] (quem foi a jogo), order: [{ key, side }] (gols pela ordem, com prorrogação) }
+   ou null se o jogo não estiver terminado, se não bater com o placar ou se faltar algum marcador. */
+async function hockeyGoals(ev, goals, bpKey) {
+  if (OFF) return null;
+  const slug = ESPN_LEAGUE[ev.league];
+  if (slug !== 'hockey/nhl') return null;
+  const t = +ev.date;
+  for (const day of [0, -1, 1].map((d) => new Date(t + d * 86400000).toISOString().slice(0, 10).replace(/-/g, ''))) {
+    let list;
+    try { list = await scoreboard(slug, day); } catch { continue; }
+    for (const e of list) {
+      const c = e.competitions?.[0];
+      if (!c || Math.abs(Date.parse(c.date || e.date) - t) > 6 * 3600000) continue;
+      const H = c.competitors?.find((x) => x.homeAway === 'home'), A = c.competitors?.find((x) => x.homeAway === 'away');
+      if (!H || !A) continue;
+      let swap;
+      if (same(ev.home.name, H.team?.displayName) && same(ev.away.name, A.team?.displayName)) swap = false;
+      else if (same(ev.home.name, A.team?.displayName) && same(ev.away.name, H.team?.displayName)) swap = true;
+      else continue;
+      if (!c.status?.type?.completed) return null;
+      const r = await fetch(`${BASE}${slug}/summary?event=${encodeURIComponent(e.id)}`, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+      if (!r.ok) return null;
+      const d = await r.json();
+      const sideOf = (id) => (String(id) === String(H.team?.id) ? (swap ? 'away' : 'home') : String(id) === String(A.team?.id) ? (swap ? 'home' : 'away') : null);
+      const players = [];
+      for (const tm of d.boxscore?.players || []) {
+        const side = sideOf(tm.team?.id);
+        if (!side) return null;
+        for (const s of tm.statistics || []) {
+          const iG = (s.keys || []).indexOf('goals');
+          for (const x of s.athletes || []) {
+            const n = x.athlete?.displayName;
+            if (!n || x.didNotPlay) continue;
+            players.push({ key: bpKey(n), side, goals: iG >= 0 ? parseInt(x.stats?.[iG], 10) || 0 : 0 });
+          }
+        }
+      }
+      const order = [];
+      for (const p of d.plays || []) {
+        if (!p.scoringPlay) continue;
+        if (/shootout/i.test(`${p.type?.text} ${p.period?.displayValue}`) || p.shootoutPlay) continue;
+        const sc = (p.participants || []).find((x) => x.type === 'scorer')?.athlete?.displayName;
+        const side = sideOf(p.team?.id);
+        if (!sc || !side) return null;
+        order.push({ key: bpKey(sc), side });
+      }
+      const cnt = (sd) => order.filter((x) => x.side === sd).length, pg = (sd) => players.filter((x) => x.side === sd).reduce((q, x) => q + x.goals, 0);
+      if (cnt('home') !== goals[0] || cnt('away') !== goals[1] || pg('home') !== goals[0] || pg('away') !== goals[1]) return null;
+      return { players, order };
+    }
+  }
+  return null;
+}
+
+module.exports = { extraTime, shootout, basketBox, hockeyGoals };

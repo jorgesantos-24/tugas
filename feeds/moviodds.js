@@ -17,6 +17,11 @@ const WS = require('./moviows.js'); // odds e placar ao vivo empurrados (WebSock
 const STATS = require('./stats.js'); // estatísticas ao vivo (página do jogo)
 const PARTS = require('./parts.js'); // placar de cada parte (tempos, quartos, períodos, mapas) a partir das estatísticas
 const PLAYERS = require('./players.js'); // futebol: mercados de jogadores (cobertura por liga, estatísticas por jogador)
+const BP = require('./bplayers.js'); // basquete: mercados de jogadores (box score)
+const ESPN = require('./espn.js'); // box score do basquete (NBA/WNBA) e marcadores da NHL
+const HG = require('./hgoals.js'); // hóquei: marcadores (NHL) e ordem dos gols
+const FIGHTS = require('./fights.js'); // MMA: resultado das lutas (MoviOdds + ESPN)
+const TT = require('./tabletennis.js'); // tênis de mesa: mercados e resultado (placar de cada set)
 // competições a eliminar: um empate aos 90' pode ter prolongamento (as apostas de jogadores esperam pela ESPN)
 const KNOCKOUT = new Set(['bra.copa', 'conmebol.lib', 'conmebol.sud', 'uefa.ucl', 'uefa.uel', 'uefa.uecl', 'eng.efl', 'esp.copa', 'ger.copa']);
 // último estado de cada jogo vindo dos pedidos normais (equipas, liga, hora, relógio): o WebSocket só traz odds e estatísticas
@@ -32,10 +37,10 @@ function scoreFromStats(sport, st) {
   return key && Number.isFinite(h[key]) && Number.isFinite(a[key]) ? `${h[key]}-${a[key]}` : null;
 }
 // modalidade no site → nome na MoviOdds
-const SRC_SPORT = { soccer: 'soccer', basketball: 'basketball', tennis: 'tennis', hockey: 'ice_hockey', esports: 'esports' };
+const SRC_SPORT = { soccer: 'soccer', basketball: 'basketball', tennis: 'tennis', hockey: 'ice_hockey', mma: 'mma', tabletennis: 'table_tennis', esports: 'esports' };
 const SPORTS = Object.keys(SRC_SPORT);
 // modalidades organizadas por torneio (cada torneio é um campeonato do site)
-const BY_TOURNAMENT = { tennis: 'ten.', esports: 'es.' };
+const BY_TOURNAMENT = { tennis: 'ten.', esports: 'es.', mma: 'mma.', tabletennis: 'tt.' };
 
 // campeonato do site a partir do nome na MoviOdds ("src" exato, ou "re" para vários torneios do ténis)
 /* Ténis: cada torneio é um campeonato próprio ("ATP Basel"), a seguir ao seu circuito.
@@ -45,6 +50,7 @@ const DOUBLES = { MD: 'Duplas', WD: 'Duplas', XD: 'Duplas Mistas' };
 function tournament(circuit, srcName, sport) {
   let name = String(srcName).trim();
   if (sport === 'esports') name = name.replace(/^[A-Z0-9]+ - /, ''); // "CS2 - PGL Bucharest" → "PGL Bucharest" (o jogo vai no circuito)
+  else if (sport === 'mma') name = name.replace(/ - /, ': ').replace(/ vs\.? /g, ' x '); // "UFC 334 - Gane vs Hokit" → "UFC 334: Gane x Hokit"
   else { const m = /^(.*\S)\s+(MD|WD|XD)$/.exec(name); if (m) name = `${m[1]} (${DOUBLES[m[2]]})`; }
   const id = sport === 'esports' ? `${circuit.key} ${name}` : name; // e-Sports: o mesmo torneio pode existir em dois jogos
   return M.addLeague({ key: BY_TOURNAMENT[sport] + slug(id), name, country: circuit.name, sport, order: circuit.order + 0.5 });
@@ -128,8 +134,8 @@ const NAMED = {
   // ténis: ver feeds/tennis.js
 };
 // quantas seleções um mercado precisa para valer (com uma a menos, sai do site)
-const NEED = { soccer: { ml: 3, dc: 3, dnb: 2, btts: 2 }, basketball: { ml: 2 }, hockey: { ml: 2, mlr: 3, dcr: 3 }, tennis: { ml: 2 } };
-const MARKET_ORDER = ['ml', 'mlr', 'dc', 'dcr', 'dnb', 'btts', 'set1', 'total', 'spread', 'sets', 'tsets', 'sspread', 'gspread', 'gtotal', 'cs'];
+const NEED = { soccer: { ml: 3, dc: 3, dnb: 2, btts: 2 }, basketball: { ml: 2 }, hockey: { ml: 2, mlr: 3, dcr: 3 }, tennis: { ml: 2 }, mma: { ml: 2, fdist: 2 }, tabletennis: { ml: 2 } };
+const MARKET_ORDER = ['ml', 'mlr', 'dc', 'dcr', 'dnb', 'btts', 'set1', 'fmov', 'fround', 'fdist', 'total', 'spread', 'sets', 'tsets', 'sspread', 'gspread', 'gtotal', 'cs'];
 
 const STALE_LIVE_MS = 60000; // ao vivo: odds lidas há mais de 1 min ficam bloqueadas
 
@@ -254,6 +260,54 @@ function esportsQuote(q, m) {
   return null;
 }
 
+/* MMA (UFC): só mercados que se liquidam sozinhos com o resultado da luta (vencedor, método, round e tempo).
+   Fica de fora o "Spread" das Fight Lines (não se sabe ao certo o que conta) e tudo o que a regra não conheça. */
+function fightQuote(q, m) {
+  const who = (name) => (name === m.home ? 'home' : name === m.away ? 'away' : null);
+  const g = String(q.group_name ?? '').trim(), line = String(q.line ?? '').trim();
+  let x;
+  if ((g === 'Game' || g === 'Fight Lines') && line === 'To Win') return { k: 'ml', pick: who(q.side) };
+  if ((g === 'Fight Lines' && line === 'Total') || g === 'Total Rounds') {
+    const n = num(q.handicap ?? (g === 'Total Rounds' ? q.line : q.label));
+    // linhas de meio round (1.5, 2.5): uma linha inteira podia acabar "exatamente" nela
+    return Math.abs(n % 1) === 0.5 ? { k: 'total', pick: /^over$/i.test(q.side) ? 'over' : /^under$/i.test(q.side) ? 'under' : null, line: n } : null;
+  }
+  if (g === 'Method of Victory') {
+    if (!q.side && /^draw/i.test(line)) return { k: 'fmov', pick: 'draw' };
+    const w = who(q.side);
+    const how = /^by decision or technical decision$/i.test(line) ? 'dec' : /^by ko, tko or dq$/i.test(line) ? 'kodq' : /^by submission$/i.test(line) ? 'sub' : null;
+    return w && how ? { k: 'fmov', pick: `${w}:${how}` } : null;
+  }
+  if (g === 'Round Betting') {
+    if (!q.side && /^draw/i.test(line)) return { k: 'fround', pick: 'draw' };
+    const w = who(q.side);
+    if (!w) return null;
+    if (/^decision( or technical decision)?$/i.test(line)) return { k: 'fround', pick: `${w}:dec` };
+    return (x = /^Rd (\d)$/.exec(line)) ? { k: 'fround', pick: `${w}:r${x[1]}` } : null;
+  }
+  if (g === 'Fight to Go the Distance') { const y = String(q.label ?? '').trim(); return /^yes$/i.test(y) ? { k: 'fdist', pick: 'yes' } : /^no$/i.test(y) ? { k: 'fdist', pick: 'no' } : null; }
+  return null;
+}
+
+/* MMA: odds que dariam lucro garantido cruzando mercados. Todas as formas de um lutador ganhar (método de vitória, ou
+   round da vitória) equivalem a "ele ganha": com o vencedor do outro lado, as probabilidades têm de somar mais de 100%
+   (o empate fica de fora dos dois). Se não, esse mercado sai do site até a fonte corrigir. */
+function guardFight(byK) {
+  const ml = byK.get('ml');
+  if (!ml || ml.sels.length !== 2) return;
+  for (const k of ['fmov', 'fround']) {
+    const mk = byK.get(k);
+    if (!mk) continue;
+    for (const side of ['home', 'away']) {
+      const ways = mk.sels.filter((x) => x.pick.startsWith(side + ':'));
+      const other = ml.sels.find((x) => x.pick !== side);
+      // só se o mercado tiver todas as formas desse lutador (método: 3; round: os rounds + decisão)
+      const full = k === 'fmov' ? ways.length === 3 : ways.some((x) => x.pick.endsWith(':dec')) && ways.length >= 4;
+      if (other && full && ways.reduce((p, x) => p + 1 / x.odds, 0) + 1 / other.odds < 1) for (const x of mk.sels) x.guard = true;
+    }
+  }
+}
+
 // futebol: os mercados da equipa (todos os grupos) vêm num pedido completo mais espaçado; guardam-se entre pedidos
 const soccerExtras = new Map(); // id do jogo → { markets, at }
 const EXTRA_PRE_MS = 15 * 60000, EXTRA_LIVE_MS = 60000; // depois disto: antes do jogo saem, ao vivo ficam bloqueados
@@ -281,7 +335,14 @@ function toEvent(m0, serverNow, sport, full = true) {
   const kick = Date.parse(m.kickoff_utc);
   const xs = live ? STATS.build(sport, st, m) : null; // estatísticas no formato da página do jogo
   let score = null, clock;
-  if (live) {
+  if (live && sport === 'mma') clock = 'Luta a decorrer'; // sem placar: a fonte não dá nada durante a luta
+  else if (live && sport === 'tabletennis') { // "11-7,13-11,7-11": sets acabados no placar, o set a meio no relógio
+    const gs = String(m.score || '').split(',').map((x) => parseScore(x)).filter(Boolean);
+    const fin = gs.filter(TT.okGame), cur = gs.length && !TT.okGame(gs[gs.length - 1]) ? gs[gs.length - 1] : null;
+    score = [fin.filter(([x, y]) => x > y).length, fin.filter(([x, y]) => y > x).length];
+    clock = cur ? `${gs.length}º set · ${cur[0]}-${cur[1]}` : 'Ao vivo';
+  }
+  else if (live) {
     if (sport === 'tennis') { const t = tennisLive(m.score); score = [t.h, t.a]; clock = t.clock; }
     else {
       score = parseScore(m.score) || parseScore(String(m.score || '').split(',').pop()) || [0, 0];
@@ -296,9 +357,10 @@ function toEvent(m0, serverNow, sport, full = true) {
   const gs = m.group_status || {};
   const byK = new Map();
   const mainSel = new WeakSet(), conflict = new Set(); // seleções do mercado principal · com duas odds diferentes na fonte
-  const specific = (q) => (sport === 'soccer' ? soccerQuote(q, m) : sport === 'tennis' ? TEN.quote(q, m) : sport === 'esports' ? esportsQuote(q, m) : namedQuote(q, m, sport));
+  const specific = (q) => (sport === 'soccer' ? soccerQuote(q, m) : sport === 'tennis' ? TEN.quote(q, m) : sport === 'esports' ? esportsQuote(q, m) : sport === 'mma' ? fightQuote(q, m) : sport === 'tabletennis' ? TT.quote(q, m) : namedQuote(q, m, sport));
   const ctx = `${sport}|${m.home}|${m.away}|${m.league}|${live ? 1 : 0}`;
-  for (const q of m.quotes || []) {
+  // MMA: apostas só antes do início (a fonte não dá nada durante a luta); tênis de mesa ao vivo: feeds/tabletennis.js
+  for (const q of live && sport === 'mma' ? [] : m.quotes || []) {
     // a leitura de cada cotação só depende dela e das equipas/liga: fica guardada enquanto a cotação não mudar
     // (pelo WebSocket, uma cotação que não mudou é o mesmo objeto de uma reconstrução para a outra)
     let c = quoteCache.get(q);
@@ -306,7 +368,8 @@ function toEvent(m0, serverNow, sport, full = true) {
       let s = specific(q);
       // sem regra automática (ou cotação que a regra não aceitou): mercado da equipa
       // ténis: só mercados com liquidação automática — o resto (próxima quebra, handicaps ao vivo, dados incompletos) não se oferece
-      if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = (sport === 'soccer' && SOCCER_GROUPS[q.group_id]) || sport === 'tennis' ? null : GEN.quote(q, m, sport);
+      // MMA: também só mercados automáticos (o resultado de uma luta não tem mais nada para a equipa decidir)
+      if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = (sport === 'soccer' && SOCCER_GROUPS[q.group_id]) || sport === 'tennis' || sport === 'mma' || sport === 'tabletennis' ? null : GEN.quote(q, m, sport);
       if (!s || !s.pick || ('line' in s && !isFinite(s.line))) s = null;
       c = { ctx, s };
       quoteCache.set(q, c);
@@ -315,6 +378,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (!s) continue;
     // jogadores: só abre se a fonte traz essa estatística nesta liga (ou, sem histórico, se o jogo ao vivo já traz jogadores)
     // ao vivo numa liga sem cobertura: só se os jogadores ao vivo trazem titular/entrou (senão não se sabe quem jogou)
+    if (s.k === 'bp' && !BP.LEAGUES.has(lg.key)) continue; // basquete: só ligas com box score garantido
+    if (s.k === 'hgs' && !HG.LEAGUES.has(lg.key)) continue; // hóquei: marcadores só na NHL (a ESPN diz quem jogou)
     if (s.k === 'pp' && !PLAYERS.covered(lg.key, s.per.split('|')[0]) && !(live && PLAYERS.hasLineup(WS.stats(m.id)?.players || []))) continue;
     // escanteios, cartões e 1º/2º tempo: só abre se a fonte costuma trazer esse dado nesta liga (ou o jogo ao vivo já o traz)
     if (sport === 'soccer' && s.k !== 'pp') {
@@ -362,14 +427,14 @@ function toEvent(m0, serverNow, sport, full = true) {
   // irmãos (feeds/tennis.js guardTennis, feeds/guard-soccer.js). As marcadas saem do site e voltam quando a fonte corrigir.
   {
     if (sport === 'tennis') TEN.guardTennis(byK, !!live);
-    else { TEN.guardOverround(byK); if (sport === 'soccer') GUARD_SOCCER.guardSoccer(byK); }
+    else { TEN.guardOverround(byK); if (sport === 'soccer') GUARD_SOCCER.guardSoccer(byK); if (sport === 'mma') guardFight(byK); }
     for (const [key, mk] of byK) {
       const out = mk.sels.filter((x) => x.guard);
       if (!out.length) continue;
       guardRemoved.push(`${new Date(serverNow).toISOString()} [${live ? 'ao vivo' : 'pré'}] ${m.home} x ${m.away} ${mk.k}${mk.per ? ' ' + mk.per : ''}: ${out.map((x) => `${x.pick}${x.line != null ? '(' + x.line + ')' : ''}@${x.odds}`).join(' ')}`);
       if (guardRemoved.length > 300) guardRemoved.splice(0, guardRemoved.length - 300);
       mk.sels = mk.sels.filter((x) => !x.guard);
-      if ((mk.sels.length < 2 && !['tace', 'tdf', 'pp', 'x'].includes(mk.k)) || (mk.k === 'ml' && sport === 'soccer' && mk.sels.length !== 3)) byK.delete(key);
+      if ((mk.sels.length < 2 && !['tace', 'tdf', 'pp', 'bp', 'hgs', 'x'].includes(mk.k)) || (mk.k === 'ml' && sport === 'soccer' && mk.sels.length !== 3)) byK.delete(key);
     }
   }
   const markets = sport === 'tennis' ? [...byK.values()].filter((mk) => mk.k !== 'x' && !M.SOURCE_KINDS.has(mk.k)).sort(TEN.marketSort)
@@ -400,7 +465,7 @@ function toEvent(m0, serverNow, sport, full = true) {
     // ténis: pontos do game e quem serve (aparecem na lista); o resto só na página do jogo
     if (xs.point) ev.point = xs.point;
     if (xs.serve) ev.serve = xs.serve;
-    if (xs.rows.length || xs.periods) ev.stats = { rows: xs.rows, ...(xs.periods ? { periods: xs.periods } : {}) };
+    if (xs.rows.length || xs.periods || xs.players) ev.stats = { rows: xs.rows, ...(xs.periods ? { periods: xs.periods } : {}), ...(xs.players ? { players: xs.players } : {}) };
   }
   return ev;
 }
@@ -505,12 +570,47 @@ function tennisRetired(r) {
   if (!ex.log) return null; // sem histórico coerente não se sabe o que se jogou
   return { done: true, retired: true, need, h, a, sets, ...ex };
 }
-async function fetchResult(id, sport = 'soccer') {
+async function fetchResult(id, sport = 'soccer', ev = null) {
   // stats=1: estatísticas do fim do jogo (ténis: histórico de games; outros: parciais certos, escanteios)
-  const d = await get(`/results?sport=${SRC_SPORT[sport] || sport}&fi=${encodeURIComponent(id)}&stats=1`);
+  const d = await get(`/results?sport=${SRC_SPORT[sport] || sport}&fi=${encodeURIComponent(id)}${sport === 'mma' ? '' : '&stats=1'}`);
   const r = (d.results || []).find((x) => String(x.fixture_id) === String(id));
-  return r ? parseResult(r, sport) : null;
+  // MMA: a MoviOdds primeiro, a ESPN de reserva (feeds/fights.js); sem a luta do site (nomes e data) não se procura
+  // tênis de mesa: o placar de cada set; sem registo nenhum 12 h depois do início → não se jogou (devolvida)
+  if (sport === 'tabletennis') {
+    const at = ev ? +new Date(ev.date) : NaN;
+    if (!r) return Number.isFinite(at) && Date.now() - at > 12 * 3600000 ? { done: true, h: 0, a: 0, sets: [], tt: true, cancelled: true, finishedAt: null, note: 'sem registo na MoviOdds 12 h depois: não se jogou' } : null;
+    const t = TT.result(r, Number.isFinite(at) ? at : Date.parse(r.finished_at) || Date.now());
+    return t.done ? { ...t, finishedAt: Date.parse(r.finished_at) || null, note: r.note || (t.incomplete ? 'partida não terminada: vale o que se jogou' : null) } : t;
+  }
+  if (sport === 'mma') { if (!ev) return null; const f = await FIGHTS.result(r, ev); return f && f.done ? { ...f, finishedAt: Date.parse(r?.finished_at) || null, note: r?.note || null } : f; }
+  const out = r ? parseResult(r, sport) : null;
+  if (sport === 'basketball' && out?.done && !out.bp) return basketBox(out, id, ev);
+  if (sport === 'hockey' && out?.done && ev && HG.LEAGUES.has(ev.league)) return hockeyGoals(out, ev);
+  return out;
 }
+/* Basquete: o box score oficial (ESPN, NBA/WNBA) para os mercados de jogadores. O da MoviOdds só serve para o
+   acompanhamento ao vivo: mesmo quando os pontos somam o placar, falha rebotes/assistências (27/10: Antetokounmpo 15
+   rebotes na MoviOdds, 14 no oficial). Sem a ESPN, espera até 30 min depois do fim; a seguir paga o resto e os
+   jogadores ficam para a equipa. */
+async function basketBox(out, id, ev) {
+  if (!ev || !BP.LEAGUES.has(ev.league)) return out;
+  const fin = [out.h, out.a];
+  let espn = null;
+  try { espn = await ESPN.basketBox(ev, fin, M.bpKey); } catch (e) { console.error(`[Box score] ${ev.home?.name} x ${ev.away?.name}: ${e.message}`); }
+  if (espn) return { ...out, bp: slimBox(espn) };
+  return Date.now() - (out.finishedAt || +new Date(ev.date) + 3 * 3600000) < 30 * 60000 ? null : out;
+}
+/* Hóquei (NHL): marcadores da ESPN. Sem eles, espera até 30 min depois do fim; a seguir paga o resto e os
+   marcadores ficam para a equipa. */
+async function hockeyGoals(out, ev) {
+  const goals = [out.h, out.a];
+  if (out.so && out.h !== out.a) goals[out.h > out.a ? 0 : 1]--; // o gol decisivo dos pênaltis não é de ninguém
+  let hg = null;
+  try { hg = await ESPN.hockeyGoals(ev, goals, M.bpKey); } catch (e) { console.error(`[Marcadores] ${ev.home?.name} x ${ev.away?.name}: ${e.message}`); }
+  if (hg) return { ...out, hg };
+  return Date.now() - (out.finishedAt || +new Date(ev.date) + 3 * 3600000) < 30 * 60000 ? null : out;
+}
+const slimBox = (list) => list.map(({ key, side, played, pts, reb, ast, tpm, stl, blk }) => ({ key, side, played, pts, reb, ast, tpm, stl, blk }));
 // lê um resultado já descarregado (também usado pelos testes: scripts/testar-mercados.js)
 function parseResult(r, sport) {
   const extra = { finishedAt: Date.parse(r.finished_at) || null, note: r.note || null };
@@ -576,8 +676,11 @@ function parseResult(r, sport) {
     const rp = per(/^Period [123]$/);
     if (![1, 2, 3].every((i) => parts[`p${i}`] && rp[i - 1] && parts[`p${i}`].join() === rp[i - 1].join())) for (const k of ['p1', 'p2', 'p3']) delete parts[k];
     // nos pênaltis o gol decisivo não vem na fonte: o vencedor conta +1 gol, mas não se sabe qual
-    if (so && fin[0] === fin[1]) return { done: true, h: fin[0], a: fin[1], reg, parts, alts: [[fin[0] + 1, fin[1]], [fin[0], fin[1] + 1]], ...extra };
-    return { done: true, h: fin[0], a: fin[1], reg, parts, ...extra };
+    // ordem dos gols (quem marca o 1º, o último, o N-ésimo): da cronologia, se estiver completa
+    const gorder = HG.goalOrder(r, r.home, r.away, fin, so);
+    const go = gorder ? { gorder, greg: reg[0] + reg[1] } : {};
+    if (so && fin[0] === fin[1]) return { done: true, h: fin[0], a: fin[1], reg, parts, so: true, alts: [[fin[0] + 1, fin[1]], [fin[0], fin[1] + 1]], ...go, ...extra };
+    return { done: true, h: fin[0], a: fin[1], reg, parts, ...(so ? { so: true } : {}), ...go, ...extra };
   }
   return NOPE('modalidade sem regras de liquidação');
 }

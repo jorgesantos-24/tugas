@@ -1,5 +1,7 @@
 'use strict';
 const AUTO = require('./auto.js'); // mercados por parte do jogo com liquidação automática
+const BP = require('./bplayers.js'); // basquete: mercados de jogadores
+const HG = require('./hgoals.js'); // hóquei: marcadores
 const PLAYERS = require('./players.js'); // futebol: mercados de jogadores
 const ET = require('./extratime.js'); // futebol: prolongamento e penáltis
 /* Mercados "liquidados pela equipa": tudo o que a fonte oferece e que o site ainda não sabe decidir sozinho pelo
@@ -125,6 +127,20 @@ function quote(q, m, sport) {
     k: 'x', per: String(q.group_id), pick: String(q.sel_id || `${q.market_id}:${q.label}:${q.side}:${q.line}`),
     name: selName(q, m), mname: tr(q.group_name), cat: catOf(sport, String(q.group_name)),
   };
+  // basquete: jogadores liquidados com o box score (feeds/bplayers.js); os que não dá para liquidar não abrem
+  if (sport === 'basketball') {
+    const bp = BP.quote(q, m);
+    if (bp) return { ...gen, ...bp };
+    if (BP.isPlayerGroup(q.group_name)) return null;
+  }
+  // hóquei: marcadores liquidados com a ESPN (NHL, feeds/hgoals.js); os outros grupos de marcadores não abrem
+  if (sport === 'hockey') {
+    const hg = HG.quote(q, m);
+    if (hg) return { ...gen, ...hg };
+    if (HG.isScorerGroup(q.group_name)) return null;
+  }
+  // hóquei: "primeiros 10 minutos" não se oferecem (a fonte não dá o minuto certo de cada gol)
+  if (sport === 'hockey' && /^1st 10 Minutes?(\s|$)/i.test(String(q.group_name ?? ''))) return null;
   // tempos, quartos, períodos, escanteios, rondas: com regra de liquidação (feeds/auto.js) deixam de ir para a equipa
   const s = AUTO.apply(gen, q, m, sport);
   if (sport !== 'soccer' || s.k !== 'x') return s;

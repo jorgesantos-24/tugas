@@ -100,7 +100,7 @@ function finishedParts(sport, st, score, { live = false, overtime = false } = {}
       // 2º tempo inclui a prorrogação (regra da bet365 no basquete); o 4º quarto não
       if (!live && n === 4 && score) {
         const s4 = reg.reduce((s, p) => [s[0] + p[0], s[1] + p[1]], [0, 0]);
-        if (s4[0] <= score[0] && s4[1] <= score[1]) out.h2 = [score[0] - out.h1[0], score[1] - out.h1[1]];
+        if (s4[0] <= score[0] && s4[1] <= score[1]) { out.h2 = [score[0] - out.h1[0], score[1] - out.h1[1]]; out.reg = s4; } // reg = tempo regulamentar (sem prorrogação)
         else for (const k of ['q1', 'q2', 'q3', 'q4', 'h1']) delete out[k]; // não bate com o final: nada por partes
       }
     }

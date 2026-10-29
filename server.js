@@ -43,7 +43,7 @@ const FAST_MS = 5000, SLOW_MS = 60000; // ao vivo: 5 s (só os jogos a decorrer)
 /* Espera antes de aceitar uma aposta / cash out ao vivo, por modalidade (segundos). Cobre o tempo entre o lance
    acontecer e a bet365 suspender o mercado (+ ~1-2 s até chegar cá). Ajustável no .env: LIVE_DELAY_SOCCER=8 ...
    Com várias modalidades no mesmo boletim vale a maior. Mínimo 3 s. */
-const LIVE_DELAY_DEFAULT = { soccer: 8, hockey: 8, tennis: 6, basketball: 5, esports: 5 };
+const LIVE_DELAY_DEFAULT = { soccer: 8, hockey: 8, tennis: 6, basketball: 5, esports: 5, tabletennis: 6 };
 const LIVE_DELAYS = Object.fromEntries(Object.entries(LIVE_DELAY_DEFAULT).map(([k, v]) => {
   const n = Number(process.env[`LIVE_DELAY_${k.toUpperCase()}`]);
   return [k, Math.max(3, Number.isFinite(n) && n > 0 ? n : v)];
@@ -452,7 +452,7 @@ async function checkResults() {
   const want = new Map();
   for (const ev of events.values()) if (ev.awaiting && ev.state !== 'post') want.set(ev.id, null);
   for (const b of pendingRows()) for (const l of b.legs) {
-    if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || l.league?.startsWith('ten.') || l.league?.startsWith('fut.'))) want.set(l.evId, l);
+    if (!l.result && l.feed === 'moviodds' && !events.has(l.evId) && t - l.startsAt > 100 * 60000 && (M.LEAGUE_BY_KEY[l.league] || /^(ten|fut|mma|tt)\./.test(l.league || ''))) want.set(l.evId, l);
   }
   // primeiro os jogos com apostas em aberto, depois os que foram perguntados há mais tempo
   // (senão os primeiros 20 da lista, que às vezes nunca recebem resultado, ocupavam sempre a vez)
@@ -466,7 +466,8 @@ async function checkResults() {
     if (++asked > 40) break;
     resultTried.set(id, t);
     let r;
-    try { r = await FEED.fetchResult(id, ev0 ? ev0.sport : leg.sport || 'soccer'); } catch (e) { console.error(`[Resultados] ${id}: ${e.message}`); continue; }
+    // MMA: a luta (nomes e data) serve para a procurar na ESPN
+    try { r = await FEED.fetchResult(id, ev0 ? ev0.sport : leg.sport || 'soccer', ev0 || (['mma', 'tabletennis', 'basketball', 'hockey'].includes(leg.sport) ? stubFromLeg(leg) : null)); } catch (e) { console.error(`[Resultados] ${id}: ${e.message}`); continue; }
     if (!r) continue;
     const ev = ev0 || stubFromLeg(leg);
     if (!ev0) { events.set(id, ev); changed = true; }
@@ -614,7 +615,7 @@ function liveSnapshot(evIds) {
   const snap = new Map();
   for (const id of evIds) {
     const ev = events.get(id);
-    if (ev && ev.state === 'in') snap.set(id, { h: ev.home.score, a: ev.away.score, state: ev.state, period: ev.period ?? null });
+    if (ev && ev.state === 'in') snap.set(id, { h: ev.home.score, a: ev.away.score, state: ev.state, period: ev.period ?? null, clock: ev.clock });
   }
   return snap;
 }
@@ -637,6 +638,8 @@ function liveChanged(snap, t0) {
     if (!ev || ev.state !== s.state) return 'o jogo mudou de estado durante a aprovação';
     if (M.GOAL_SPORTS.has(ev.sport) && (ev.home.score !== s.h || ev.away.score !== s.a || (ev.goalAt && ev.goalAt >= t0))) return 'houve gol durante a aprovação';
     if (ev.manual && (ev.home.score !== s.h || ev.away.score !== s.a)) return 'o placar mudou durante a aprovação';
+    // tênis de mesa: um ponto dura segundos (o placar do set em curso está no relógio, "2º set · 4-7")
+    if (ev.sport === 'tabletennis' && (ev.home.score !== s.h || ev.away.score !== s.a || ev.clock !== s.clock)) return 'houve ponto durante a aprovação';
     if (M.isSuspended(ev)) return 'mercado suspenso durante a aprovação';
   }
   return null;
@@ -667,7 +670,7 @@ function lightMarkets(markets) {
 const publicEvent = ({ goalAt, fetchedAt, pendingResult, result, ...ev }) => ({ ...ev, goalAt: goalAt || null });
 // jogo com os mercados completos (aberto, no boletim ou com apostas): leva também o acompanhamento das apostas
 const fullEvent = (e) => {
-  const track = e.sport === 'soccer' ? trackOf(e, e.result) : null;
+  const track = e.sport === 'soccer' ? trackOf(e, e.result) : e.sport === 'basketball' ? basketTrack(e, e.result) : null;
   return track ? { ...publicEvent(e), track } : publicEvent(e);
 };
 /* Acompanhamento das apostas (barra de progresso, como na bet365): os números do jogo que as seleções contam.
@@ -690,6 +693,13 @@ function trackOf(ev, R) {
     y: cards ? [cards.lo[0] + (cards.hi[0] - cards.lo[0]) / 2, cards.lo[1] + (cards.hi[1] - cards.lo[1]) / 2] : null,
     ht: PARTS.soccerHT(st), pl: pl.length ? pl : null,
   };
+}
+// basquete: pl = box score dos jogadores (ao vivo das estatísticas da fonte; no fim, do resultado)
+const BPL = require('./feeds/bplayers.js');
+function basketTrack(ev, R) {
+  if (ev.state === 'post') return R?.bp ? { bp: R.bp } : null;
+  const list = ev.state === 'in' ? BPL.roster(FEED.liveStats(ev.id)) : null;
+  return list ? { bp: list.map(({ key, side, played, pts, reb, ast, tpm, stl, blk }) => ({ key, side, played, pts, reb, ast, tpm, stl, blk })) } : null;
 }
 // versão para a lista de jogos: só os mercados da linha do jogo + o número de seleções
 function lightEvent(e) {

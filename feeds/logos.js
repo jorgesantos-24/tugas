@@ -12,6 +12,7 @@ const path = require('node:path');
 const dns = require('node:dns');
 const https = require('node:https');
 const M = require('../public/markets.js'); // país de cada liga (as de futebol criadas na hora também)
+const FIGHTS = require('./fights.js'); // MMA: fotos dos lutadores
 
 const KEY = process.env.THESPORTSDB_KEY || '123'; // chave pública do plano grátis
 const OFF = process.env.LOGOS === '0'; // LOGOS=0 desliga (o site mostra as iniciais)
@@ -415,6 +416,8 @@ function esportsLogo(name, priority, league) {
 function logo(sport, name, priority, league) {
   if (!name || OFF) return '';
   if (sport === 'esports') return esportsLogo(name, priority, league);
+  if (sport === 'mma') return FIGHTS.photo(name); // foto do lutador (ESPN) ou a bandeira do país
+  if (sport === 'tabletennis') return ''; // a fonte não diz o país dos jogadores: ficam as iniciais
   if (sport === 'tennis') return ESPN_ON ? tennisLogo(name, priority) : '';
   if (offLeague.has(league)) { const u = listLogo(offLeague.get(league), name); if (u) return u; }
   // ligas europeias: as equipas que também jogam a Euroliga/EuroCup (a liga francesa não tem lista própria)

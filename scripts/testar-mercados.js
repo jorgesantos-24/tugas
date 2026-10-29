@@ -289,6 +289,492 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   check(near(M.outcomeFactor(0.5, 1.9), 1.45) && M.outcomeFactor(-0.5, 1.9) === 0.5 && M.outcomeFactor(0, 1.9) === 1, 'meio ganho / meia perda / devolvida');
 }
 
+/* ================= 5) MMA (UFC) =================
+   Dados reais em scripts/dados/ufc-2025-26.json: o resultado oficial de 1088 lutas do UFC (ESPN), o UFC 333 como a
+   MoviOdds o registou e as odds da MoviOdds do card de 31/10. */
+{
+  const FI = require(path.join(__dirname, '..', 'feeds', 'fights.js'));
+  const UFC = require(path.join(__dirname, 'dados', 'ufc-2025-26.json'));
+  const fightR = (f) => ({ done: true, h: f.out === 'home' ? 1 : 0, a: f.out === 'away' ? 1 : 0, fight: f });
+  const FMOV = ['home:kodq', 'home:sub', 'home:dec', 'away:kodq', 'away:sub', 'away:dec', 'draw'];
+  const fround = (rounds) => ['draw', ...['home', 'away'].flatMap((s) => [`${s}:dec`, ...Array.from({ length: rounds }, (_, i) => `${s}:r${i + 1}`)])];
+
+  // casos conhecidos
+  {
+    const ko = fightR({ out: 'away', method: 'ko', round: 2, secs: 294, rounds: 5 }); // Volkanovski x Evloev ao contrário: fora ganha por KO aos 4:54 do 2º
+    eq(L('ml', 'away'), ko, 1, 'mma KO'); eq(L('ml', 'home'), ko, -1, 'mma KO');
+    eq(L('fmov', 'away:kodq'), ko, 1, 'mma KO'); eq(L('fmov', 'away:sub'), ko, -1, 'mma KO'); eq(L('fmov', 'home:kodq'), ko, -1, 'mma KO'); eq(L('fmov', 'draw'), ko, -1, 'mma KO');
+    eq(L('fround', 'away:r2'), ko, 1, 'mma KO'); eq(L('fround', 'away:r1'), ko, -1, 'mma KO'); eq(L('fround', 'away:dec'), ko, -1, 'mma KO');
+    eq(L('total', 'over', 1.5), ko, 1, 'mma KO 9:54'); eq(L('total', 'under', 1.5), ko, -1, 'mma KO'); eq(L('total', 'under', 2.5), ko, 1, 'mma KO');
+    eq(L('fdist', 'no'), ko, 1, 'mma KO'); eq(L('fdist', 'yes'), ko, -1, 'mma KO');
+    // exatamente na linha: 2.5 rounds = 2:30 do 3º round conta como "mais"
+    const at = fightR({ out: 'home', method: 'sub', round: 3, secs: 150, rounds: 3 });
+    eq(L('total', 'over', 2.5), at, 1, 'mma 2:30 do 3º'); eq(L('total', 'under', 2.5), at, -1, 'mma 2:30 do 3º');
+    const before = fightR({ out: 'home', method: 'sub', round: 3, secs: 149, rounds: 3 });
+    eq(L('total', 'under', 2.5), before, 1, 'mma 2:29 do 3º');
+    // decisão: todos os rounds, até o fim; decisão técnica: "por decisão", mas não foi até o fim
+    const dec = fightR({ out: 'home', method: 'dec', round: 3, secs: 300, rounds: 3 });
+    eq(L('fdist', 'yes'), dec, 1, 'mma decisão'); eq(L('fround', 'home:dec'), dec, 1, 'mma decisão'); eq(L('fmov', 'home:dec'), dec, 1, 'mma decisão'); eq(L('total', 'over', 2.5), dec, 1, 'mma decisão');
+    const td = fightR({ out: 'away', method: 'tdec', round: 3, secs: 36, rounds: 3 });
+    eq(L('fdist', 'no'), td, 1, 'mma decisão técnica'); eq(L('fround', 'away:dec'), td, 1, 'mma decisão técnica'); eq(L('fmov', 'away:dec'), td, 1, 'mma decisão técnica'); eq(L('total', 'under', 2.5), td, 1, 'mma decisão técnica');
+    // empate: vencedor devolvido; método/round "empate" ganha; técnico (antes do fim) não foi até o fim
+    const dr = fightR({ out: 'draw', method: 'draw', round: 3, secs: 300, rounds: 3 });
+    eq(L('ml', 'home'), dr, 0, 'mma empate'); eq(L('ml', 'away'), dr, 0, 'mma empate'); eq(L('fmov', 'draw'), dr, 1, 'mma empate'); eq(L('fmov', 'home:dec'), dr, -1, 'mma empate');
+    eq(L('fround', 'draw'), dr, 1, 'mma empate'); eq(L('fdist', 'yes'), dr, 1, 'mma empate'); eq(L('total', 'over', 2.5), dr, 1, 'mma empate');
+    const tdr = fightR({ out: 'draw', method: 'draw', round: 3, secs: 36, rounds: 3 });
+    eq(L('fdist', 'no'), tdr, 1, 'mma empate técnico');
+    eq(L('fdist', 'yes'), fightR({ out: 'draw', method: 'draw', round: 3, secs: 300, rounds: null }), null, 'mma empate sem rounds marcados → equipa');
+    eq(L('fdist', 'yes'), fightR({ out: 'draw', method: 'draw', round: 3, secs: 300, rounds: 5 }), null, 'mma empate no fim do 3º de uma luta "de 5" (rounds errados na ESPN?) → equipa');
+    // DQ conta em "KO, TKO ou desqualificação"; interrupção médica (TKO) também
+    eq(L('fmov', 'home:kodq'), fightR({ out: 'home', method: 'dq', round: 1, secs: 139, rounds: 3 }), 1, 'mma DQ');
+    eq(L('fround', 'home:r1'), fightR({ out: 'home', method: 'dq', round: 1, secs: 139, rounds: 3 }), 1, 'mma DQ');
+    // no contest e luta que não aconteceu: tudo devolvido
+    const nc = fightR({ out: 'nc', method: 'nc', round: 1, secs: 51, rounds: 3 });
+    for (const l of [L('ml', 'home'), L('ml', 'away'), ...FMOV.map((p) => L('fmov', p)), L('fround', 'home:r1'), L('total', 'over', 0.5), L('fdist', 'no')]) eq(l, nc, 0, 'mma no contest');
+    // liquidação completa (settleLeg) e o texto do resultado
+    const ev = { state: 'post', completed: true, statusName: '', result: { ...ko, fight: { ...ko.fight, winner: 'Movsar Evloev' } } };
+    const leg = { market: 'fmov', pick: 'away:kodq', odds: 4 };
+    check(M.settleLeg(leg, ev) && leg.result === 'won' && leg.final === 'Movsar Evloev por KO/TKO · 2º round 4:54', `mma settleLeg: ${JSON.stringify(leg)}`);
+  }
+
+  // 1088 lutas reais: cada mercado tem exatamente uma seleção certa (ou tudo devolvido) e os mercados batem certo entre si
+  let n = 0;
+  const seen = {};
+  for (const [day, , , w, method, round, secs, rounds] of UFC.fights) {
+    const m = FI.espnMethod(method);
+    seen[method] = (seen[method] || 0) + 1;
+    check(m, `mma: método da ESPN desconhecido "${method}" (${day})`);
+    if (!m) continue;
+    const side = m === 'nc' || m === 'draw' ? m : w === 0 ? 'home' : w === 1 ? 'away' : null;
+    check(side, `mma: ${method} sem vencedor (${day})`);
+    if (!side) continue;
+    n++;
+    const R = fightR({ out: side, method: m, round, secs, rounds });
+    const tag = `mma real ${day} ${method} R${round} ${secs}s/${rounds}`;
+    exactlyOne([L('ml', 'home'), L('ml', 'away')], R, `${tag} vencedor`, true);
+    exactlyOne(FMOV.map((p) => L('fmov', p)), R, `${tag} método`, true);
+    exactlyOne(fround(rounds || 5).map((p) => L('fround', p)), R, `${tag} round`, true);
+    if (m !== 'nc') {
+      complement(L('fdist', 'yes'), L('fdist', 'no'), R, `${tag} até o fim`);
+      for (const ln of [0.5, 1.5, 2.5, 3.5, 4.5]) complement(L('total', 'over', ln), L('total', 'under', ln), R, `${tag} total ${ln}`);
+      // até o fim ⇒ passou de (rounds - 0.5); vitória no round N ⇒ mais de N-1.5 e menos de N+0.5
+      if (out(L('fdist', 'yes'), R) === 1) check(out(L('total', 'over', round - 0.5), R) === 1, `${tag}: foi até o fim mas não passou de ${round - 0.5} rounds`);
+      if (['ko', 'dq', 'sub'].includes(m)) {
+        check(out(L('total', 'under', round + 0.5), R) === 1, `${tag}: acabou no ${round}º mas não ficou abaixo de ${round + 0.5}`);
+        if (round > 1) check(out(L('total', 'over', round - 1.5), R) === 1, `${tag}: acabou no ${round}º mas não passou de ${round - 1.5}`);
+        check(out(L('fdist', 'no'), R) === 1, `${tag}: KO/finalização não vai até o fim`);
+      }
+    }
+  }
+  check(n === UFC.fights.length, `mma: só ${n} de ${UFC.fights.length} lutas reais liquidadas sozinhas`);
+  console.log(`  UFC: ${n} de ${UFC.fights.length} lutas reais liquidadas sozinhas (${Object.entries(seen).map(([k, v]) => `${k} ${v}`).join(', ')})`);
+
+  // nomes: as 14 lutas do UFC 333 e as 12 do card de 31/10 (MoviOdds) encontram a sua na ESPN, e só essa
+  const comps = (day) => UFC.cards[day].map((c) => ({ competitors: c.names.map((x) => ({ athlete: { displayName: x } })), names: c.names }));
+  const tryCard = (pairs, day, tag) => {
+    let ok = 0;
+    const cs = comps(day);
+    for (const [h, a] of pairs) {
+      const hit = FI.findBout(cs, h, a);
+      if (!hit) { check(false, `${tag}: ${h} x ${a} sem luta na ESPN`); continue; }
+      const [x, y] = hit.c.names;
+      const good = FI.nameScore(h, hit.swap ? y : x) >= 2 && FI.nameScore(a, hit.swap ? x : y) >= 2;
+      check(good, `${tag}: ${h} x ${a} ligado a ${x} x ${y} (troca ${hit.swap})`);
+      if (good) ok++;
+      // adversário trocado: não pode ligar a nenhuma luta
+      const other = pairs.find(([h2]) => h2 !== h)[0];
+      check(!FI.findBout(cs, h, other), `${tag}: ${h} x ${other} (luta que não existe) ligou a uma luta`);
+    }
+    return ok;
+  };
+  const p333 = UFC.moviodds333.map(([, h, a]) => [h, a]);
+  const ok333 = tryCard(p333, '2026-10-24', 'UFC 333');
+  const p31 = UFC.odds.matches.filter((m) => /^UFC Fight Night/.test(m.league)).map((m) => [m.home, m.away]);
+  const ok31 = tryCard(p31, '2026-10-31', 'UFC 31/10');
+  console.log(`  UFC: nomes MoviOdds ↔ ESPN: UFC 333 ${ok333}/${p333.length}, card de 31/10 ${ok31}/${p31.length}`);
+  check(FI.nameScore('Joseph Kropschot', 'Joe Kropschot') >= 2 && FI.nameScore('Zachary Reese', 'Zach Reese') >= 2 && FI.nameScore('Lucia Szabova', 'Lucia Szabová') >= 2, 'mma: variantes de nomes');
+  check(FI.nameScore('Yana Santos', 'Luana Santos') === 0, 'mma: mesmo apelido, outra lutadora');
+
+  // MoviOdds: o objeto "fight" do /results (como está na documentação)
+  const mf = (fight, status = 'finished', final_score = '') => FI.moviFight({ status, final_score, fight });
+  check(JSON.stringify(mf({ result: 'home', winner: 'A', method: 'KO/TKO', round: 2, time: '4:54' }, 'finished', '1-0')).includes('"out":"home","method":"ko","round":2,"secs":294'), 'mma: MoviOdds KO');
+  check(mf({ result: 'away', method: 'TD', round: 3, time: '0:36' }, 'finished', '0-1').method === 'tdec', 'mma: MoviOdds decisão técnica');
+  check(mf({ result: 'draw', method: 'DEC', round: 3, time: '5:00' }, 'finished', '0-0').out === 'draw', 'mma: MoviOdds empate');
+  check(mf({ result: 'no_contest', method: 'NC', round: 1 }, 'unknown').out === 'nc', 'mma: MoviOdds no contest (vem "unknown")');
+  check(mf({ result: 'home', method: 'OTHER', round: 1, time: '1:00' }, 'finished', '1-0').bad, 'mma: MoviOdds método OTHER → equipa');
+  check(mf({ result: 'home', method: 'SUB', round: 1, time: '1:00' }, 'finished', '0-1').bad, 'mma: MoviOdds placar ao contrário do vencedor → equipa');
+  check(mf({ result: 'home', method: 'SUB', round: 1, time: '' }, 'finished', '1-0').bad, 'mma: MoviOdds sem tempo → equipa');
+  check(FI.moviFight({ status: 'unknown', final_score: '', note: 'no fight result' }) === null, 'mma: MoviOdds sem objeto fight → espera');
+
+  // as duas fontes juntas
+  const A = { out: 'home', method: 'ko', round: 2, secs: 100, rounds: null, src: 'moviodds' };
+  const E = { out: 'home', method: 'ko', round: 2, secs: 102, rounds: 5, src: 'espn' };
+  check(FI.combine(A, E, true, 3600000).fight?.src === 'moviodds+espn' && FI.combine(A, E, true, 3600000).fight.rounds === 5, 'mma: as duas concordam → paga (rounds da ESPN)');
+  check(FI.combine(A, { ...E, method: 'sub' }, true, 3600000).done === false, 'mma: método diferente → equipa');
+  check(FI.combine(A, { ...E, round: 3 }, true, 3600000).done === false, 'mma: round diferente → equipa');
+  check(FI.combine(A, { ...E, out: 'away' }, true, 3600000).done === false, 'mma: vencedor diferente → equipa');
+  check(FI.combine(null, E, true, 3600000).fight?.src === 'espn', 'mma: só a ESPN → paga pela ESPN');
+  check(FI.combine(A, null, true, 3600000).fight?.src === 'moviodds', 'mma: só a MoviOdds → paga pela MoviOdds');
+  check(FI.combine(null, null, true, 3600000) === null, 'mma: nenhuma → espera');
+  check(FI.combine(null, { missing: true }, true, 20 * 3600000).done === false, 'mma: vista ao vivo mas não está na ESPN → equipa');
+  check(FI.combine(null, { missing: true }, false, 3600000) === null, 'mma: não aconteceu? espera 12 h');
+  const can = FI.combine(null, { missing: true, replaced: true }, false, 20 * 3600000);
+  check(can.done && can.fight.out === 'nc' && can.fight.cancelled, 'mma: luta que não aconteceu → devolvida');
+  check(M.legOutcome(L('ml', 'home'), can) === 0, 'mma: luta que não aconteceu → vencedor devolvido');
+  check(FI.combine(null, { bad: 'x' }, true, 3600000).done === false, 'mma: ESPN incompleta → equipa');
+
+  // odds reais da MoviOdds: cada luta do UFC vira um evento só com mercados automáticos (nada para a equipa)
+  const F = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));
+  const now = Date.parse(UFC.odds.server_time);
+  let evs = 0, sels = 0;
+  for (const m of UFC.odds.matches) {
+    const ev = F.toEvent(m, now, 'mma', true);
+    if (!/^UFC /.test(m.league)) { check(!ev, `mma: ${m.league} (fora do UFC) entrou no site`); continue; }
+    check(ev, `mma: ${m.home} x ${m.away} (${m.league}) não entrou`);
+    if (!ev) continue;
+    evs++;
+    const ss = M.selections(ev);
+    sels += ss.length;
+    check(ss.every((s) => ['ml', 'fmov', 'fround', 'fdist', 'total'].includes(s.market)), `mma: mercado não automático em ${m.home} x ${m.away}: ${[...new Set(ss.map((s) => s.market))]}`);
+    check(ss.filter((s) => s.market === 'ml').length === 2, `mma: ${m.home} x ${m.away} sem os dois vencedores`);
+    check(ss.every((s) => s.name && !/\b(By|Draw|Over|Under|Decision)\b/.test(s.name) && !/Method of|Total Rounds|Round Betting|To Win|Fight/.test(s.marketName)), `mma: texto em inglês em ${m.home} x ${m.away}: ${ss.map((s) => s.marketName + ' / ' + s.name).find((t) => /\b(By|Draw|Over|Under|Decision)\b|Method of|Total Rounds|Round Betting/.test(t))}`);
+    check(ss.filter((s) => s.market === 'total').every((s) => s.line % 1 === 0.5), `mma: linha de rounds inteira em ${m.home} x ${m.away}`);
+    // ao vivo: nada se aposta
+    check(!F.toEvent({ ...m, in_play: true }, now, 'mma', true)?.markets, `mma: ${m.home} x ${m.away} com mercados ao vivo`);
+  }
+  console.log(`  UFC: ${evs} lutas com odds reais da MoviOdds, ${sels} seleções (só mercados automáticos)`);
+  check(evs >= 12, `mma: poucas lutas do UFC nas odds (${evs})`);
+  // proteção: odds de método que, com o vencedor do outro lado, dão lucro garantido → o método sai
+  {
+    const m = UFC.odds.matches.find((x) => /^UFC/.test(x.league) && (x.quotes || []).some((q) => q.group_name === 'Method of Victory'));
+    const q2 = m.quotes.map((q) => (q.group_name === 'Method of Victory' && q.side === m.home ? { ...q, odds_dec: 9 } : q));
+    const ev = F.toEvent({ ...m, id: 'guard-test', quotes: q2 }, now, 'mma', true);
+    check(ev && !M.selections(ev).some((s) => s.market === 'fmov'), 'mma: método com lucro garantido não saiu do site');
+    check(ev && M.selections(ev).some((s) => s.market === 'ml'), 'mma: a proteção tirou também o vencedor');
+  }
+}
+
+/* ================= 6) basquete: mercados que eram da equipa e passaram a automáticos =================
+   Dados reais em scripts/dados/basquete-2026-10.json: cotações pré-jogo da MoviOdds (12 jogos, 50 tipos de mercado)
+   e 317 resultados reais (placar, quartos). Cada mercado tem de ter exatamente um vencedor em todos os resultados. */
+{
+  const AUTO = require(path.join(__dirname, '..', 'feeds', 'auto.js'));
+  const PARTS = require(path.join(__dirname, '..', 'feeds', 'parts.js'));
+  const BK = require(path.join(__dirname, 'dados', 'basquete-2026-10.json'));
+  // (as seleções do 3 vias: o "N ou mais" lê-se das irmãs do mesmo mercado)
+  const mt = { home: 'Casa', away: 'Fora', league: 'NBA', quotes: [{ group_id: 'g', side: 'Casa', line: '6 or more' }, { group_id: 'g', side: 'Fora', line: '6 or more' }, { group_id: 'g', line: 'Any other result' }] };
+  const leg = (q, m = mt) => { const r = AUTO.rule({ group_id: 'g', ...q }, m, 'basketball'); return r && r.pick ? { market: r.k, per: `${r.scope}|g`, pick: r.pick, line: r.line } : null; };
+  // jogo com prorrogação: 1º tempo 50-48, quartos 25-20 25-28 20-22 30-30 → tempo regulamentar 100-100, final 111-104
+  const ot = { done: true, h: 111, a: 104, parts: { q1: [25, 20], q2: [25, 28], q3: [20, 22], q4: [30, 30], h1: [50, 48], h2: [61, 56], reg: [100, 100] } };
+  const B = (q, want, what) => { const l = leg(q); check(!!l, `basquete: lê "${q.group_name}" ${what}`); if (l) eq(l, ot, want, `basquete prorrogação: ${q.group_name} ${what}`); };
+  B({ group_name: 'Winning Margin', side: 'Casa', line: '7-9' }, 1, 'casa 7-9 (a margem conta a prorrogação)');
+  B({ group_name: 'Winning Margin', side: 'Casa', line: '3-6' }, -1, 'casa 3-6');
+  B({ group_name: 'Winning Margin 12-Way', side: 'Casa', line: '6-10' }, 1, 'casa 6-10');
+  B({ group_name: 'Winning Margin 3-Way', side: 'Casa', line: '6 or more' }, 1, 'casa por 6+');
+  B({ group_name: 'Winning Margin 3-Way', line: 'Any other result' }, -1, 'outro resultado');
+  B({ group_name: '1st Half Margin (Bands)', side: 'Casa', line: '1-3' }, 1, '1º tempo casa 1-3');
+  B({ group_name: '1st Quarter Winning Margin', side: 'Casa', line: '5-6' }, 1, '1º quarto casa 5-6');
+  B({ group_name: '1st Quarter Winning Margin', line: 'Tie' }, -1, '1º quarto empate');
+  B({ group_name: 'Tied at End Of Regulation?', label: 'Yes' }, 1, 'sim (100-100)');
+  B({ group_name: 'Tied at End Of Regulation?', label: 'No' }, -1, 'não');
+  B({ group_name: "Result and Both Teams to Score 'X' Points", side: '100', line: 'Casa and Yes' }, 1, 'casa e os dois 100+');
+  B({ group_name: "Result and Both Teams to Score 'X' Points", side: '110', line: 'Casa and No' }, 1, 'casa e não os dois 110+');
+  B({ group_name: '1st Half Both Teams to Score X Points', side: 'Yes', line: '50' }, -1, 'os dois 50 no 1º tempo (48)');
+  B({ group_name: 'Match Result and Total', side: 'Casa', label: 'Over 214.5', line: '214.5', handicap: '214.5' }, 1, 'casa e mais de 214.5 (215)');
+  B({ group_name: 'Match Result and Total', side: 'Over', label: ' 215.5', line: 'Casa' }, -1, 'formato ao vivo, mais de 215.5');
+  B({ group_name: '1st Half Result and Total', side: 'Under', label: '98.5', line: 'Casa', handicap: '98.5' }, 1, 'casa e menos de 98.5');
+  B({ group_name: 'Match Handicap and Total', label: 'Fora +6.5 & Over 210.5' }, -1, 'fora +6.5 (perde por 7)');
+  B({ group_name: 'Match Handicap and Total', label: 'Casa -6.5 & Over 210.5' }, 1, 'casa -6.5 e mais de 210.5');
+  B({ group_name: 'Team Total Odd Or Even', side: 'Casa', label: 'Odd' }, 1, 'casa ímpar (111)');
+  B({ group_name: 'Game Total - Odd or Even', label: 'Odd' }, 1, 'total ímpar (215)');
+  B({ group_name: 'Highest Scoring Half', label: 'Half 2' }, 1, '2º tempo (117, com prorrogação)');
+  B({ group_name: 'Highest Scoring Quarter', label: '4th Quarter' }, 1, '4º quarto (60, sem prorrogação)');
+  B({ group_name: 'Highest Scoring Quarter', label: 'Tie' }, -1, 'empate');
+  B({ group_name: 'Team with highest scoring quarter', label: 'Casa' }, -1, 'casa (30 = 30)');
+  B({ group_name: 'Team with highest scoring quarter', label: 'Tie' }, 1, 'empate (30 = 30)');
+  B({ group_name: 'Quarter Correct Score', side: 'Casa', line: '2-1' }, -1, 'casa 2-1 (foi 1-2, um empate)');
+  B({ group_name: 'Quarter Correct Score', side: 'Fora', line: '2-1' }, 1, 'fora 2-1');
+  B({ group_name: 'Quarter Correct Score', line: 'Any Other' }, -1, 'outro');
+  B({ group_name: '1st Quarter 3 Way Lines', side: 'Casa', line: 'To Win' }, 1, '1º quarto casa');
+  B({ group_name: '1st Half Result (Incl. Tie)', label: 'Casa' }, 1, '1º tempo casa');
+  B({ group_name: '1st Half Double Chance', label: 'Draw or Fora', n2: 'X2' }, -1, '1º tempo X2');
+  B({ group_name: 'Alternative 1st Half Team Totals', side: 'Over', line: '49.5', handicap: '49.5', n2: 'Casa' }, 1, 'casa mais de 49.5 no 1º tempo');
+  // formatos ao vivo (a equipa vem no nome do grupo)
+  B({ group_name: 'Casa To Score', side: 'Yes', line: '110' }, 1, 'casa faz 110 (111)');
+  B({ group_name: '4th Quarter Fora To Score', side: 'Yes', line: '30' }, 1, 'fora faz 30 no 4º quarto');
+  B({ group_name: 'Alternative Fora Totals', side: 'Over', label: 'Over', line: '104.5', handicap: '104.5' }, -1, 'fora mais de 104.5 (104)');
+  B({ group_name: 'Alternative 2nd Half Casa Totals', side: 'Under', label: 'Under', line: '60.5', handicap: '60.5' }, -1, 'casa menos de 60.5 no 2º tempo (61)');
+  B({ group_name: 'Alternative Point Spread', side: 'Fora', label: ' +7.5', line: '+7.5', handicap: '+7.5' }, 1, 'fora +7.5');
+  B({ group_name: 'Both Teams To Score', side: 'Yes', line: '105' }, -1, 'os dois 105 (fora 104)');
+  B({ group_name: '3rd Quarter', side: 'Tie', line: 'To Win (3-Way)' }, -1, '3º quarto empate (20-22)');
+  B({ group_name: '3rd Quarter Winning Margin', side: 'Fora', line: '1-2' }, 1, '3º quarto fora 1-2');
+  B({ group_name: '3rd Quarter - Team Totals', side: 'Fora', label: 'Over 21.5', line: '21.5', handicap: '21.5' }, 1, 'fora mais de 21.5 no 3º quarto');
+  // sem dados para decidir: não vira automático (sai do site)
+  check(!leg({ group_name: 'Team to Score X Points', side: 'Yes', line: '100' }), 'basquete: "Team to Score X Points" não diz a equipa → sem regra');
+  check(!leg({ group_name: 'Match Handicap and Total', label: 'Casa -6 & Over 210.5' }), 'basquete: handicap inteiro em combinação → sem regra');
+  check(!leg({ group_name: '1st Quarter 3 Way Lines', side: 'Casa', line: 'Line', handicap: '-2' }), 'basquete: handicap a 3 vias → sem regra');
+  // quartos em falta: fica por decidir (nunca adivinha)
+  eq(leg({ group_name: 'Highest Scoring Quarter', label: '1st Quarter' }), { done: true, h: 90, a: 80, parts: {} }, null, 'basquete sem quartos: espera');
+
+  // dados reais: todos os mercados com exatamente um vencedor (dupla chance: dois; 2 vias com empate na parte: todos devolvidos)
+  const Rs = [];
+  for (const r of BK.results) {
+    const fin = String(r.final_score).split('-').map(Number);
+    const parts = PARTS.finishedParts('basketball', r.stats, fin);
+    if (parts.q4) Rs.push({ done: true, h: fin[0], a: fin[1], parts });
+  }
+  // e os mesmos jogos empatados no fim do 4º quarto, com prorrogação de 11-7
+  for (const R of Rs.slice(0, 120)) {
+    const p = R.parts, d = p.reg[0] - p.reg[1], q4 = [p.q4[0], p.q4[1] + d], reg = [p.reg[0], p.reg[0]];
+    Rs.push({ done: true, h: reg[0] + 11, a: reg[1] + 7, parts: { ...p, q4, reg, h2: [reg[0] + 11 - p.h1[0], reg[1] + 7 - p.h1[1]] } });
+  }
+  let groups = 0, sels = 0;
+  for (const m of BK.matches) {
+    const byG = new Map();
+    for (const q of m.quotes) {
+      const r = AUTO.rule(q, m, 'basketball');
+      check(!!(r && r.pick), `basquete real: regra para ${q.group_name}`);
+      if (!r || !r.pick) continue;
+      sels++;
+      const norm = r.k === 'ptot' ? 'L' + r.line : r.k === 'pspr' ? 'L' + (r.pick === 'home' ? r.line : -r.line) : r.k === 'pteam' ? r.pick.split(':')[0] + r.line
+        : r.k === 'pcond' ? r.pick.replace(/^!/, '').split(';').filter((c) => !/^(res|dc)=/.test(c)).map((c) => c.replace(/=(gt|lt):/, '=').replace(/bx=(yes|no):/, 'bx=').replace(/hc=(home|away):[+-]?/, 'hc=').replace(/^(m[ha]|ad)=.*/, 'm').replace(/^par=(\w):.*/, 'par$1')).join(';') || (/Margin/.test(q.group_name) ? 'm' : '') : '';
+      const key = `${q.group_id}|${r.k}|${r.scope}|${norm}`;
+      if (!byG.has(key)) byG.set(key, { g: q.group_name, legs: [] });
+      byG.get(key).legs.push({ market: r.k, per: `${r.scope}|${q.group_id}`, pick: r.pick, line: r.line });
+    }
+    for (const { g, legs } of byG.values()) {
+      groups++;
+      for (const R of Rs) {
+        const outs = legs.map((l) => M.legOutcome(l, R));
+        const wins = outs.filter((o) => o === 1).length;
+        const ok = !outs.some((o) => o == null) && (legs[0].market === 'pdc' ? wins === 2 : legs[0].market === 'pml2' && outs.every((o) => o === 0) ? true : wins === 1);
+        check(ok, `basquete real: ${m.home} x ${m.away} · ${g} → ${legs.map((l, i) => `${l.pick}=${outs[i]}`).join(' ')} (${R.h}-${R.a})`);
+      }
+    }
+  }
+  console.log(`  basquete: ${sels} seleções reais da MoviOdds em ${groups} mercados, ${Rs.length} resultados (${Rs.length - 120} reais + 120 com prorrogação), todos com exatamente um vencedor`);
+}
+
+/* ================= 7) tênis de mesa =================
+   Dados reais em scripts/dados/tenis-de-mesa-2026-10.json: cotações pré-jogo da MoviOdds (15 jogos) e 789 resultados
+   (placar de cada set). Cada mercado: exatamente um vencedor (ou tudo devolvido); abandonadas: só o que já se decidiu. */
+{
+  const TT = require(path.join(__dirname, '..', 'feeds', 'tabletennis.js'));
+  const FEED = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));
+  const TD = require(path.join(__dirname, 'dados', 'tenis-de-mesa-2026-10.json'));
+  const old = Date.now() - 86400000;
+  const res = (fs, status = 'finished') => TT.result({ final_score: fs, periods: fs.split(',').map((score, i) => ({ name: `Set ${i + 1}`, score })), status }, old);
+  const T = (market, pick, R, want, what, line, per) => eq({ market, pick, line, per }, R, want, `tênis de mesa: ${what}`);
+  // casos conhecidos: 11-8 3-11 11-9 14-16 12-10 → casa 3-2, 51-54 em pontos (105)
+  const r5 = res('11-8,3-11,11-9,14-16,12-10');
+  // mercados do ao vivo (51-54 pontos, sets 19 / 14 / 20 / 30 / 22 pontos)
+  T('ttoe', 'odd', r5, 1, '1º set 19 pontos ímpar', undefined, '1');
+  T('ttoe', 'even', r5, -1, 'partida 105 pontos: par perde', undefined, 'M');
+  T('ttgx', 'yes', r5, 1, '4º set 14-16 foi a 10-10', undefined, '4');
+  T('ttgx', 'no', r5, 1, '1º set 11-8 não foi a 10-10', undefined, '1');
+  T('ttgm', 'away:5+', r5, 1, '2º set 3-11: fora por 8', undefined, '2');
+  T('ttgm', 'home:2', r5, 1, '5º set 12-10: casa por 2', undefined, '5');
+  T('ttgm', 'home:3-4', r5, 1, '1º set 11-8: casa por 3 (banda 3-4)', undefined, '1');
+  T('ttgm', 'away:3-4', r5, -1, '1º set 11-8: fora perdeu', undefined, '1');
+  T('ttmp', 'under', r5, 1, 'casa 51 pontos, menos de 51.5', 51.5, 'home');
+  T('ttmp', 'over', r5, 1, 'fora 54 pontos, mais de 53.5', 53.5, 'away');
+  T('ttdr', 'home:w', r5, 1, 'casa ganha 1º set e partida');
+  T('ttdr', 'away:l', r5, -1, 'fora não ganhou o 1º set');
+  T('ttrt', 'home:over', r5, 1, 'casa ganha e 105 > 100.5', 100.5);
+  T('ttrt', 'away:over', r5, -1, 'fora não ganhou', 100.5);
+  T('ttcs', '1-1', r5, 1, 'placar após 2 sets 1-1', undefined, '2');
+  check(r5.done && r5.h === 3 && r5.a === 2, 'tênis de mesa: 3-2 lido');
+  T('ml', 'home', r5, 1, 'vencedor'); T('ttsh', 'away', r5, 1, 'fora +1.5 sets', 1.5); T('ttsh', 'home', r5, -1, 'casa -1.5 sets', -1.5);
+  T('ttpt', 'over', r5, 1, 'mais de 103.5 pontos (105)', 103.5); T('ttph', 'away', r5, -1, 'fora -3.5 pontos (fez mais 3)', -3.5); T('ttph', 'away', r5, 1, 'fora -2.5', -2.5);
+  T('ttcs', '3-2', r5, 1, 'placar 3-2', null, 'M'); T('ttcs', '2-1', r5, 1, 'após 3 sets 2-1', null, '3'); T('ttcs', '1-1', r5, 1, 'após 2 sets 1-1', null, '2');
+  T('ttgw', 'away', r5, 1, '2º set fora', null, '2'); T('ttgt', 'over', r5, 1, '4º set mais de 29.5 (30)', 29.5, '4'); T('ttgh', 'home', r5, 1, '1º set casa -2.5', -2.5, '1');
+  T('ttgwt', 'home:under', r5, 1, '1º set casa e menos de 19.5', 19.5, '1'); T('ttgp', 'over', r5, 1, '4º set fora mais de 15.5', 15.5, '4:away');
+  // 3-0: o 4º e o 5º set não se jogaram → devolvidas
+  const r3 = res('11-5,11-7,11-9');
+  T('ttgw', 'home', r3, 0, '4º set não jogado', null, '4'); T('ttcs', '3-0', r3, 1, 'após 3 sets 3-0', null, '3');
+  // abandonada a 2-1 (o 4º set a meio fica de fora): sets acabados valem, o resto devolvido
+  const ab = res('11-5,8-11,11-9,4-2', 'unknown');
+  check(ab.done && ab.incomplete && ab.sets.length === 3, 'tênis de mesa: abandonada lida');
+  T('ttgw', 'home', ab, 1, 'abandonada: 3º set decidido', null, '3'); T('ttgw', 'home', ab, 0, 'abandonada: 4º set em aberto', null, '4');
+  T('ml', 'home', ab, 0, 'abandonada: vencedor em aberto'); T('ttsh', 'home', ab, 1, 'abandonada: casa +2.5 já decidido', 2.5);
+  T('ttpt', 'over', ab, 1, 'abandonada: mais de 50.5 já passado (55)', 50.5); T('ttpt', 'under', ab, 0, 'abandonada: menos de 80.5 em aberto', 80.5);
+  T('ttcs', '2-1', ab, 1, 'abandonada: após 3 sets 2-1', null, '3');
+  // partida em curso: ainda não se dá por abandonada
+  check(!TT.result({ final_score: '11-5,8-11', periods: [], status: 'unknown' }, Date.now()).done, 'tênis de mesa: partida em curso não liquida');
+  check(!res('11-5,11-7,11-12').done, 'tênis de mesa: set impossível (11-12) não liquida');
+  check(!res('11-5,11-7').done, 'tênis de mesa: terminada a 2-0 (não é melhor de 5) não liquida');
+  eq({ market: 'ml', pick: 'home' }, { done: true, h: 0, a: 0, sets: [], tt: true, cancelled: true }, 0, 'tênis de mesa: não se jogou → devolvida');
+
+  // dados reais
+  const Rs = TD.results.map((r) => TT.result(r, old)).filter((r) => r.done);
+  check(TD.results.filter((r) => r.status === 'finished').every((r) => TT.result(r, old).done && !TT.result(r, old).incomplete), 'tênis de mesa: todas as partidas terminadas liquidam');
+  const now = Date.parse(TD.server_time);
+  let mk = 0, sels = 0;
+  const TL = require(path.join(__dirname, 'dados', 'tenis-de-mesa-aovivo-2026-10.json')); // ao vivo
+  for (const m of TD.matches.concat(TL.matches)) {
+    const ev = FEED.toEvent(m, now, 'tabletennis', true);
+    if (!m.in_play) check(!!ev && !!ev.markets, `tênis de mesa: ${m.home} x ${m.away} entra no site`);
+    if (!ev || !ev.markets) continue;
+    // ao vivo: os finais possíveis são os sets já jogados + a continuação de cada resultado real
+    const done = m.in_play ? String(m.score || '').split(',').map((x) => x.split('-').map(Number)).filter((g) => g.length === 2 && TT.okGame(g)) : [];
+    const finals = !m.in_play ? Rs : Rs.filter((R) => !R.incomplete).map((R) => {
+      const sets = [];
+      for (const g of done.concat(R.sets.slice(done.length))) { if (sets.filter((x) => x[0] > x[1]).length === TT.NEED || sets.filter((x) => x[1] > x[0]).length === TT.NEED) break; sets.push(g); }
+      const h = sets.filter((x) => x[0] > x[1]).length, a = sets.length - h;
+      return h === TT.NEED || a === TT.NEED ? { done: true, h, a, sets, tt: true } : null;
+    }).filter(Boolean);
+    const S = M.selections({ ...ev, date: new Date(ev.date) });
+    sels += S.length;
+    for (const s of S) check(!/\b(Game|Games|Over|Under|Winner|Total Double|Line)\b/.test(s.marketName + ' ' + s.name), `tênis de mesa: texto em português (${s.marketName} · ${s.name})`);
+    const by = new Map();
+    for (const s of S) {
+      const k = s.market === 'ml' ? 'ml' : s.market === 'ttcs' ? 'cs' + s.per : ['ttsh', 'ttph', 'ttgh'].includes(s.market) ? s.market + s.per + '|' + (s.pick === 'home' ? s.line : -s.line) : s.market + (s.per ?? '') + '|' + s.line;
+      if (!by.has(k)) by.set(k, []); by.get(k).push(s);
+    }
+    for (const list of by.values()) {
+      mk++;
+      for (const R of finals) {
+        const outs = list.map((s) => M.legOutcome({ market: s.market, pick: s.pick, line: s.line, per: s.per }, R));
+        const wins = outs.filter((x) => x === 1).length;
+        // ao vivo a bet365 tira as seleções já impossíveis: pode não haver vencedor entre as que sobram
+        const ok = !outs.some((x) => x == null) && (R.incomplete ? wins <= 1 : wins === 1 || outs.every((x) => x === 0) || (m.in_play && wins === 0 && list[0].market === 'ttcs'));
+        check(ok, `tênis de mesa real: ${list[0].marketName} → ${list.map((s, i) => `${s.name}=${outs[i]}`).join(' | ')} (${R.sets.map((x) => x.join('-')).join(' ')})`);
+      }
+    }
+  }
+  console.log(`  tênis de mesa: ${sels} seleções reais da MoviOdds em ${mk} mercados, ${Rs.length} resultados reais (${Rs.filter((r) => r.incomplete).length} abandonadas)`);
+}
+
+/* ================= 8) basquete: mercados de jogadores =================
+   Dados reais em scripts/dados/basquete-jogadores-2026-10.json (cotações NBA/WNBA da MoviOdds, uma ao vivo).
+   Box score oficial (ESPN) montado à mão: Mais/Menos de cada linha → exatamente um ganha; "N ou mais" sobe com N;
+   não jogou ou fora do box score → devolvida; sem box score → equipa. */
+{
+  const FEED = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));
+  const BD = require(path.join(__dirname, 'dados', 'basquete-jogadores-2026-10.json'));
+  const box = [
+    { key: M.bpKey('Austin Reaves'), side: 'home', played: true, pts: 24, reb: 4, ast: 10, tpm: 3, stl: 1, blk: 0 },
+    { key: M.bpKey('Darius Garland'), side: 'away', played: true, pts: 9, reb: 10, ast: 10, tpm: 2, stl: 2, blk: 1 },
+    { key: M.bpKey('Bronny James'), side: 'home', played: false, pts: 0, reb: 0, ast: 0, tpm: 0, stl: 0, blk: 0 },
+    { key: M.bpKey('Jalen Williams'), side: 'home', played: true, pts: 10, reb: 3, ast: 2, tpm: 1, stl: 0, blk: 0 },
+    { key: M.bpKey('Jaylin Williams'), side: 'home', played: true, pts: 4, reb: 7, ast: 1, tpm: 0, stl: 0, blk: 1 },
+  ];
+  const R = { done: true, h: 120, a: 118, bp: box };
+  const B = (per, pick, want, what) => eq({ market: 'bp', per: `${per}|1`, pick }, R, want, `basquete jogadores: ${what}`);
+  B('pts', '24##Austin Reaves', 1, 'Reaves 24 pontos, "24 ou mais" ganha');
+  B('pts', '25##Austin Reaves', -1, 'Reaves 24 pontos, "25 ou mais" perde');
+  B('pts', 'u24##Austin Reaves', -1, 'Reaves 24 pontos, "Menos de 23.5" perde');
+  B('pts', 'u25#home#Austin Reaves', 1, 'Reaves 24 pontos, "Menos de 24.5" ganha');
+  B('pra', '38##A Reaves', 1, 'nome abreviado da MoviOdds (24+4+10 = 38)');
+  B('pa', '35#away#Austin Reaves', null, 'lado errado → equipa');
+  B('dd', '2##Austin Reaves', 1, 'duplo-duplo (pontos + assistências)');
+  B('td', '3##Darius Garland', -1, 'triplo-duplo: 9 pontos, 10 rebotes, 10 assistências → perde');
+  B('td', 'u3##Darius Garland', 1, 'triplo-duplo "Não" ganha');
+  B('sb', '3##Darius Garland', 1, 'roubos + tocos 2+1');
+  B('reb', '1##Bronny James', 0, 'não jogou → devolvida');
+  B('reb', '1##Kevin Durant', 0, 'fora do box score (inativo) → devolvida');
+  B('reb', '1##Austin Williams', null, 'mesmo apelido com outra inicial → equipa');
+  B('reb', '1##Jalen Williams', null, 'dois "J Williams" → equipa');
+  eq({ market: 'bp', per: 'pts|1', pick: '10##Austin Reaves' }, { done: true, h: 120, a: 118 }, null, 'basquete jogadores: sem box score → equipa');
+  // dados reais: cada seleção, com o jogador no box score (valores a variar), dá um resultado coerente
+  let sels = 0, mks = 0;
+  for (const m of BD.matches) {
+    const ev = FEED.toEvent(m, Date.now(), 'basketball', true);
+    const bp = (ev?.markets || []).filter((mk) => mk.k === 'bp');
+    check(bp.length > 0, `basquete jogadores: ${m.home} x ${m.away} sem mercados de jogadores`);
+    for (const mk of bp) {
+      mks++;
+      const byPlayer = new Map();
+      for (const s of mk.sels) { const nm = String(s.pick).split('#').slice(2).join('#'); if (!byPlayer.has(nm)) byPlayer.set(nm, []); byPlayer.get(nm).push(s); }
+      for (const [nm, list] of byPlayer) for (const v of [0, 1, 5, 9, 10, 12, 25, 40]) {
+        const p = { key: M.bpKey(nm), side: '', played: true, pts: v, reb: v, ast: v, tpm: v, stl: v, blk: v };
+        const RR = { done: true, h: 100, a: 100, bp: [p] };
+        const outs = list.map((s) => M.legOutcome({ market: 'bp', per: mk.per, pick: s.pick }, RR));
+        sels += list.length;
+        check(outs.every((x) => x === 1 || x === -1), `basquete jogadores real: ${mk.name} ${nm} (${v}) sem decisão`);
+        // cada linha: "N ou mais" e "menos de N" (mesmo N) → exatamente um ganha
+        const byN = new Map();
+        list.forEach((s, i) => { const n = String(s.pick).split('#')[0].replace(/^u/, ''); if (!byN.has(n)) byN.set(n, []); byN.get(n).push(outs[i]); });
+        for (const [n, o] of byN) if (o.length === 2) check(o.filter((x) => x === 1).length === 1, `basquete jogadores real: ${mk.name} ${nm} linha ${n} (${v}) → ${o.join(',')}`);
+        // "N ou mais": ganha se e só se v >= N
+        list.forEach((s, i) => { const x = /^(u?)(\d+)#/.exec(s.pick); const val = M.BP_FIELD[mk.per.split('|')[0]](p); check(outs[i] === ((val >= Number(x[2])) !== !!x[1] ? 1 : -1), `basquete jogadores real: ${mk.name} ${s.name} com ${val}`); });
+      }
+    }
+  }
+  check(mks >= 20, `basquete jogadores: poucos mercados reais (${mks})`);
+  console.log(`  basquete jogadores: ${mks} mercados reais da MoviOdds, ${sels} liquidações testadas`);
+}
+
+/* ================= 9) hóquei: mercados que eram da equipa =================
+   Dados reais em scripts/dados/hoquei-2026-10.json (cotações de 16 jogos e 73 resultados com cronologia).
+   Cada mercado, com cada resultado (reais + prorrogação + pênaltis montados): exatamente um vencedor, ou tudo para a
+   equipa (null) quando a regra não decide (mercados "jogo todo" num jogo com prorrogação). */
+{
+  const FEED = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));
+  const HD = require(path.join(__dirname, 'dados', 'hoquei-2026-10.json'));
+  const H = (market, pick, R, want, what, line, per) => eq({ market, pick, line, per }, R, want, `hóquei: ${what}`);
+  // casos conhecidos: 3-2 no tempo regulamentar (casa, fora, casa, fora, casa), 2-1 na prorrogação, 2-2 + pênaltis
+  const reg = { done: true, h: 3, a: 2, reg: [3, 2], parts: { p1: [1, 1], p2: [1, 1], p3: [1, 0] }, gorder: ['home', 'away', 'home', 'away', 'home'], greg: 5 };
+  const ot = { done: true, h: 2, a: 1, reg: [1, 1], parts: { p1: [1, 0], p2: [0, 1], p3: [0, 0] }, gorder: ['home', 'away', 'home'], greg: 2 };
+  const so = { done: true, h: 2, a: 2, reg: [2, 2], so: true, alts: [[3, 2], [2, 3]], parts: { p1: [2, 0], p2: [0, 2], p3: [0, 0] }, gorder: ['home', 'home', 'away', 'away'], greg: 4 };
+  H('hend', 'reg', reg, 1, 'acabou nos 60 minutos'); H('hend', 'ot', ot, 1, 'acabou na prorrogação'); H('hend', 'so', so, 1, 'acabou nos pênaltis'); H('hend', '!so', ot, 1, 'não foi a pênaltis');
+  H('pcs', '3-2', reg, 1, 'placar exato 3-2 (60 min)', undefined, 'ftr|1'); H('pcs', '2-1', ot, null, 'placar exato com prorrogação → equipa', undefined, 'ftr|1');
+  H('pcond', 'mh=in:1-1', reg, 1, 'margem: casa por 1', undefined, 'ftr|1');
+  H('pml2', 'home', ot, 0, 'empate anula: 1-1 nos 60 min → devolvida', undefined, 'reg|1');
+  H('hng', 'first:home', reg, 1, '1º gol da casa'); H('hng', 'last:home', reg, 1, 'último gol da casa'); H('hng', '6:none', reg, 1, 'não houve 6º gol');
+  H('hng', '3:home', ot, null, '3º gol na prorrogação → equipa'); H('hng', 'last:home', so, null, 'último gol com pênaltis → equipa');
+  H('hng', 'firstwins:yes', reg, 1, 'quem marcou primeiro ganhou');
+  H('hphs', 'tie', reg, 1, 'períodos 2-2-1: empate no mais alto'); H('hmost', 'home', reg, 1, 'casa ganhou mais períodos (1 a 0)');
+  H('pcond', 'mh=lt:1', reg, -1, 'handicap a 3: fora +1 perde com 3-2', undefined, 'reg|1');
+  // marcadores (NHL, ESPN)
+  const hg = { ...reg, hg: { players: [{ key: M.bpKey('Olen Zellweger'), side: 'away', goals: 2 }, { key: M.bpKey('Zach Benson'), side: 'away', goals: 0 }, { key: M.bpKey('Macklin Celebrini'), side: 'home', goals: 3 }],
+    order: [{ key: 'm celebrini', side: 'home' }, { key: 'o zellweger', side: 'away' }, { key: 'm celebrini', side: 'home' }, { key: 'o zellweger', side: 'away' }, { key: 'm celebrini', side: 'home' }] } };
+  const G = (per, pick, want, what) => eq({ market: 'hgs', per: `${per}|1`, pick }, hg, want, `hóquei marcadores: ${what}`);
+  G('any', 'away#Olen Zellweger', 1, 'marcou'); G('any', 'away#Zach Benson', -1, 'jogou e não marcou'); G('any', 'away#Tage Thompson', 0, 'não foi a jogo → devolvida');
+  G('n3', 'home#Macklin Celebrini', 1, '3 gols'); G('n2', 'away#Olen Zellweger', 1, '2 gols'); G('n3', 'away#Olen Zellweger', -1, 'só 2');
+  G('first', 'home#Macklin Celebrini', 1, 'primeiro gol'); G('last', 'away#Olen Zellweger', -1, 'último gol foi do Celebrini');
+  G('any', 'away#Ryan Zellweger', null, 'mesmo apelido, outra inicial → equipa');
+  eq({ market: 'hgs', per: 'any|1', pick: 'away#Olen Zellweger' }, reg, null, 'hóquei marcadores: sem a ESPN → equipa');
+  // dados reais
+  const Rs = [];
+  for (const r of HD.results) { const R = FEED.parseResult(r, 'hockey'); if (R?.done) { const { done, finishedAt, note, ...x } = R; Rs.push(x); } }
+  Rs.push(reg, ot, so);
+  const withOrder = Rs.filter((R) => R.gorder).length;
+  let mks = 0, sels = 0;
+  for (const m of HD.matches) {
+    const ev = FEED.toEvent(m, Date.now(), 'hockey', true);
+    if (!ev?.markets) continue;
+    const S = M.selections({ ...ev, date: new Date(ev.date) }).filter((s) => !['hgs', 'x'].includes(s.market));
+    sels += S.length;
+    const by = new Map();
+    for (const s of S) {
+      const pk = String(s.pick), base = pk.replace(/^!/, '');
+      const twin = s.market === 'pcond' && S.some((o) => o !== s && o.per === s.per && String(o.pick).replace(/^!/, '') === base);
+      const k = s.market === 'pspr' || s.market === 'spread' ? `${s.market}|${s.per}|${pk === 'home' ? s.line : -s.line}`
+        : s.market === 'pteam' ? `${s.market}|${s.per}|${pk.split(':')[0]}|${s.line}`
+          : s.market === 'hng' ? `hng|${s.per}|${pk.split(':')[0]}`
+            : s.market === 'pcond' ? `pcond|${s.per}${twin ? '|' + base : ''}`
+              : `${s.market}|${s.per ?? ''}|${s.line ?? ''}`;
+      if (!by.has(k)) by.set(k, []); by.get(k).push(s);
+    }
+    for (const list of by.values()) {
+      mks++;
+      for (const R of Rs) {
+        // pênaltis sem vencedor na fonte (alts): vale o que der igual nos dois casos, como em settleLeg
+        const one = (s) => { const L = { market: s.market, pick: s.pick, line: s.line, per: s.per }; if (!R.alts) return M.legOutcome(L, R); const v = R.alts.map(([h, a]) => M.legOutcome(L, { ...R, h, a, alts: null })); return v.every((x) => x === v[0]) ? v[0] : null; };
+        const outs = list.map(one);
+        if (outs.every((x) => x == null) || ['dcr', 'pdc'].includes(list[0].market)) continue; // a equipa decide · dupla chance tem 2 vencedores (ex.: placar exato num jogo com prorrogação)
+        const wins = outs.filter((x) => x === 1).length;
+        const exactish = ['pcs', 'pcond'].includes(list[0].market); // placares/margens/faixas que a bet365 não lista todos
+        const ok = !outs.some((x) => x == null) && (wins === 1 || list.length === 1 || (exactish && wins === 0) || outs.every((x) => x === 0) || (list[0].market === 'pml2' && outs.every((x) => x === 0)));
+        check(ok, `hóquei real: ${list[0].marketName} → ${list.map((s, i) => `${s.name}=${outs[i]}`).join(' | ')} (${R.h}-${R.a}${R.so ? ' pên.' : ''} reg ${R.reg})`);
+      }
+    }
+  }
+  check(withOrder > 50, `hóquei: ordem dos gols só em ${withOrder} resultados`);
+  console.log(`  hóquei: ${sels} seleções reais em ${mks} mercados, ${Rs.length} resultados (${withOrder} com a ordem dos gols)`);
+}
+
 /* ================= 4) partidas reais de ténis (MoviOdds) ================= */
 async function realTennis() {
   const F = require(path.join(__dirname, '..', 'feeds', 'moviodds.js'));

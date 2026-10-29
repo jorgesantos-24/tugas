@@ -14,7 +14,7 @@ const DEP_LABEL = { CREATING: 'a gerar', PENDING: 'à espera do PIX', PAID: 'pag
 function liveCard(l) {
   if (!l) return '';
   const w = l.ws || {};
-  const bad = Object.entries(w.health || {}).filter(([k, v]) => ['soccer', 'basketball', 'tennis', 'ice_hockey', 'esports'].includes(k) && (v.live !== 'ok' || v.pre !== 'ok'));
+  const bad = Object.entries(w.health || {}).filter(([k, v]) => ['soccer', 'basketball', 'tennis', 'ice_hockey', 'mma', 'table_tennis', 'esports'].includes(k) && (v.live !== 'ok' || v.pre !== 'ok'));
   const state = w.open ? `<b style="color:#22c55e">Tempo real ligado</b>` : `<b style="color:#f59e0b">Só pedidos normais</b>`;
   const lp = w.livePolls || {};
   return `<div class="card"><small>Odds ao vivo (WebSocket)</small>${state}<span>${w.withData || 0}/${w.subscribed || 0} jogos seguidos · ${w.kbPerSec || 0} KB/s · ${l.browsers} navegadores · ${l.live} ao vivo` +
