@@ -1874,6 +1874,9 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
   }
+  // emblemas da API-Football pelo nosso domínio (o media.api-sports.io é bloqueado no DNS de provedores brasileiros)
+  const crest = (req.method === 'GET' || req.method === 'HEAD') && /^\/escudos\/(\d{1,7})\.png$/.exec(url.pathname);
+  if (crest) return LOGOS.serveCrest(crest[1], res);
   if (!url.pathname.startsWith('/api/')) return serveStatic(req, res);
   if (req.method === 'POST' && url.pathname === '/api/webhooks/bravopay') return handleWebhook(req, res);
   if (req.method === 'GET' && url.pathname === '/api/stream') { // odds ao vivo empurradas

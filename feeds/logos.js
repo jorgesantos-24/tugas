@@ -141,15 +141,40 @@ function soccerCountryLogo(name, league) {
 
 /* Futebol, reserva: equipas de cada país da API-Football (api-sports.io), num ficheiro fixo do projeto
    (feeds/escudos-futebol.json, gerado por `node scripts/escudos-futebol.js` com a chave grátis: 1 pedido por país).
-   O servidor não faz pedidos à API: as imagens vêm de media.api-sports.io/football/teams/<id>.png, sem chave.
-   Formato: { "Tchéquia": [["Slavia Praha", 560], …] }. */
+   O servidor não faz pedidos à API. As imagens (media.api-sports.io/football/teams/<id>.png, sem chave) passam pelo
+   nosso endereço /escudos/<id>.png: provedores brasileiros bloqueiam media.api-sports.io no DNS (visto 29/10 no
+   181.213.132.4), e assim o cliente nunca fala com esse domínio. Formato: { "Tchéquia": [["Slavia Praha", 560], …] }. */
 const AF_FILE = path.join(__dirname, 'escudos-futebol.json');
 const afCountry = new Map(); // país → [{ names, url }]
 try {
   for (const [c, teams] of Object.entries(JSON.parse(fs.readFileSync(AF_FILE, 'utf8')))) {
-    afCountry.set(c, teams.map(([n, id]) => ({ names: [norm(n)].filter(Boolean), url: `https://media.api-sports.io/football/teams/${id}.png` })));
+    afCountry.set(c, teams.map(([n, id]) => ({ names: [norm(n)].filter(Boolean), url: `/escudos/${id}.png` })));
   }
 } catch { /* ainda não gerado */ }
+// GET /escudos/<id>.png: busca a imagem uma vez e guarda-a em memória (o CDN do Firebase Hosting guarda-a também)
+const crestMem = new Map(); // id → { body, type } ou Promise
+const CREST_MAX = 4000;
+async function serveCrest(id, res) {
+  let c = crestMem.get(id);
+  if (!c) {
+    c = (async () => {
+      const r = await fetch(`https://media.api-sports.io/football/teams/${id}.png`, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return { body: Buffer.from(await r.arrayBuffer()), type: r.headers.get('content-type') || 'image/png' };
+    })();
+    crestMem.set(id, c);
+    if (crestMem.size > CREST_MAX) crestMem.delete(crestMem.keys().next().value); // a mais antiga
+  }
+  try {
+    const v = await c;
+    crestMem.set(id, v);
+    res.writeHead(200, { 'Content-Type': v.type, 'Content-Length': v.body.length, 'Cache-Control': 'public, max-age=604800, s-maxage=604800' });
+    res.end(v.body);
+  } catch {
+    crestMem.delete(id); // tenta de novo no próximo pedido
+    res.writeHead(404, { 'Cache-Control': 'public, max-age=300' }); res.end();
+  }
+}
 function afLogo(name, league) {
   const list = afCountry.get(countryOf(league));
   return list ? listLogo(list, name) : '';
@@ -437,4 +462,4 @@ async function start() {
 }
 const stats = () => ({ cached: cache.size, withLogo: [...cache.values()].filter((v) => v.url).length, queue: queue.size + lpQueue.size, found, missed });
 
-module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE, lookupEsports };
+module.exports = { logo, start, stats, save, expand, sameTeam, ESPN_LEAGUE, lookupEsports, serveCrest };
