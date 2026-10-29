@@ -803,6 +803,8 @@ tennisCross(buildMatch([{ wins: 'HHHHHH' }, { wins: 'HHHHHAH' }]), 'ténis monta
   for (const m of HD.matches) {
     const ev = FEED.toEvent(m, Date.now(), 'hockey', true);
     if (!ev?.markets) continue;
+    const xs = ev.markets.filter((mk) => mk.k === 'x').map((mk) => mk.name);
+    check(!xs.length, `hóquei 100% automático: ${ev.home.name} tem mercados da equipa (${xs.join(', ')})`);
     const S = M.selections({ ...ev, date: new Date(ev.date) }).filter((s) => !['hgs', 'x'].includes(s.market));
     sels += S.length;
     const by = new Map();

@@ -143,6 +143,7 @@ function quote(q, m, sport) {
   if (sport === 'hockey' && /^1st 10 Minutes?(\s|$)/i.test(String(q.group_name ?? ''))) return null;
   // tempos, quartos, períodos, escanteios, rondas: com regra de liquidação (feeds/auto.js) deixam de ir para a equipa
   const s = AUTO.apply(gen, q, m, sport);
+  if (sport === 'hockey' && s.k === 'x') return null; // hóquei 100% automático (29/10): sem regra de liquidação não se oferece
   if (sport !== 'soccer' || s.k !== 'x') return s;
   /* Futebol (decisão de 2026-10-27): os mercados da equipa saem, exceto
      - jogadores: liquidados sozinhos com as estatísticas por jogador (os que não dá para liquidar não abrem);

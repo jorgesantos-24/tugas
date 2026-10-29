@@ -225,11 +225,12 @@ function rule(q, m, sport) {
     if (g === 'Correct Score') return { k: 'pcs', scope: 'ftr', pick: orient(q.side || 'Tie', val()) };
     if ((x = /^(1st|2nd|3rd) Period Correct Score$/.exec(g))) return /^any other/i.test(val()) ? null : { k: 'pcs', scope: PERIOD[x[1]], pick: orient(q.side || 'Tie', val()) };
     if (g === 'Winning Margin') { const w = who(q.side), b = /^(\d+)(\+?)$/.exec(val()); return (w === 'home' || w === 'away') && b ? cond('ftr', [`m${w[0]}=in:${b[1]}-${b[2] ? 99 : b[1]}`]) : null; }
-    if (g === '3-Way' && q.line === 'Line') { // handicap a 3 (tempo regulamentar); o empate traz a linha da casa — confere-se com a seleção irmã
+    if (g === '3-Way' && q.line === 'Line') { // handicap a 3 (tempo regulamentar); o empate traz a linha de quem recebe gols (+1), seja casa ou fora
       const sib = (m.quotes || []).filter((y) => y.group_id === q.group_id && y.market_id === q.market_id && y.line === 'Line' && Number.isFinite(lineOf(y)));
       const hRow = sib.find((y) => who(y.side) === 'home'), aRow = sib.find((y) => who(y.side) === 'away');
       const hl = hRow ? lineOf(hRow) : aRow ? -lineOf(aRow) : NaN, w = who(q.side);
-      if (!Number.isInteger(hl) || (hRow && aRow && lineOf(hRow) !== -lineOf(aRow)) || (w === 'draw' && lineOf(q) !== hl)) return null;
+      if (!Number.isInteger(hl) || sib.filter((y) => who(y.side) === 'home').length > 1 || sib.filter((y) => who(y.side) === 'away').length > 1
+        || (hRow && aRow && lineOf(hRow) !== -lineOf(aRow)) || (w === 'draw' && Math.abs(lineOf(q)) !== Math.abs(hl))) return null;
       const c = w ? cond('reg', [`mh=${{ home: 'gt', draw: 'eq', away: 'lt' }[w]}:${-hl}`]) : null;
       return c && { ...c, sub: `h${hl}`, mname: `Handicap a 3 opções ${hl > 0 ? '+' : ''}${hl} (tempo regulamentar)`, name: w === 'draw' ? `Empate (${hl > 0 ? '+' : ''}${hl})` : `${w === 'home' ? m.home : m.away} ${w === 'home' ? (hl > 0 ? '+' : '') + hl : (-hl > 0 ? '+' : '') + -hl}` };
     }
