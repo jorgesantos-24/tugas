@@ -813,11 +813,12 @@ function linesTable(list, ev, open = true) {
     ${(open ? (x) => x : mainWindow)([...rows].sort((a, b) => a[0] - b[0])).map(([k, r]) => `<div class="ln-row">${total ? `<span class="ln">${k}</span>` : ''}${cell(r[0], total ? '' : fmtLine(r[0]?.cline ?? k))}${cell(r[1], total ? '' : fmtLine(r[1]?.cline ?? -k))}</div>`).join('')}</div>`;
 }
 
-/* margem de vitória de cada equipa (pick "mh=..." casa / "ma=..." visitante): uma coluna por equipa, com o nome no
-   topo e só a margem nos botões ("1-5", "21+") */
+/* margem de vitória e par/ímpar de cada equipa (pick "mh=..." / "par=h:..." casa, "ma=..." / "par=a:..." visitante):
+   uma coluna por equipa, com o nome no topo e só a margem (ou Par/Ímpar) nos botões */
 function teamCols(list, ev, open = true) {
-  if (!list.every((s) => /^m[ha]=/.test(String(s.pick)))) return '';
-  const col = (t, side) => list.filter((s) => s.pick.startsWith(side)).map((s) => ({ ...s, name: String(s.name).startsWith(t.name) ? s.name.slice(t.name.length).trim() : s.name }));
+  const sideOf = (s) => (/^(mh=|par=h:)/.test(String(s.pick)) ? 'h' : /^(ma=|par=a:)/.test(String(s.pick)) ? 'a' : null);
+  if (!list.every(sideOf)) return '';
+  const col = (t, side) => list.filter((s) => sideOf(s) === side[1]).map((s) => ({ ...s, name: String(s.name).startsWith(t.name) ? s.name.slice(t.name.length).trim() : s.name }));
   const h = col(ev.home, 'mh='), a = col(ev.away, 'ma=');
   if (!h.length || !a.length) return '';
   const n = open ? Math.max(h.length, a.length) : Math.min(Math.max(h.length, a.length), MKT_SELS);

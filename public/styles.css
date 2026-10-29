@@ -212,6 +212,14 @@ img[src*="/headshots/mma/"]{border-radius:50%;object-fit:cover!important;object-
 .pl-grid .wide-odd{min-width:0;width:100%;justify-content:center}
 .lines-tbl.combo .ln-head,.lines-tbl.combo .ln-row{grid-template-columns:minmax(96px,1.1fr) 1fr 1fr}
 .lines-tbl .ln-team{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* telemóvel: nomes compridos passam para duas linhas em vez de cortar; 3 opções ficam 2 + 1 */
+@media (max-width:700px){
+  .lines-tbl .ln-team,.lines-tbl .ln-head span,.pl-grid .pl-name{white-space:normal;line-height:1.2}
+  .pl-grid{grid-template-columns:minmax(112px,1.2fr) repeat(var(--n),minmax(54px,1fr))}
+  .market-body:not(.many) .wide-odd{flex:1 1 calc(50% - 4px)}
+  .market-body .wide-odd{height:auto;min-height:44px;padding-top:4px;padding-bottom:4px}
+  .market-body .wide-odd .lbl{white-space:normal;line-height:1.2;text-align:left}
+}
 .lines-tbl .wide-odd{min-width:0;width:100%}
 .timeline{background:var(--panel);border-radius:12px;padding:6px 14px}
 .tl-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:13px}
