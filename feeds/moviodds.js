@@ -24,6 +24,7 @@ const BP = require('./bplayers.js'); // basquete: mercados de jogadores (box sco
 const ESPN = require('./espn.js'); // box score do basquete (NBA/WNBA) e marcadores da NHL
 const BB = require('./betbuilder.js'); // Criar aposta: que seleções o motor sabe calcular
 const BK = require('./bbasket.js'); // Criar aposta do basquete
+const TN = require('./btennis.js'); // Criar aposta do ténis
 const HG = require('./hgoals.js'); // hóquei: marcadores (NHL) e ordem dos gols
 const FIGHTS = require('./fights.js'); // MMA: resultado das lutas (MoviOdds + ESPN)
 const TT = require('./tabletennis.js'); // tênis de mesa: mercados e resultado (placar de cada set)
@@ -457,6 +458,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     else if (sport === 'soccer' && live && BB.liveQ({ home: m.home, away: m.away, live: {} }, q)) sel.bb = 1;
     // basquete (antes e ao vivo; a NCAA joga em 2 tempos: só antes do jogo): pela forma da seleção
     else if (sport === 'basketball' && !(live && lg.key === 'ncaab') && BK.supports({ market: s.k, per: s.per, pick: s.pick, line: s.line })) sel.bb = 1;
+    // ténis (antes e ao vivo): pela forma da seleção
+    else if (sport === 'tennis' && TN.supports({ market: s.k, per: s.per, pick: s.pick, line: s.line })) sel.bb = 1;
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
@@ -825,7 +828,7 @@ module.exports = {
     const minute = Number(c.min) + run;
     // basquete: o relógio conta para trás (minutos que faltam no quarto)
     const left = Math.max(0, Number(c.min) + (Number(c.sec) || 0) / 60 - run);
-    return { home: meta.m.home, away: meta.m.away, quotes, st, minute: Math.floor(minute), left: c.min == null ? null : left, ticking: !!c.ticking };
+    return { home: meta.m.home, away: meta.m.away, quotes, st, minute: Math.floor(minute), left: c.min == null ? null : left, ticking: !!c.ticking, score: meta.m.score ?? null };
   },
   bbMatch: (id) => { const meta = lastMeta.get(String(id)), f = fullQuotes.get(String(id)); return meta && f && Date.now() - f.at < EXTRA_PRE_MS ? { home: meta.m.home, away: meta.m.away, quotes: f.quotes } : null; },
   // última leitura da bet365 pela MoviOdds para este jogo (ms, relógio da fonte), pelo WebSocket; null sem WebSocket

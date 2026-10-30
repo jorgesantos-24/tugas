@@ -10,6 +10,7 @@
     "verificar": "node scripts/verificar.js",
     "testar": "node scripts/testar-mercados.js",
     "testar:tenis": "node scripts/testar-tenis.js",
+    "testar:criar-aposta-tenis": "node scripts/testar-criar-aposta-tenis.js",
     "testar:futebol": "node --max-old-space-size=4096 scripts/testar-futebol.js",
     "auditar": "node --max-old-space-size=4096 scripts/auditar-odds.js",
     "deploy": "node scripts/deploy.js"
