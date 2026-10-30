@@ -34,6 +34,7 @@ const FB = require('./firebase.js');
 const FEED = require('./feeds/moviodds.js'); // jogos, odds e resultados
 const BB = require('./feeds/betbuilder.js'); // Criar aposta (várias seleções do mesmo jogo numa odd)
 const BK = require('./feeds/bbasket.js'); // Criar aposta do basquete
+const BKPOOL = require('./feeds/bbpool.js'); // o ajuste do motor do basquete num worker (não para o servidor)
 const TN = require('./feeds/btennis.js'); // Criar aposta do tênis
 const B365 = require('./feeds/bb365.js'); // Bet Builder da bet365 (MoviOdds, só antes do jogo): a odd do Criar aposta
 const BOOST = require('./feeds/boosts.js'); // Super Odds: combinações escolhidas pelo sistema, com a odd aumentada
@@ -705,6 +706,8 @@ function findSel(key) {
    a partir de todas as odds da bet365 desse jogo. Pode juntar-se a outros jogos numa múltipla. */
 const BB_SPORTS = { soccer: BB, basketball: BK, tennis: TN }; // motor de cada modalidade (basquete: feeds/bbasket.js; ténis: feeds/btennis.js)
 const bbEngine = (ev) => BB_SPORTS[ev.sport];
+// motor do jogo (Promise): o do basquete é ajustado no worker; low = Super Odds (espera atrás dos jogadores)
+const engineOf = async (ev, m, maxAge, low) => (ev.sport === 'basketball' ? BKPOOL.engineFor(ev.id, m, maxAge, low) : bbEngine(ev).engineFor(ev.id, m, maxAge));
 // modalidades sem motor nosso: Criar aposta só antes do jogo e só com a odd do Bet Builder da bet365
 const B365_ONLY = new Set(['mma', 'hockey', 'tabletennis']);
 const bbEligible = (ev) => !!ev && !ev.manual && !M.isSuspended(ev) && ((!!BB_SPORTS[ev.sport] && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting))) || (B365_ONLY.has(ev.sport) && B365.enabled() && ev.state === 'pre' && now() < +ev.date));
@@ -773,7 +776,7 @@ function srcQuote(ev, o) {
 }
 // odd de um grupo de seleções do mesmo jogo → { odds, params, items } ou { reason, bad? }
 // maxAge: idade máxima do motor (na aceitação de uma aposta ao vivo: refeito com as cotações de agora)
-function bbQuote(keys, maxAge) {
+async function bbQuote(keys, maxAge, low) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
   if (!bbEligible(ev)) return { reason: BB_OFF };
   // sem motor nosso: as seleções vão tal como estão para a bet365 (bbFinal)
@@ -788,8 +791,9 @@ function bbQuote(keys, maxAge) {
     return { odds: 0, params: null, items, only365: true };
   }
   const m = bbMatchOf(ev);
-  const E = m && bbEngine(ev).engineFor(evId, m, maxAge);
+  const E = m && await engineOf(ev, m, maxAge, low);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  if (!bbEligible(events.get(evId))) return { reason: BB_OFF }; // o jogo mudou enquanto o motor era ajustado
   const items = [];
   for (const key of keys) {
     const { sel } = findSel(key);
@@ -837,7 +841,7 @@ const boostOk = (ev) => !!ev && ev.state === 'pre' && !ev.manual && !M.isSuspend
 // odd de um grupo de seleções do mesmo jogo, com a Super Odd quando é uma delas → resultado de bbFinal (+ boost) ou { reason }
 async function bbPriced(keys, maxAge) {
   const ev = events.get(String(keys[0]).split('|')[0]);
-  const q = bbQuote(keys, ev?.state === 'in' ? maxAge ?? 2000 : undefined);
+  const q = await bbQuote(keys, ev?.state === 'in' ? maxAge ?? 2000 : undefined);
   if (q.reason) return q;
   const f = await bbFinal(ev, q, maxAge);
   if (f.reason) return f;
@@ -857,7 +861,7 @@ async function makeBoosts() {
       const mine = [], used = new Set();
       const tryLegs = async (ev, legs) => {
         const keys = legs.map((s) => s.key);
-        const q = bbQuote(keys);
+        const q = await bbQuote(keys, undefined, true);
         // o nosso motor primeiro (sem gastar pedidos à bet365): fora da faixa, nem pergunta
         if (q.reason || (q.odds && (q.odds < BOOST.MIN * 0.8 || q.odds > BOOST.MAX * 1.25))) return null;
         const f = await bbFinal(ev, q);
@@ -871,6 +875,7 @@ async function makeBoosts() {
           if (!second && used.has(ev.id)) continue;
           for (const legs of BOOST.prefer(BOOST.combosOf(ev, M.selections(ev)), BOOST.SIZES[mine.length] || 3)) {
             if (mine.some((b) => b.key === boostKey(legs.map((s) => s.key)))) continue;
+            await new Promise(setImmediate); // dá a vez aos pedidos dos jogadores entre um motor e o seguinte
             const r = await tryLegs(ev, legs);
             if (r) { mine.push(r); used.add(ev.id); break; }
           }
@@ -898,12 +903,13 @@ function boostsPublic() {
   return out;
 }
 // aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
-function bbPreview(keys) {
+async function bbPreview(keys) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
   if (!bbEligible(ev) || B365_ONLY.has(ev.sport)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
-  const E = m && bbEngine(ev).engineFor(evId, m);
+  const E = m && await engineOf(ev, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  if (!bbEligible(events.get(evId))) return { reason: BB_OFF };
   const items = [];
   for (const key of keys) {
     const { sel } = findSel(key);
@@ -912,7 +918,7 @@ function bbPreview(keys) {
   }
   const mine = new Set(keys);
   const cands = M.selections(ev).filter((s) => s.bb && !s.locked && !mine.has(s.key)).map((s) => ({ key: s.key, q: specOf(ev, s), odds: s.odds }));
-  const odds = bbEngine(ev).preview(E, items, cands);
+  const odds = ev.sport === 'basketball' ? await BKPOOL.preview(evId, m, E, items, cands) : bbEngine(ev).preview(E, items, cands);
   if (odds) { const cap = bbCap(ev); for (const k in odds) if (odds[k] > cap) odds[k] = cap; }
   return odds ? { odds } : { reason: 'estas seleções não entram no Criar aposta' };
 }
@@ -920,12 +926,13 @@ function bbPreview(keys) {
 /* Criar aposta no navegador: o modelo do jogo (parâmetros do motor) e a cotação de cada seleção que entra.
    O navegador mostra as odds recalculadas na hora; a odd da aposta continua a ser a do servidor (/api/betbuilder/price). */
 const BB_FIELDS = ['group_name', 'group_id', 'side', 'label', 'line', 'handicap', 'n2'];
-function bbModel(evId) {
+async function bbModel(evId) {
   const ev = events.get(evId);
   if (!bbEligible(ev) || B365_ONLY.has(ev.sport)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
-  const E = m && bbEngine(ev).engineFor(evId, m);
+  const E = m && await engineOf(ev, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
+  if (!bbEligible(events.get(evId))) return { reason: BB_OFF };
   const src = {};
   for (const s of M.selections(ev)) {
     if (!s.bb) continue;

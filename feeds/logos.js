@@ -211,8 +211,20 @@ function espnLogo(sport, name, league) {
 }
 // palavras que sozinhas não identificam uma equipa
 const GENERIC = new Set('united city town athletic atletico athletico sporting real deportivo union club rovers wanderers rangers county borough albion basket basketball baskets women reserves'.split(' '));
-// strict: sem o "contém" (lista de outra liga: "Strasbourg" contém "Bourg")
+/* strict: sem o "contém" (lista de outra liga: "Strasbourg" contém "Bourg")
+   Resultado guardado por lista: a procura percorre a lista toda (milhares de equipas por país) e corria para cada
+   jogo a cada atualização — até 5 s com o servidor parado. As listas são trocadas por novas quando se atualizam,
+   e a memória de uma lista antiga vai com ela. */
+const listMemo = new WeakMap(); // lista → Map(nome → emblema)
 function listLogo(list, name, strict = false) {
+  let m = listMemo.get(list);
+  if (!m) listMemo.set(list, (m = new Map()));
+  const k = (strict ? '1|' : '0|') + name;
+  let u = m.get(k);
+  if (u === undefined) m.set(k, (u = findLogo(list, name, strict)));
+  return u;
+}
+function findLogo(list, name, strict) {
   const qs = [norm(expand(name)), norm(name)].filter(Boolean);
   for (const q of [...qs]) if (ALIAS[q]) qs.push(ALIAS[q]);
   // "Sport Recife" perde a palavra "sport" ao normalizar: usa também o nome sem normalizar as siglas de clube

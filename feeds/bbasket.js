@@ -543,12 +543,18 @@ function fromParams(X) {
 // duração do jogo: NBA 48 minutos, o resto 40 (a prorrogação é sempre de 5)
 const regMinutes = (league) => (/^(bk\.)?nba$/i.test(String(league ?? '')) ? 48 : 40);
 function build(m) {
-  if (m.live) return buildLive(m);
-  const P = fitGame({ ...m, k: 5 / regMinutes(m.league) });
-  if (!P) return null;
-  const E = fromParams({ home: m.home, away: m.away, P, pl: fitPlayers(m) });
+  const f = fitOf(m);
+  if (!f) return null;
+  const E = fromParams({ home: m.home, away: m.away, ...f });
   E.m = m;
   return E;
+}
+/* a parte pesada de build (ajuste às odds, 0,5–1,5 s num jogo da NBA) → { P, pl, live? } ou null.
+   No servidor corre num worker (feeds/bbpool.js); a montagem com fromParams leva ~5 ms. */
+function fitOf(m) {
+  if (m.live) return fitLiveOf(m);
+  const P = fitGame({ ...m, k: 5 / regMinutes(m.league) });
+  return P ? { P, pl: fitPlayers(m) } : null;
 }
 const modelOf = (E) => ({ v: E.v, ...paramsOf(E, null) });
 const srcOf = (l) => legOfSpec(l);
@@ -570,7 +576,7 @@ function requote(params, kept) {
               left (minutos que faltam no quarto), roster: [{ key, side, played, pts, reb, ast, tpm, stl, blk }] }
    O ajuste usa as odds ao vivo traduzidas para "o que falta": as linhas da bet365 contam o jogo todo, por isso cada
    seleção vê o que já aconteceu + o que falta (o mesmo bitsOf, com a simulação já somada). */
-function buildLive(m) {
+function fitLiveOf(m) {
   const L = m.live, len = regMinutes(m.league) / 4;
   if (!(L.period >= 1 && L.period <= 4) || !(L.left >= 0)) return null; // prorrogação: fora
   // parte do quarto atual que falta e quartos seguintes: pesos do que falta
@@ -582,9 +588,7 @@ function buildLive(m) {
   const P = fitLive(m, L, fCur, k, base);
   if (!P) return null;
   const live = { q: done, cur, period: L.period, fCur, base, roster: L.roster || [] };
-  const E = fromParams({ home: m.home, away: m.away, P, pl: fitPlayers({ ...m, sels: liveBpSels(m.sels, live) }), live });
-  E.m = m;
-  return E;
+  return { P, pl: fitPlayers({ ...m, sels: liveBpSels(m.sels, live) }), live };
 }
 // pesos do que falta: o resto do quarto atual (fCur) e os quartos seguintes inteiros
 // cc: ritmo do resto do quarto atual (o fim de um quarto costuma ter mais pontos: faltas, últimas posses)
@@ -703,8 +707,10 @@ function liveBpSels(sels, live) {
 /* motor de cada jogo, guardado alguns minutos (montar leva ~100 ms) */
 const cache = new Map();
 const TTL = 3 * 60000, LIVE_TTL = 8000;
+// o motor guardado só serve enquanto as odds (antes do jogo) ou o placar e o relógio (ao vivo) são os mesmos
+const sigOf = (m) => (m.live ? JSON.stringify([m.live.q, m.live.cur, m.live.period, Math.round(m.live.left * 2)]) : m.sels.map((s) => s.odds).join(','));
 function engineFor(id, m, maxAge) {
-  const c = cache.get(id), sig = m.live ? JSON.stringify([m.live.q, m.live.cur, m.live.period, Math.round(m.live.left * 2)]) : m.sels.map((s) => s.odds).join(',');
+  const c = cache.get(id), sig = sigOf(m);
   if (c && Date.now() - c.at < (maxAge ?? (m.live ? LIVE_TTL : TTL)) && c.sig === sig) return c.E;
   let E = null;
   try { E = build(m); } catch (e) { console.error('[Criar aposta basquete]', id, e.message); }
@@ -714,4 +720,4 @@ function engineFor(id, m, maxAge) {
   return E;
 }
 
-module.exports = { supports, engineFor, build, fromParams, modelOf, quote, preview, requote, srcOf, MAX_LEGS, bitsOf, legFor, jointBits, analytic, fitGame, fitPlayers, N, R_MAX };
+module.exports = { supports, engineFor, build, fitOf, sigOf, TTL, LIVE_TTL, fromParams, modelOf, quote, preview, requote, srcOf, MAX_LEGS, bitsOf, legFor, jointBits, analytic, fitGame, fitPlayers, N, R_MAX };

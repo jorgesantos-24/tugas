@@ -2143,9 +2143,27 @@ function go(view, extra = {}, opts = {}) {
   S.keepScroll = false; S.listLimit = LIST_STEP;
   if (!opts.fromHistory) syncUrl(opts.replace);
   closeDrawers(); render(); window.scrollTo(0, 0);
-  // página do jogo: mostra logo o que há e completa com todos os mercados
-  if (view === 'event' && S.eventId) loadFull([S.eventId]).then(() => { if (S.view === 'event') { S.keepScroll = true; safeRender(); } });
+  // página do jogo: mostra logo o que há e completa com todos os mercados (se já vieram antes do clique, nada a esperar)
+  if (view === 'event' && S.eventId && !fullFresh(S.eventId)) prefetchFull(S.eventId).then(() => { if (S.view === 'event') { S.keepScroll = true; safeRender(); } });
 }
+/* Mercados completos pedidos antes do clique: rato parado em cima do jogo (120 ms) ou dedo a tocar nele.
+   Quando o clique chega, o pedido já vai a meio ou já voltou. Um só pedido por jogo de cada vez. */
+const fullPending = new Map(); // id do jogo → pedido em curso
+const fullFresh = (id) => { const ev = S.events.get(id); return !!ev?.fullAt && Date.now() - ev.fullAt < 15000; };
+function prefetchFull(id) {
+  if (fullPending.has(id)) return fullPending.get(id);
+  const p = loadFull([id]).finally(() => fullPending.delete(id));
+  fullPending.set(id, p);
+  return p;
+}
+const intentOf = (e) => e.target.closest?.('[data-ev]')?.dataset.ev;
+let hoverT = 0;
+document.addEventListener('mouseover', (e) => {
+  clearTimeout(hoverT);
+  const id = intentOf(e);
+  if (id && S.events.has(id) && !fullFresh(id)) hoverT = setTimeout(() => prefetchFull(id), 120);
+});
+document.addEventListener('touchstart', (e) => { const id = intentOf(e); if (id && S.events.has(id) && !fullFresh(id)) prefetchFull(id); }, { passive: true });
 // botões voltar/avançar do navegador
 window.addEventListener('popstate', () => { const r = routeFromPath(); go(r.view, r, { fromHistory: true }); });
 function closeDrawers() { $('#sidebar').classList.remove('open'); $('#slip').classList.remove('open'); document.documentElement.classList.remove('drawer-open'); if (!$('#modal').classList.contains('show')) $('#overlay').classList.remove('show'); }

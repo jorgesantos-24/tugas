@@ -414,6 +414,7 @@ function toEvent(m0, serverNow, sport, full = true) {
   const staleAll = !!m.stale || feedBad || (live && m.polled_at && serverNow - Date.parse(m.polled_at) > STALE_LIVE_MS);
   const gs = m.group_status || {};
   const byK = new Map();
+  const selIdx = new Map(); // mercado → (seleção → posição em sels): procurar repetidas sem percorrer a lista toda
   const mainSel = new WeakSet(), conflict = new Set(); // seleções do mercado principal · com duas odds diferentes na fonte
   const prioOf = new WeakMap(); // prioridade do grupo de onde veio a seleção (totais do futebol)
   const specific = (q) => (sport === 'soccer' ? soccerQuote(q, m) : sport === 'tennis' ? TEN.quote(q, m) : sport === 'esports' ? esportsQuote(q, m) : sport === 'mma' ? fightQuote(q, m) : sport === 'tabletennis' ? TT.quote(q, m) : namedQuote(q, m, sport));
@@ -472,7 +473,9 @@ function toEvent(m0, serverNow, sport, full = true) {
     // a mesma seleção pode vir em dois grupos (principal e alternativas): fica a principal. Duas cotações com odds
     // diferentes para a mesma seleção sem nenhuma ser a principal (ex.: 'Draw - X' a 21 e 'Tie - X' a 34): não se sabe
     // qual está certa → a seleção sai do site
-    const dup = mk.sels.findIndex((x) => x.pick === sel.pick && x.line === sel.line && String(x.base) === String(sel.base));
+    if (!selIdx.has(mkKey)) selIdx.set(mkKey, new Map());
+    const idx = selIdx.get(mkKey), selKey = `${sel.pick}|${sel.line}|${String(sel.base)}`;
+    const dup = idx.has(selKey) ? idx.get(selKey) : -1;
     if (dup >= 0) {
       const old = mk.sels[dup];
       if (s.main && !mainSel.has(old)) { mk.sels[dup] = sel; mainSel.add(sel); }
@@ -483,6 +486,7 @@ function toEvent(m0, serverNow, sport, full = true) {
     prioOf.set(sel, s.prio || 0);
     if (s.main) mainSel.add(sel);
     if (s.main && sel.line != null && mk.main == null) mk.main = s.k === 'spread' ? Math.abs(sel.line) : sel.line;
+    idx.set(selKey, mk.sels.length);
     mk.sels.push(sel);
   }
   if (conflict.size) for (const [key, mk] of byK) {
