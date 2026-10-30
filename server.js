@@ -2078,23 +2078,26 @@ routes['POST /api/pgsoft/gold_api/game_callback'] = async (ctx) => {
   const win = toCents(s.win || 0);
   if (!(bet >= 0) || !(win >= 0)) fail(400, 'Valores inválidos.');
 
-  const txRef = db.collection('pgsoftTxns').doc(txnId);
-  if ((await txRef.get()).exists) { // já processámos esta rodada
-    const cur = await getUser(uid, true);
-    return { status: 1, msg: 'SUCCESS', user_balance: cur ? fromCents(cur.balance) : 0 };
-  }
+  if (!uid || uid.includes('/')) return { status: 0, msg: 'INVALID_USER' };
+  const txRef = db.collection('pgsoftTxns').doc(txnId.replace(/\//g, '_'));
 
-  let novo = 0;
+  // a verificação de rodada repetida fica DENTRO da transação: dois envios iguais ao mesmo tempo só pagam uma vez
+  let novo = 0, reply = null;
   await runTx([uid], async (t) => {
     const ref = col.user(uid);
-    const fu = (await t.get(ref)).data();
-    if (!fu) fail(400, 'Utilizador inexistente.');
-    novo = Math.max(0, fu.balance + win - bet);
+    const [done, us] = await Promise.all([t.get(txRef), t.get(ref)]);
+    const fu = us.data();
+    if (!fu || fu.blocked) { reply = { status: 0, msg: 'INVALID_USER' }; return; }
+    if (done.exists) { novo = fu.balance; return; } // já processámos esta rodada
+    // sem saldo para a aposta: a rodada é recusada (antes ficava a 0 e o prémio era pago na mesma)
+    if (bet > fu.balance) { reply = { status: 0, msg: 'INSUFFICIENT_USER_FUNDS', user_balance: fromCents(fu.balance) }; return; }
+    novo = fu.balance + win - bet;
     t.set(txRef, { uid, bet, win, delta: win - bet, game: s.game_code || null, at: now() });
     t.update(ref, { balance: novo });
     if (bet) addTx(t, uid, `${slotName(s.game_code)}: aposta`, -bet, txnId);
     if (win) addTx(t, uid, `${slotName(s.game_code)}: prémio`, win, txnId);
   });
+  if (reply) return reply;
   return { status: 1, msg: 'SUCCESS', user_balance: fromCents(novo) };
 };
 

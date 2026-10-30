@@ -50,7 +50,8 @@ const A = { me: null, view: 'saques', wdFilter: 'OPEN', depFilter: 'ALL', betFil
 async function boot() {
   try { A.me = (await api('GET', '/api/me')).user; } catch { A.me = null; }
   if (!A.me) return showLogin();
-  if (!A.me.isAdmin) { $('#main').innerHTML = `<div class="center-box"><h3>Sem acesso</h3><p class="sub">A conta ${esc(A.me.email)} não faz parte da equipa. Peça para incluírem o seu e-mail em <b>ADMIN_EMAILS</b> no ficheiro .env do servidor.</p><a class="btn btn-ghost btn-block" href="/">Voltar ao site</a></div>`; return; }
+  // conta sem acesso: volta ao site sem revelar nada sobre o painel
+  if (!A.me.isAdmin) return location.replace('/');
   if (!A.me.emailVerified) { $('#main').innerHTML = `<div class="center-box"><h3>Confirme o seu e-mail</h3><p class="sub">Para usar o painel, confirme primeiro o e-mail ${esc(A.me.email)} (no site: Minha conta → Perfil).</p><a class="btn btn-green btn-block" href="/">Ir ao site</a></div>`; return; }
   $('#who').textContent = A.me.email;
   renderTabs();
