@@ -381,8 +381,10 @@ const bbLoading = new Set();
 async function ensureModel(ev, force = false) {
   if (!bbEng(ev) || !bbOk(ev) || bbLoading.has(ev.id)) return;
   const c = bbM.get(ev.id);
-  // ao vivo as odds e o jogo mudam a cada segundo: modelo novo a cada 5 s (o servidor refá-lo a cada 8 s)
-  if (c && Date.now() - c.at < (force ? 5000 : ev.state === 'in' ? 5000 : 90000)) return;
+  /* ao vivo as odds e o jogo mudam a cada segundo: modelo novo a cada 5 s (o servidor refá-lo a cada 8 s); no basquete
+     a cada 10 s, porque preparar os jogadores custa ~3 s de contas no navegador (feitas aos bocados, ver warmModel) */
+  const every = ev.state !== 'in' ? 90000 : ev.sport === 'basketball' ? 10000 : 5000;
+  if (c && Date.now() - c.at < (force ? 5000 : every)) return;
   bbLoading.add(ev.id);
   try {
     const r = await api('GET', `/api/betbuilder/model?ev=${encodeURIComponent(ev.id)}`);
@@ -390,16 +392,29 @@ async function ensureModel(ev, force = false) {
     // o mesmo motor do servidor que já temos: fica (com as contas já feitas)
     if (c?.E && c.v === r.model.v) c.at = Date.now();
     else {
-      const E = bbEng(ev).fromParams(r.model);
+      const eng = bbEng(ev), E = eng.fromParams(r.model);
       E.m = { home: r.model.home, away: r.model.away, quotes: [], live: r.model.live || null };
       E.v = r.model.v;
+      // basquete: cada seleção preparada aos bocados antes de trocar de modelo (o antigo serve entretanto) — de uma
+      // vez eram 2,6 s de página parada a cada modelo ao vivo
+      if (eng.legFor) await warmModel(eng, E, ev, r.src || {});
       bbM.set(ev.id, { at: Date.now(), v: r.model.v, E, src: r.src || {}, memo: new Map() });
       // primeira conta já agora (prepara cada seleção do jogo no motor; os cliques seguintes ficam em milissegundos)
-      setTimeout(() => { const ev2 = S.events.get(ev.id), first = ev2 && selections(ev2).find((s) => s.bb && !s.locked); if (first) bbLocal(ev2, [{ key: first.key, evId: ev.id }]); }, 30);
+      if (!eng.legFor) setTimeout(() => { const ev2 = S.events.get(ev.id), first = ev2 && selections(ev2).find((s) => s.bb && !s.locked); if (first) bbLocal(ev2, [{ key: first.key, evId: ev.id }]); }, 30);
     }
   } catch { bbM.set(ev.id, { ...(c || {}), at: Date.now() - 60000 }); } // falhou: tenta outra vez daqui a 30 s
   bbLoading.delete(ev.id);
   if (S.view === 'event' && S.eventId === ev.id && S.evTab?.id === ev.id && S.evTab.tab === 'bb') { S.keepScroll = true; renderMain(); }
+}
+// as seleções do jogo no motor, ~30 ms de cada vez (os jogadores do basquete são simulados um a um)
+async function warmModel(eng, E, ev, src) {
+  const ev2 = S.events.get(ev.id) || ev;
+  const qs = selections(ev2).filter((s) => s.bb && !s.locked && src[s.key]).map((s) => src[s.key]);
+  let t = performance.now();
+  for (const q of qs) {
+    try { eng.legFor(E, q); } catch { /* a seleção fica de fora, como no servidor */ }
+    if (performance.now() - t > 30) { await new Promise((r) => setTimeout(r, 0)); t = performance.now(); }
+  }
 }
 // { odds: { chave: odd }, mine: odd das escolhidas (2 ou mais) } pelo motor do navegador; undefined sem modelo
 function bbLocal(ev, mine) {
@@ -1333,7 +1348,8 @@ function renderEvent() {
     bbShow = tab !== 'bb' || !mineKey ? null : loc !== undefined ? loc.odds : S.bbPrev?.k === mineKey ? S.bbPrev.odds : null;
     bbMine = tab === 'bb' && mine.length > 1 ? bbOf(mine)?.odds || loc?.mine || null : null;
     // modelo do jogo pedido logo ao abrir a página (o primeiro clique já calcula na hora)
-    if (bbOk(ev)) queueMicrotask(() => ensureModel(ev));
+    // basquete ao vivo: só para quem usa o Criar aposta (aba aberta ou seleção deste jogo no boletim)
+    if (bbOk(ev) && (ev.sport !== 'basketball' || ev.state !== 'in' || tab === 'bb' || S.slip.some((s) => s.evId === ev.id))) queueMicrotask(() => ensureModel(ev));
     if (tab === 'bb') queueMicrotask(ensurePreview);
     // totais e handicaps aparecem em tabela (uma linha por fila); no Criar aposta só as seleções que o motor junta
     let entries = tab === 'bb' ? Object.entries(groups).map(([n, l]) => [n, l.filter((s) => s.bb)]).filter(([, l]) => l.length)
