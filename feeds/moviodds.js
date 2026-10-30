@@ -6,6 +6,9 @@
    Limites deles: 300 pedidos/min em /odds e 120/min em /results (por IP; com chave, por chave).
    A cada 5 s: 1 pedido ao vivo por modalidade; a cada minuto: 1 pedido completo por modalidade. */
 
+const path = require('node:path');
+const { Worker } = require('node:worker_threads');
+
 const BASE = 'https://moviodds.com';
 const KEY = process.env.NO_EXTERNAL === '1' ? '' : process.env.MOVIODDS_KEY || ''; // opcional
 
@@ -145,11 +148,52 @@ const STALE_LIVE_MS = 60000; // ao vivo: odds lidas há mais de 1 min ficam bloq
 
 // tempo máximo de cada pedido (o completo do futebol tem ~118 MB: numa ligação lenta, ex. testes locais, pode precisar de mais)
 const TIMEOUT_MS = Number(process.env.MOVIODDS_TIMEOUT_MS) || 25000;
+const urlOf = (pathQs) => `${BASE}${pathQs}${KEY ? (pathQs.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY) : ''}`;
 async function get(pathQs) {
-  const url = `${BASE}${pathQs}${KEY ? (pathQs.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(KEY) : ''}`;
-  const r = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  const r = await fetch(urlOf(pathQs), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
   if (!r.ok) throw new Error(`MoviOdds ${pathQs.split('&')[0]}: HTTP ${r.status}`);
   return r.json();
+}
+
+/* Listas de jogos (/odds): lidas no worker feeds/bigjson.js. O JSON.parse do futebol completo (~118 MB) aqui
+   deixava o servidor parado 10-20 s; lá corre noutra thread e os jogos chegam aos bocados, entre outros pedidos. */
+let bigWorker = null, bigSeq = 0;
+const bigJobs = new Map(); // id → { resolve, reject, label, d, matches, timer }
+function bigFail(err) {
+  for (const [id, j] of bigJobs) { clearTimeout(j.timer); bigJobs.delete(id); j.reject(new Error(`MoviOdds ${j.label}: ${err}`)); }
+  bigWorker = null;
+}
+function bigW() {
+  if (bigWorker) return bigWorker;
+  const w = bigWorker = new Worker(path.join(__dirname, 'bigjson.js'));
+  w.unref();
+  w.on('message', (msg) => {
+    const j = bigJobs.get(msg.id);
+    if (!j) return;
+    const end = (err) => { clearTimeout(j.timer); bigJobs.delete(msg.id); if (err) j.reject(new Error(`MoviOdds ${j.label}: ${err}`)); else { j.d.matches = j.matches; j.resolve(j.d); } };
+    if (msg.error) return end(msg.error);
+    if (msg.head) { j.d = msg.head; return msg.total ? w.postMessage({ id: msg.id, next: true }) : end(); }
+    for (const m of msg.part) j.matches.push(m);
+    if (msg.done) return end();
+    setImmediate(() => w.postMessage({ id: msg.id, next: true })); // dá a vez aos outros pedidos entre bocados
+  });
+  w.on('error', (e) => { console.error('[MoviOdds] worker:', e.message); if (bigWorker === w) bigFail(e.message); });
+  w.on('exit', (code) => { if (bigWorker === w) bigFail(`worker saiu (${code})`); });
+  return w;
+}
+function getOdds(pathQs) {
+  const id = ++bigSeq;
+  return new Promise((resolve, reject) => {
+    const w = bigW();
+    // segurança: se o worker não acabar, o ciclo de atualização não fica preso para sempre
+    const timer = setTimeout(() => {
+      if (!bigJobs.delete(id)) return;
+      w.postMessage({ id, cancel: true });
+      reject(new Error(`MoviOdds ${pathQs.split('&')[0]}: sem resposta do worker`));
+    }, TIMEOUT_MS + 60000);
+    bigJobs.set(id, { resolve, reject, label: pathQs.split('&')[0], d: null, matches: [], timer });
+    w.postMessage({ id, url: urlOf(pathQs), timeout: TIMEOUT_MS });
+  });
 }
 
 // ténis: últimas odds tiradas do site pela proteção (feeds/tennis.js guardTennis) — para o painel e os testes
@@ -538,19 +582,19 @@ async function fetchSport(s, live) {
      (groups=0 → nenhuma cotação; ~50x mais leve). Se algum jogo com mercados ainda não tiver fotografia pelo
      WebSocket (acabou de começar), faz-se o pedido normal desta modalidade. */
   if (live && WS.isOpen()) {
-    const d = await get(`/odds?sport=${SRC_SPORT[s]}&in_play=1&groups=0`);
+    const d = await getOdds(`/odds?sport=${SRC_SPORT[s]}&in_play=1&groups=0`);
     const missing = (d.matches || []).some((m) => m.market_count > 0 && !WS.get(m.id) && m.home && m.away && leagueOf(s, m.league));
     if (!missing) { livePolls.light++; return parseList(d, s, false); }
   }
   if (live) livePolls.heavy++;
   const { q, full } = qs(s, live);
-  try { return await parseList(await get(q), s, full); } catch (e) {
+  try { return await parseList(await getOdds(q), s, full); } catch (e) {
     if (!(s === 'soccer' && full)) throw e;
     // o pedido completo do futebol (~118 MB) falhou: tenta de novo no ciclo seguinte e, já agora, vai buscar os
     // mercados principais (pedido pequeno) para o futebol não desaparecer do site entretanto
     lastSoccerFull[live ? 'live' : 'pre'] = 0;
     console.warn(`[MoviOdds] futebol completo falhou (${e.message}): a usar só os mercados principais`);
-    return parseList(await get(`${q}&groups=${live ? SOCCER_LIVE : `${SOCCER_PRE},${SOCCER_LIVE}`}`), s, false);
+    return parseList(await getOdds(`${q}&groups=${live ? SOCCER_LIVE : `${SOCCER_PRE},${SOCCER_LIVE}`}`), s, false);
   }
 }
 async function fetchSports(live, only = null) {

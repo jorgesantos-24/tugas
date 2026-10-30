@@ -74,7 +74,7 @@ const plain = { ...Object.fromEntries(Object.entries(env).filter(([k, v]) => v !
   try {
     sh(g([
       `run deploy ${SERVICE}`, '--source=.', `--region=${REGION}`, '--allow-unauthenticated',
-      '--min-instances=1', '--max-instances=1', '--no-cpu-throttling', '--cpu=1', '--memory=2Gi', // a oferta completa de futebol (~118 MB de JSON) chega a ~800 MB no pico
+      '--min-instances=1', '--max-instances=1', '--no-cpu-throttling', '--cpu=2', '--memory=4Gi', // 2 CPUs: o worker das odds (feeds/bigjson.js) e a limpeza de memória correm ao lado do servidor; o futebol completo (~118 MB de JSON) chega a ~800 MB no pico, e no worker existe por momentos em duas cópias
       // cada navegador com o tempo real aberto (GET /api/stream) ocupa uma ligação: 80 seria pouco para uma instância só
       '--concurrency=1000', '--timeout=3600', '--cpu-boost',
       `--env-vars-file="${envFile}"`, `--set-secrets="${secretFlags}"`,
