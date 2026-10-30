@@ -1078,8 +1078,75 @@ function playerGrid(list, ev, open = true) {
   };
   return `<div class="pl-wrap"><div class="pl-grid" style="--n:${cs.length}"><span class="pl-name pl-h"></span>${cs.map(([, c]) => `<span class="pl-h">${esc(c.label)}</span>`).join('')}${block('home')}${block('away')}${block('')}</div></div>`;
 }
+/* jogadores do basquete num cartão só: um botão por estatística (Pontos, Rebotes...), filtro por equipa e, dentro,
+   a linha mais/menos (uma fila por jogador: linha | Mais | Menos) e as marcas "N ou mais" em grelha.
+   Antes eram ~20 mercados empilhados e a mais/menos virava uma escada com uma coluna por linha. */
+const BP_FAM = [
+  ['pts', 'Pontos'], ['reb', 'Rebotes'], ['ast', 'Assistências'], ['tpm', 'Cestas de 3'], ['pra', 'Pts + Reb + Ast'],
+  ['pr', 'Pts + Reb'], ['pa', 'Pts + Ast'], ['ar', 'Ast + Reb'], ['stl', 'Roubos'], ['blk', 'Tocos'], ['sb', 'Roubos + Tocos'],
+  ['dd', 'Duplo / triplo-duplo', ['dd', 'td']], ['fb', 'Primeiro lance', ['fb', 'fa']],
+];
+const bpStat = (s) => String(s.per ?? '').split('|')[0];
+const bpIsOU = (l) => l.every((s) => / — (Mais|Menos) de /.test(s.name));
+function bpPanel(lists, ev) {
+  const all = lists.flat();
+  // ao vivo a fonte não diz a equipa: vem do box score, que abrevia o nome ("D Avdija")
+  const short = (n) => { const [f = '', ...r] = String(n).trim().split(/\s+/); return `${f[0] || ''} ${r.join(' ')}`.toLowerCase(); };
+  const roster = new Map();
+  for (const w of ['home', 'away']) for (const x of ev.stats?.players?.[w] || []) roster.set(String(x.n).toLowerCase(), w).set(short(x.n), w);
+  const fix = (s) => {
+    const p = String(s.pick).split('#'), n = p.slice(2).join('#'), w = roster.get(n.toLowerCase()) || roster.get(short(n));
+    return p.length >= 3 && !p[1] && w ? { ...s, pick: [p[0], w, ...p.slice(2)].join('#') } : s;
+  };
+  const sideOf = (s) => String(s.pick).split('#')[1] || '';
+  const fams = BP_FAM.filter(([k, , ks = [k]]) => all.some((s) => ks.includes(bpStat(s))));
+  if (!fams.length) return '';
+  const [fk, , fks = [fk]] = fams.find(([k]) => k === S.bpStat) || fams[0];
+  const team = ['home', 'away'].includes(S.bpTeam) ? S.bpTeam : 'all';
+  const open = mktOpen(ev, `bp:${fk}`);
+  const secs = lists.filter((l) => fks.includes(bpStat(l[0])))
+    .map((l) => l.map(fix).filter((s) => team === 'all' || sideOf(s) === team || !sideOf(s)))
+    .filter((l) => l.length).sort((a, b) => bpIsOU(b) - bpIsOU(a));
+  // as marcas na mesma ordem da linha mais/menos (os de linha mais alta em cima)
+  const lineOf = new Map();
+  for (const s of secs.filter(bpIsOU).flat()) { const m = / — (?:Mais|Menos) de ([\d.]+)$/.exec(s.name); if (m) lineOf.set(String(s.pick).split('#').slice(2).join('#'), Number(m[1])); }
+  const rank = (s) => lineOf.get(String(s.pick).split('#').slice(2).join('#')) ?? -1;
+  for (const l of secs) if (!bpIsOU(l)) l.sort((a, b) => rank(b) - rank(a));
+  let more = false;
+  const body = secs.map((l) => {
+    const ou = bpIsOU(l), mile = !ou && l.every((s) => / ou mais$/.test(s.name));
+    const title = ou ? 'Mais / menos' : mile ? 'Marcas (N ou mais)' : String(l[0].marketName).replace(/ do jogador.*$/, '');
+    let grid;
+    if (ou) grid = bpOuTable(l, ev, open);
+    else { grid = playerGrid(l, ev, open); if (!open && grid !== playerGrid(l, ev, true)) more = true; }
+    if (ou && !open && grid !== bpOuTable(l, ev, true)) more = true;
+    return `<div class="bp-sec"><div class="bp-sub">${esc(title)}</div>${grid}</div>`;
+  }).join('') || '<div class="empty-state" style="padding:16px">Sem linhas desta equipa.</div>';
+  const chip = (attr, v, on, label) => `<button class="${on ? 'active' : ''}" data-${attr}="${v}">${esc(label)}</button>`;
+  const teams = new Set(all.map(fix).map(sideOf));
+  return `<div class="market bp-panel"><div class="market-head">Jogadores${ev.state === 'in' ? '<small>Ao vivo</small>' : ''}</div>
+    <div class="bp-chips">${fams.map(([k, label]) => chip('bpstat', k, k === fk, label)).join('')}</div>
+    ${teams.has('home') && teams.has('away') ? `<div class="bp-teams">${chip('bpteam', 'all', team === 'all', 'Todos')}${chip('bpteam', 'home', team === 'home', ev.home.name)}${chip('bpteam', 'away', team === 'away', ev.away.name)}</div>` : ''}
+    ${body}${more || open ? `<button class="mkt-tog" data-mkt="bp:${fk}">${open ? 'Mostrar menos ▴' : 'Mostrar todos os jogadores ▾'}</button>` : ''}</div>`;
+}
+// mais/menos: jogador | linha | Mais | Menos, por equipa (casa primeiro), os de linha mais alta em cima
+function bpOuTable(list, ev, open) {
+  const rows = new Map();
+  for (const s of list) {
+    const [, side = '', ...pl] = String(s.pick).split('#'), name = pl.join('#'), m = / — (Mais|Menos) de ([\d.]+)$/.exec(s.name);
+    if (!m) continue;
+    const r = rows.get(name) || { side, name, line: Number(m[2]) };
+    r[m[1] === 'Mais' ? 'o' : 'u'] = s; rows.set(name, r);
+  }
+  const cell = oddCell(ev, '');
+  const block = (side) => {
+    const rs = [...rows.values()].filter((r) => r.side === side).sort((a, b) => b.line - a.line).slice(0, open ? undefined : MKT_PL);
+    return rs.length ? (side ? `<div class="pl-team">${esc(ev[side].name)}</div>` : '') + rs.map((r) => `<span class="pl-name">${esc(r.name)}</span><span class="bp-line">${r.line}</span>${cell(r.o)}${cell(r.u)}`).join('') : '';
+  };
+  return `<div class="pl-wrap"><div class="pl-grid bp-ou"><span class="pl-name pl-h"></span><span class="pl-h">Linha</span><span class="pl-h">Mais</span><span class="pl-h">Menos</span>${block('home')}${block('away')}${block('')}</div></div>`;
+}
 // a tabela de cada mercado (a primeira que serve), aberta e como fica agora; null = botões normais
-const GRIDS = [linesTable, teamLines, teamCols, comboGrid, yesNoTable, threeWayTotal, scoreCols, playerGrid, nameCols];
+const GRIDS =[linesTable, teamLines, teamCols, comboGrid, yesNoTable, threeWayTotal, scoreCols, playerGrid, nameCols];
 function marketGrid(list, ev, open) {
   for (const g of GRIDS) { const full = g(list, ev, true); if (full) return { full, body: open ? full : g(list, ev, false) }; }
   return null;
@@ -1285,7 +1352,10 @@ function renderEvent() {
       entries = entries.map((e, i) => [e, i]).sort((x, y) => gnum(x[0][1][0].cgroup) - gnum(y[0][1][0].cgroup) || x[1] - y[1]).map(([e]) => e);
     }
     let lastGroup;
+    // jogadores do basquete: um cartão só, onde aparece o primeiro deles
+    const bpLists = entries.filter(([, l]) => l[0].market === 'bp').map(([, l]) => l);
     for (const [rawName, list] of entries) {
+      if (list[0].market === 'bp') { if (list === bpLists[0]) html += bpPanel(bpLists, ev); continue; }
       const g = list[0].cgroup || null;
       if (g !== lastGroup && multi) {
         const mi = ev.maps?.[(parseInt(String(g).replace(/\D+/g, ''), 10) || 0) - 1];
@@ -2072,6 +2142,7 @@ document.addEventListener('click', async (e) => {
   if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.listLimit = LIST_STEP; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
+  if (d.bpstat || d.bpteam) { if (d.bpstat) S.bpStat = d.bpstat; else S.bpTeam = d.bpteam; S.keepScroll = true; renderMain(); return; }
   if (d.mkt != null) { const k = `${S.eventId}|${d.mkt}`; if (S.openMkts.has(k)) S.openMkts.delete(k); else S.openMkts.add(k); S.keepScroll = true; renderMain(); return; }
   if (d.action === 'stream-toggle') { S.streamHidden = !S.streamHidden; lsSet('gl_streamHidden', S.streamHidden); S.keepScroll = true; renderMain(); return; }
   if (d.hb != null) { heroShow(+d.hb); return; }

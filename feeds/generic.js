@@ -85,7 +85,7 @@ function catOf(sport, g) {
     return 'pop';
   }
   if (sport === 'basketball') {
-    if (/^(1st (Quarter|Half) )?(Points|Rebounds|Assists|Threes|Steals|Blocks|Turnovers|Double|Triple)|& (Rebounds|Assists|Blocks)/i.test(g)) return 'players';
+    if (/^(1st (Quarter|Half) )?(Points|Rebounds|Assists|Threes|Steals|Blocks|Turnovers|Double Double|Triple Double)|& (Rebounds|Assists|Blocks)/i.test(g)) return 'players';
     if (/quarter/i.test(g)) return 'quarters';
     if (/half/i.test(g)) return 'halves';
     if (/line|handicap|total|margin|race/i.test(g)) return 'hcp';

@@ -739,3 +739,14 @@ html.drawer-open,html.drawer-open body{overflow:hidden;overscroll-behavior:none}
 .lp-n{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lp-on{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green);flex:none}
 .lp .trk-bar{height:4px;margin-top:4px}
+/* jogadores do basquete: botões por estatística e por equipa, mais/menos numa fila por jogador */
+.bp-chips,.bp-teams{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:10px 12px 0}
+.bp-chips::-webkit-scrollbar,.bp-teams::-webkit-scrollbar{display:none}
+.bp-chips button,.bp-teams button{flex:none;white-space:nowrap;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer}
+.bp-teams button{font-size:12px;padding:4px 10px;color:var(--muted)}
+.bp-chips button.active{background:var(--green);border-color:transparent;color:#03200f}
+.bp-teams button.active{border-color:var(--yellow);color:var(--yellow)}
+.bp-sec+.bp-sec{border-top:1px solid var(--line)}
+.bp-sub{padding:10px 12px 0;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+.pl-grid.bp-ou{grid-template-columns:minmax(140px,1.6fr) 56px minmax(64px,1fr) minmax(64px,1fr)}
+.bp-line{text-align:center;font-weight:800;color:var(--yellow)}
