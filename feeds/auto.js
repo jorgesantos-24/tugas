@@ -106,12 +106,27 @@ function rule(q, m, sport) {
     return null;
   }
   if (sport === 'basketball') {
+    /* linhas principais e alternativas de cada parte num só mercado, como na bet365 (handicap, total, total de cada
+       equipa); a linha repetida fica a do grupo principal (moviodds.js) */
+    const PART = { ft: '', h1: '1º tempo - ', h2: '2º tempo - ', q1: '1º quarto - ', q2: '2º quarto - ', q3: '3º quarto - ', q4: '4º quarto - ' };
+    const sgn = (v) => (v > 0 ? `+${v}` : `${v}`);
+    const partLine = (kind, scope, main) => {
+      const line = lineOf(q);
+      if (kind === 'spr') { const w = who(q.side); return w === 'home' || w === 'away' ? { k: 'pspr', scope, per: `${scope}|lines`, pick: w, line, main, mname: `${PART[scope]}Handicap`, name: `${m[w]} ${sgn(line)}` } : null; }
+      const o = ou(q.side) || ou(q.label);
+      return o ? { k: 'ptot', scope, per: `${scope}|lines`, pick: o, line, main, mname: `${PART[scope]}Total de pontos`, name: `${o === 'over' ? 'Mais' : 'Menos'} de ${line}` } : null;
+    };
+    const teamLine = (scope, w, main) => {
+      const o = ou(q.label) || ou(q.side), line = lineOf(q);
+      return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope, per: `${scope}|team:${w}`, pick: `${w}:${o}`, line, main, mname: `${PART[scope] || ''}Total de pontos: ${m[w]}`, name: `${o === 'over' ? 'Mais' : 'Menos'} de ${line}` } : null;
+    };
     // ao vivo vem também "To Win (3-Way)" (com empate na parte)
     const win3 = String(q.line ?? '').trim() === 'To Win (3-Way)';
-    if ((x = /^(1st|2nd) Half$/.exec(g))) return win3 ? { k: 'p1x2', scope: HALF[x[1]], pick: who(q.side) } : lines(HALF[x[1]]);
-    if ((x = /^(1st|2nd|3rd|4th) Quarter$/.exec(g))) return win3 ? { k: 'p1x2', scope: QUARTER[x[1]], pick: who(q.side) } : lines(QUARTER[x[1]]);
-    if ((x = /^Alternative (1st|2nd) Half (Line|Totals)$/.exec(g))) return x[2] === 'Line' ? { k: 'pspr', scope: HALF[x[1]], pick: who(q.side), line: lineOf(q) } : { k: 'ptot', scope: HALF[x[1]], pick: ou(q.side), line: lineOf(q) };
-    if ((x = /^Alternative (1st|2nd|3rd|4th) Quarter (Line|Totals)$/.exec(g))) return x[2] === 'Line' ? { k: 'pspr', scope: QUARTER[x[1]], pick: who(q.side), line: lineOf(q) } : { k: 'ptot', scope: QUARTER[x[1]], pick: ou(q.side), line: lineOf(q) };
+    const part = (scope) => (win3 ? { k: 'p1x2', scope, pick: who(q.side) } : q.line === 'Line' ? partLine('spr', scope, true) : q.line === 'Total' ? partLine('tot', scope, true) : lines(scope));
+    if ((x = /^(1st|2nd) Half$/.exec(g))) return part(HALF[x[1]]);
+    if ((x = /^(1st|2nd|3rd|4th) Quarter$/.exec(g))) return part(QUARTER[x[1]]);
+    if ((x = /^Alternative (1st|2nd) Half (Line|Totals)$/.exec(g))) return partLine(x[2] === 'Line' ? 'spr' : 'tot', HALF[x[1]], false);
+    if ((x = /^Alternative (1st|2nd|3rd|4th) Quarter (Line|Totals)$/.exec(g))) return partLine(x[2] === 'Line' ? 'spr' : 'tot', QUARTER[x[1]], false);
     // a equipa vem em "side" (Team Totals) ou em "n2" (Alternative Team Totals, com side = Over/Under)
     // os três grupos da bet365 (principal + 2 alternativos) juntam-se num mercado por equipa; a linha repetida fica a do principal
     if (g === 'Team Totals' || g === 'Alternative Team Totals' || g === 'Alternative Team Totals 2') {
@@ -127,8 +142,8 @@ function rule(q, m, sport) {
       return { k: 'phtft', scope: 'ft', pick: `${a}-${b}`, mname: 'Intervalo / Final', name: `${sh(a)} / ${sh(b)}` };
     }
     if (g === 'Odd/Even' && /^match$/i.test(String(q.line ?? ''))) { const p = /^odd$/i.test(String(q.side).trim()) ? 'odd' : /^even$/i.test(String(q.side).trim()) ? 'even' : null; return p ? { k: 'poe', scope: 'ft', pick: p } : null; }
-    if ((x = /^(?:Alternative )?(1st|2nd) Half Team Totals$/.exec(g))) { const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: HALF[x[1]], pick: `${w}:${o}`, line: lineOf(q) } : null; }
-    if ((x = /^(?:Alternative )?(1st|2nd|3rd|4th) Quarter Team Totals$/.exec(g))) { const w = who(q.side) || who(q.n2), o = ou(q.label) || ou(q.side); return (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: QUARTER[x[1]], pick: `${w}:${o}`, line: lineOf(q) } : null; }
+    if ((x = /^(Alternative )?(1st|2nd) Half(?: -)? Team Totals$/.exec(g))) return teamLine(HALF[x[2]], who(q.side) || who(q.n2), !x[1]);
+    if ((x = /^(Alternative )?(1st|2nd|3rd|4th) Quarter(?: -)? Team Totals$/.exec(g))) return teamLine(QUARTER[x[2]], who(q.side) || who(q.n2), !x[1]);
     /* ---- o resto que dá para decidir com o placar e os quartos da MoviOdds (decisão de 2026-10-28: sem a equipa).
        O jogo e o 2º tempo incluem a prorrogação; os quartos e o "tempo regulamentar" não (regras da bet365). ---- */
     const sc = (pre) => (!pre ? 'ft' : HALF[(/^(1st|2nd) Half$/.exec(pre) || [])[1]] || QUARTER[(/^(1st|2nd|3rd|4th) Quarter$/.exec(pre) || [])[1]] || null);
@@ -145,12 +160,9 @@ function rule(q, m, sport) {
     const teamIn = (re) => { for (const [w, n] of [['home', m.home], ['away', m.away]]) { const mm = new RegExp(re.replace('@', esc(String(n)))).exec(g); if (n && mm) return { w, pre: mm[1] }; } return null; };
     let t;
     if (g === 'Alternative Point Spread') return { k: 'pspr', scope: 'ft', pick: who(q.side), line: lineOf(q) };
-    if ((x = new RegExp(`^Alternative ${PRE}Totals$`).exec(g))) return sc(x[1]) ? { k: 'ptot', scope: sc(x[1]), pick: ou(q.side), line: lineOf(q) } : null;
-    if ((t = teamIn(`^Alternative ${PRE}@ Totals$`))) { const o = ou(q.side) || ou(q.label); return sc(t.pre) && o ? { k: 'pteam', scope: sc(t.pre), pick: `${t.w}:${o}`, line: lineOf(q) } : null; }
-    if ((x = /^(1st Half|2nd Half|1st Quarter|2nd Quarter|3rd Quarter|4th Quarter) - Team Totals$/.exec(g))) {
-      const w = who(q.side), o = ou(q.label);
-      return sc(x[1]) && (w === 'home' || w === 'away') && o ? { k: 'pteam', scope: sc(x[1]), pick: `${w}:${o}`, line: lineOf(q) } : null;
-    }
+    // ao vivo e em algumas ligas: "Alternative [1st Half ]Totals", "Alternative [1st Quarter ]POR Trail Blazers Totals" — no mesmo mercado das principais
+    if ((x = new RegExp(`^Alternative ${PRE}Totals$`).exec(g))) return sc(x[1]) ? partLine('tot', sc(x[1]), false) : null;
+    if ((t = teamIn(`^Alternative ${PRE}@ Totals$`))) return sc(t.pre) ? teamLine(sc(t.pre), t.w, false) : null;
     // "<equipa> To Score" N pontos (ao vivo; antes do jogo o grupo não diz a equipa e fica sem regra)
     if ((t = teamIn(`^${PRE}@ To Score$`))) { const y = yn(q.side), n = Number(q.line); return sc(t.pre) && y && Number.isInteger(n) ? cond(sc(t.pre), [`t${t.w[0]}=gt:${n - 1}`], y === 'no') : null; }
     if ((x = new RegExp(`^${PRE}Both Teams [Tt]o Score$`).exec(g)) && Number.isInteger(Number(q.line)) && txt(q.line) !== '') { const y = yn(q.side); return sc(x[1]) && y ? cond(sc(x[1]), [`bx=${y}:${Number(q.line)}`]) : null; }

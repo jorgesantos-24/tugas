@@ -137,7 +137,7 @@ const SOCCER_LIVE = '1777,10115,10563,10565,421,15,12';
 /* Outras modalidades: mercados pelo nome do grupo (iguais antes do jogo e ao vivo).
    "game" = grupo da bet365 com vencedor, handicap e total juntos (campo "line": To Win / Line / Total). */
 const NAMED = {
-  basketball: [[/^Game$/, 'game'], [/^Alternative Line( 2)?$/, 'spread'], [/^Alternative Game Total( 2)?$/, 'total']],
+  basketball: [[/^Game$/, 'game'], [/^Alternative (Line|Point Spread)( 2)?$/, 'spread'], [/^Alternative (Game Total|Totals)( 2)?$/, 'total']], // ao vivo e em algumas ligas: "Alternative Totals" / "Point Spread"
   hockey: [[/^Game$/, 'game'], [/^3-Way$/, 'mlr'], [/^Double Chance$/, 'dcr']],
   // ténis: ver feeds/tennis.js
 };
