@@ -29,7 +29,7 @@ const g = (args) => `gcloud ${args} --project=${PROJECT} --quiet`;
 
 // segredos: nome no Secret Manager -> conteúdo
 const SECRETS = { 'tugas-firebase-sa': fs.readFileSync(path.resolve(ROOT, env.FIREBASE_SERVICE_ACCOUNT || 'firebase-service-account.json'), 'utf8') };
-const SECRET_ENV = { BRAVOPAY_API_KEY: 'tugas-bravopay-key', BRAVOPAY_WEBHOOK_SECRET: 'tugas-bravopay-webhook', MOVIODDS_KEY: 'tugas-moviodds-key' };
+const SECRET_ENV = { BRAVOPAY_API_KEY: 'tugas-bravopay-key', BRAVOPAY_WEBHOOK_SECRET: 'tugas-bravopay-webhook', MOVIODDS_KEY: 'tugas-moviodds-key', SMTP_PASS: 'tugas-smtp-pass' };
 for (const [k, name] of Object.entries(SECRET_ENV)) if (env[k]) SECRETS[name] = env[k];
 
 // variáveis normais (sem segredos, sem vazias)

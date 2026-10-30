@@ -10,6 +10,7 @@ const path = require('node:path');
 const { initializeApp, cert } = require('firebase-admin/app');
 const { getFirestore, FieldValue } = require('firebase-admin/firestore');
 const { getAuth } = require('firebase-admin/auth');
+const MAIL = require('./mailer.js'); // e-mails do site por SMTP (suporte@tugasbet.com)
 
 // configuração web do projeto (valores públicos)
 const WEB_CONFIG = {
@@ -68,12 +69,30 @@ const continueUrl = () => (process.env.SITE_URL ? { continueUrl: process.env.SIT
 async function verifyPassword(email, password) {
   return (await identity('signInWithPassword', { email, password, returnSecureToken: false })).localId;
 }
-// e-mail "redefinir senha" (enviado pelo Firebase)
+/* e-mail "redefinir senha": com SMTP (mailer.js) sai de suporte@tugasbet.com com o visual do site;
+   sem SMTP, envia o Firebase. O link é sempre do Firebase. */
 async function sendPasswordReset(email) {
+  if (MAIL.enabled) {
+    let user, link;
+    try {
+      user = await auth.getUserByEmail(email);
+      link = await auth.generatePasswordResetLink(email, process.env.SITE_URL ? { url: process.env.SITE_URL } : undefined);
+    } catch (e) {
+      const err = new Error(e.message);
+      err.authCode = e.code === 'auth/user-not-found' || e.code === 'auth/email-not-found' ? 'EMAIL_NOT_FOUND' : e.code === 'auth/invalid-email' ? 'INVALID_EMAIL' : String(e.code || '');
+      throw err;
+    }
+    return MAIL.sendResetPassword(email, user.displayName, link);
+  }
   await identity('sendOobCode', { requestType: 'PASSWORD_RESET', email, ...continueUrl() });
 }
-// e-mail "confirme o seu endereço" (enviado pelo Firebase)
+// e-mail "confirme o seu endereço" (o mesmo esquema: SMTP do site ou, sem ele, o Firebase)
 async function sendEmailVerification(uid) {
+  if (MAIL.enabled) {
+    const user = await auth.getUser(uid);
+    const link = await auth.generateEmailVerificationLink(user.email, process.env.SITE_URL ? { url: process.env.SITE_URL } : undefined);
+    return MAIL.sendVerifyEmail(user.email, user.displayName, link);
+  }
   const token = await auth.createCustomToken(uid);
   const { idToken } = await identity('signInWithCustomToken', { token, returnSecureToken: true });
   await identity('sendOobCode', { requestType: 'VERIFY_EMAIL', idToken, ...continueUrl() });
