@@ -33,6 +33,7 @@ const BP = require('./bravopay.js');
 const FB = require('./firebase.js');
 const FEED = require('./feeds/moviodds.js'); // jogos, odds e resultados
 const BB = require('./feeds/betbuilder.js'); // Criar aposta (várias seleções do mesmo jogo numa odd)
+const BK = require('./feeds/bbasket.js'); // Criar aposta do basquete
 const LOGOS = require('./feeds/logos.js');   // emblemas das equipas
 const ESPN = require('./feeds/espn.js');     // futebol: resultado do prolongamento e dos penáltis
 const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailVerification, WEB_CONFIG, EMULATOR } = FB;
@@ -694,8 +695,10 @@ function findSel(key) {
 /* ---------------- Criar aposta ----------------
    Várias seleções do mesmo jogo de futebol (antes do início) numa só odd, calculada pelo motor (feeds/betbuilder.js)
    a partir de todas as odds da bet365 desse jogo. Pode juntar-se a outros jogos numa múltipla. */
-const bbEligible = (ev) => !!ev && !ev.manual && ev.sport === 'soccer' && !M.isSuspended(ev) && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting));
-const BB_OFF = 'Criar aposta: só no futebol, antes do jogo ou ao vivo';
+const BB_SPORTS = { soccer: BB, basketball: BK }; // motor de cada modalidade (o do basquete: feeds/bbasket.js)
+const bbEngine = (ev) => BB_SPORTS[ev.sport];
+const bbEligible = (ev) => !!ev && !ev.manual && !!BB_SPORTS[ev.sport] && !M.isSuspended(ev) && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting));
+const BB_OFF = 'Criar aposta: só no futebol e no basquete, antes do jogo ou ao vivo';
 /* ao vivo: cotações de agora + o que já aconteceu (placar do site, intervalo, escanteios, cartões, jogadores).
    Só no tempo regulamentar; com expulsões os cartões ficam de fora (as casas contam o vermelho de formas diferentes). */
 function bbLiveMatch(ev) {
@@ -709,7 +712,31 @@ function bbLiveMatch(ev) {
   const cd = PARTS.soccerCards(st), cards = cd && !cd.reds && cd.lo[0] === cd.hi[0] && cd.lo[1] === cd.hi[1] ? cd.lo : null;
   return { home: x.home, away: x.away, quotes: x.quotes, live: { score, ht, half: ht ? 2 : 1, minute: x.minute, corners, cards, roster: PLAYERS.roster(st) || [] } };
 }
-const bbMatchOf = (ev) => (ev.state === 'in' ? bbLiveMatch(ev) : FEED.bbMatch(ev.id));
+/* basquete: o jogo para o motor = as seleções do site (com as odds de agora) e, ao vivo, o placar por quarto,
+   o relógio e os números dos jogadores. Ao vivo só no tempo regulamentar e não nos 2 últimos minutos. */
+function bkMatchOf(ev) {
+  const sels = M.selections(ev).map((s) => ({ market: s.market, per: s.per, pick: s.pick, line: s.line, odds: s.odds, locked: s.locked }));
+  const m = { home: ev.home.name, away: ev.away.name, league: ev.league, sels };
+  if (ev.state !== 'in') return m;
+  if (ev.league === 'ncaab') return null; // 2 tempos, não quartos
+  const x = FEED.bbLive(ev.id);
+  const Q = x && PARTS.basketQuarters(x.st);
+  if (!Q || !(x.left >= 0)) return null;
+  const len = (/^nba$/.test(ev.league) ? 48 : 40) / 4;
+  let period, cur, left;
+  if (Q.list.length === Q.done + 1) { period = Q.done + 1; cur = Q.list[Q.done]; left = Math.min(len, x.left); } // quarto a decorrer
+  else if (Q.list.length === Q.done) { period = Q.done + 1; cur = [0, 0]; left = len; } // intervalo entre quartos
+  else return null;
+  if (period > 4 || (period === 4 && left < 2)) return null;
+  const q = Q.list.slice(0, Q.done);
+  // o placar do site tem de bater com a soma dos quartos (senão as estatísticas estão atrasadas)
+  const sum = [...q, cur].reduce((t, p) => [t[0] + p[0], t[1] + p[1]], [0, 0]);
+  if (Number.isFinite(ev.home.score) && (sum[0] !== ev.home.score || sum[1] !== ev.away.score)) return null;
+  return { ...m, live: { q, cur, period, left, roster: BPL.roster(x.st) || [] } };
+}
+const bbMatchOf = (ev) => (ev.sport === 'basketball' ? bkMatchOf(ev) : ev.state === 'in' ? bbLiveMatch(ev) : FEED.bbMatch(ev.id));
+// a seleção para o motor: futebol = a cotação da bet365 de onde veio; basquete = a própria seleção do site
+const specOf = (ev, o) => (ev.sport === 'basketball' ? { market: o.market, per: o.per, pick: o.pick, line: o.line } : srcQuote(ev, o));
 // seleção do site → cotação da bet365 de onde veio
 function srcQuote(ev, o) {
   for (const mk of ev.markets || []) {
@@ -725,16 +752,16 @@ function bbQuote(keys, maxAge) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
   if (!bbEligible(ev)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
-  const E = m && BB.engineFor(evId, m, maxAge);
+  const E = m && bbEngine(ev).engineFor(evId, m, maxAge);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const items = [];
   for (const key of keys) {
     const { sel } = findSel(key);
     if (!sel || sel.locked) return { reason: `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`, bad: key };
-    const q = !sel.manual && srcQuote(ev, sel);
+    const q = !sel.manual && specOf(ev, sel);
     items.push({ key, sel, q, odds: sel.odds, name: sel.name });
   }
-  const r = BB.quote(E, items);
+  const r = bbEngine(ev).quote(E, items);
   return r.reason ? r : { ...r, items };
 }
 // aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
@@ -742,17 +769,17 @@ function bbPreview(keys) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
   if (!bbEligible(ev)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
-  const E = m && BB.engineFor(evId, m);
+  const E = m && bbEngine(ev).engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const items = [];
   for (const key of keys) {
     const { sel } = findSel(key);
     if (!sel || sel.locked) return { reason: `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`, bad: key };
-    items.push({ key, q: !sel.manual && srcQuote(ev, sel), odds: sel.odds });
+    items.push({ key, q: !sel.manual && specOf(ev, sel), odds: sel.odds });
   }
   const mine = new Set(keys);
-  const cands = M.selections(ev).filter((s) => s.bb && !s.locked && !mine.has(s.key)).map((s) => ({ key: s.key, q: srcQuote(ev, s), odds: s.odds }));
-  const odds = BB.preview(E, items, cands);
+  const cands = M.selections(ev).filter((s) => s.bb && !s.locked && !mine.has(s.key)).map((s) => ({ key: s.key, q: specOf(ev, s), odds: s.odds }));
+  const odds = bbEngine(ev).preview(E, items, cands);
   return odds ? { odds } : { reason: 'estas seleções não entram no Criar aposta' };
 }
 
@@ -763,17 +790,17 @@ function bbModel(evId) {
   const ev = events.get(evId);
   if (!bbEligible(ev)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
-  const E = m && BB.engineFor(evId, m);
+  const E = m && bbEngine(ev).engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
   const src = {};
   for (const s of M.selections(ev)) {
     if (!s.bb) continue;
-    const q = srcQuote(ev, s);
-    if (q) src[s.key] = Object.fromEntries(BB_FIELDS.filter((k) => q[k] != null).map((k) => [k, q[k]]));
+    const q = specOf(ev, s);
+    if (q) src[s.key] = ev.sport === 'basketball' ? q : Object.fromEntries(BB_FIELDS.filter((k) => q[k] != null).map((k) => [k, q[k]]));
   }
-  return { model: BB.modelOf(E), src };
+  return { model: bbEngine(ev).modelOf(E), src };
 }
-// o motor (feeds/players.js + feeds/betbuilder.js) num só ficheiro para o navegador
+// os motores (feeds/players.js + feeds/betbuilder.js; basquete: feeds/bbasket.js) num só ficheiro para o navegador
 let bbEngineJs = null;
 function bbEngineFile() {
   if (bbEngineJs) return bbEngineJs;
@@ -781,8 +808,8 @@ function bbEngineFile() {
 ${fs.readFileSync(path.join(__dirname, 'feeds', file), 'utf8')}
 })();mods.${name}=module.exports;}
 `;
-  const js = `(function(){'use strict';const mods={};const require=(p)=>/players/.test(p)?mods.players:/markets/.test(p)?Markets:{};
-${wrap('players.js', 'players')}${wrap('betbuilder.js', 'bb')}window.BBE=mods.bb;})();
+  const js = `(function(){'use strict';const mods={};const require=(p)=>/betbuilder/.test(p)?mods.bb:/players/.test(p)?mods.players:/markets/.test(p)?Markets:{};
+${wrap('players.js', 'players')}${wrap('betbuilder.js', 'bb')}${wrap('bbasket.js', 'bk')}window.BBE=mods.bb;window.BBK=mods.bk;})();
 `;
   const data = Buffer.from(js);
   bbEngineJs = { data, gz: zlib.gzipSync(data, { level: 9 }), etag: `"${crypto.createHash('sha1').update(data).digest('base64url').slice(0, 16)}"` };
@@ -1027,7 +1054,7 @@ function betFactor(row, legs) {
   for (const [evId, g] of Object.entries(row.bb || {})) {
     const gl = legs.filter((l) => l.bb === evId);
     if (gl.every((l) => l.value === 1)) { f *= g.odds; continue; }
-    try { f *= BB.requote(g.params, gl.filter((l) => l.value > 0).map((l) => ({ src: l.src, odds: l.odds }))); }
+    try { f *= (g.params?.sport === 'basketball' ? BK : BB).requote(g.params, gl.filter((l) => l.value > 0).map((l) => ({ src: l.src, odds: l.odds }))); }
     catch (e) { console.error(`[Criar aposta] aposta ${row.id}: nova odd falhou (${e.message}); conta cada seleção pela sua odd`); f *= gl.filter((l) => l.value > 0).reduce((p, l) => p * l.odds, 1); }
   }
   return f;
@@ -1638,7 +1665,7 @@ const routes = {
             key: sel.key, evId: ev.id, feed: ev.manual ? 'equipa' : 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
             name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
-            ...(grp ? { bb: ev.id, src: BB.srcOf(grp.items.find((x) => x.key === sel.key).q) } : {}),
+            ...(grp ? { bb: ev.id, src: bbEngine(ev).srcOf(grp.items.find((x) => x.key === sel.key).q) } : {}),
           });
         }
         if (reason) { rejected.push({ index: i, reason }); continue; }

@@ -325,14 +325,14 @@ function toggleSel(key) {
     if (!sel || sel.locked || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
     if (S.slip.length >= 20) { toast('Máximo de 20 seleções', 'err'); return; }
     const same = S.slip.filter((s) => s.evId === ev.id).length;
-    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é só no futebol)', 'err');
+    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é só no futebol e no basquete)', 'err');
     else if (same >= BB_MAX) { toast(`Criar aposta: máximo de ${BB_MAX} seleções por jogo`, 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
     // Criar aposta: o boletim mostra logo a odd calculada aqui; a do servidor substitui-a quando chegar
     const grp = S.slip.filter((s) => s.evId === ev.id);
     const loc = grp.length > 1 && bbOk(ev) && !bbOf(grp) ? bbLocal(ev, grp) : undefined;
     if (loc?.mine) S.bbq[bbKey(grp)] = { odds: loc.mine, at: 0 };
-    // segunda seleção do mesmo jogo de futebol: vira Criar aposta (múltipla)
+    // segunda seleção do mesmo jogo de futebol ou basquete: vira Criar aposta (múltipla)
     if (S.slip.length >= 2 && (!hasConflict() || (same && bbOk(ev)))) S.slipMode = 'multiple';
     // e, na página desse jogo, abre a aba Criar aposta
     if (same === 1 && bbOk(ev) && S.view === 'event' && S.eventId === ev.id && !(S.evTab?.id === ev.id && S.evTab.tab === 'bb')) { S.evTab = { id: ev.id, tab: 'bb' }; jump = true; }
@@ -345,9 +345,11 @@ function toggleSel(key) {
   ensureBB();
 }
 
-/* Criar aposta: seleções do mesmo jogo de futebol (antes do início) numa odd só, calculada pelo servidor */
+/* Criar aposta: seleções do mesmo jogo de futebol ou basquete (antes do início ou ao vivo) numa odd só, calculada pelo servidor */
 const BB_MAX = 6;
-const bbOk = (ev) => !!ev && ev.sport === 'soccer' && (ev.state === 'pre' || (ev.state === 'in' && !ev.awaiting)) && !ev.manual;
+const bbOk = (ev) => !!ev && (ev.sport === 'soccer' || (ev.sport === 'basketball' && !(ev.state === 'in' && ev.league === 'ncaab'))) && (ev.state === 'pre' || (ev.state === 'in' && !ev.awaiting)) && !ev.manual;
+// motor do Criar aposta no navegador (/bbengine.js): futebol BBE, basquete BBK
+const bbEng = (ev) => (ev?.sport === 'basketball' ? window.BBK : window.BBE);
 const slipGroups = () => { const g = new Map(); for (const s of S.slip) g.set(s.evId, [...(g.get(s.evId) || []), s]); return g; };
 const bbKey = (list) => list.map((s) => s.key).sort().join('~');
 const bbOf = (list) => S.bbq[bbKey(list)] || null;
@@ -377,7 +379,7 @@ let bbMine = null; // odd da aposta deste jogo, mostrada nas seleções já esco
 const bbM = new Map(); // evId → { at, v, E, src: { chave: cotação }, memo: Map(bbKey → { at, odds, mine }) }
 const bbLoading = new Set();
 async function ensureModel(ev, force = false) {
-  if (!window.BBE || !bbOk(ev) || bbLoading.has(ev.id)) return;
+  if (!bbEng(ev) || !bbOk(ev) || bbLoading.has(ev.id)) return;
   const c = bbM.get(ev.id);
   // ao vivo as odds e o jogo mudam a cada segundo: modelo novo a cada 5 s (o servidor refá-lo a cada 8 s)
   if (c && Date.now() - c.at < (force ? 5000 : ev.state === 'in' ? 5000 : 90000)) return;
@@ -388,7 +390,7 @@ async function ensureModel(ev, force = false) {
     // o mesmo motor do servidor que já temos: fica (com as contas já feitas)
     if (c?.E && c.v === r.model.v) c.at = Date.now();
     else {
-      const E = BBE.fromParams(r.model);
+      const E = bbEng(ev).fromParams(r.model);
       E.m = { home: r.model.home, away: r.model.away, quotes: [], live: r.model.live || null };
       E.v = r.model.v;
       bbM.set(ev.id, { at: Date.now(), v: r.model.v, E, src: r.src || {}, memo: new Map() });
@@ -412,8 +414,8 @@ function bbLocal(ev, mine) {
   if (cands.some((x) => !x.q)) queueMicrotask(() => ensureModel(ev, true));
   let out = { at: Date.now(), odds: null, mine: null };
   try {
-    out.odds = items.every((it) => it.q) ? BBE.preview(c.E, items, cands) : null;
-    if (items.length > 1 && out.odds) out.mine = BBE.quote(c.E, items).odds || null;
+    out.odds = items.every((it) => it.q) ? bbEng(ev).preview(c.E, items, cands) : null;
+    if (items.length > 1 && out.odds) out.mine = bbEng(ev).quote(c.E, items).odds || null;
   } catch (e) { console.error('[Criar aposta]', e); return undefined; }
   if (c.memo.size > 60) c.memo.clear();
   c.memo.set(k, out);
@@ -1099,7 +1101,7 @@ function eventTabs(ev) {
   const tabs = base.map((t) => (t.id === 'all' ? t : { ...t, has: (s) => (s.cat ? s.cat === t.id : t.has(s)) }));
   const cats = [...new Set(selections(ev).filter((s) => s.cat).map((s) => s.cat))].filter((c) => !tabs.some((t) => t.id === c));
   cats.sort((a, b) => (a === 'other') - (b === 'other') || a.localeCompare(b, undefined, { numeric: true }));
-  // futebol antes do jogo: "Criar aposta" antes de "Todos", só com as seleções que o motor sabe juntar
+  // futebol e basquete: "Criar aposta" antes de "Todos", só com as seleções que o motor sabe juntar
   const bb = bbOk(ev) ? [{ id: 'bb', label: 'Criar aposta', has: (s) => !!s.bb }] : [];
   return bb.concat(tabs, cats.map((c) => ({ id: c, label: catLabel(c), has: (s) => s.cat === c })));
 }

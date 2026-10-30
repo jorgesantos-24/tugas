@@ -23,6 +23,7 @@ const PLAYERS = require('./players.js'); // futebol: mercados de jogadores (cobe
 const BP = require('./bplayers.js'); // basquete: mercados de jogadores (box score)
 const ESPN = require('./espn.js'); // box score do basquete (NBA/WNBA) e marcadores da NHL
 const BB = require('./betbuilder.js'); // Criar aposta: que seleções o motor sabe calcular
+const BK = require('./bbasket.js'); // Criar aposta do basquete
 const HG = require('./hgoals.js'); // hóquei: marcadores (NHL) e ordem dos gols
 const FIGHTS = require('./fights.js'); // MMA: resultado das lutas (MoviOdds + ESPN)
 const TT = require('./tabletennis.js'); // tênis de mesa: mercados e resultado (placar de cada set)
@@ -454,6 +455,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     if (sport === 'soccer' && !live) { try { const l = BB.legOf(m, q); if (l && l.fam !== 'combo') sel.bb = 1; } catch { /* cotação fora do formato */ } }
     // ao vivo: os mercados que o motor ao vivo sabe traduzir (o motor ainda decide, com o estado do jogo, se entra)
     else if (sport === 'soccer' && live && BB.liveQ({ home: m.home, away: m.away, live: {} }, q)) sel.bb = 1;
+    // basquete (antes e ao vivo; a NCAA joga em 2 tempos: só antes do jogo): pela forma da seleção
+    else if (sport === 'basketball' && !(live && lg.key === 'ncaab') && BK.supports({ market: s.k, per: s.per, pick: s.pick, line: s.line })) sel.bb = 1;
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
@@ -818,8 +821,11 @@ module.exports = {
     const quotes = [...w.quotes.values()].filter((q) => !w.status?.[q.group_id]?.stale);
     // minuto de agora: o relógio da fonte diz o minuto quando foi lido (ref) e se está a contar
     const c = meta.m.clock || {}, ref = Date.parse(c.ref);
-    const minute = Number(c.min) + (c.ticking && ref ? Math.max(0, (WS.now() - ref) / 60000) : 0);
-    return { home: meta.m.home, away: meta.m.away, quotes, st, minute: Math.floor(minute) };
+    const run = c.ticking && ref ? Math.max(0, (WS.now() - ref) / 60000) : 0;
+    const minute = Number(c.min) + run;
+    // basquete: o relógio conta para trás (minutos que faltam no quarto)
+    const left = Math.max(0, Number(c.min) + (Number(c.sec) || 0) / 60 - run);
+    return { home: meta.m.home, away: meta.m.away, quotes, st, minute: Math.floor(minute), left: c.min == null ? null : left, ticking: !!c.ticking };
   },
   bbMatch: (id) => { const meta = lastMeta.get(String(id)), f = fullQuotes.get(String(id)); return meta && f && Date.now() - f.at < EXTRA_PRE_MS ? { home: meta.m.home, away: meta.m.away, quotes: f.quotes } : null; },
   // última leitura da bet365 pela MoviOdds para este jogo (ms, relógio da fonte), pelo WebSocket; null sem WebSocket

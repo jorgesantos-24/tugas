@@ -924,4 +924,6 @@ function engineFor(id, m, maxAge) {
   return E;
 }
 
-module.exports = { modelOf, liveQ, engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER };
+module.exports = { modelOf, liveQ, engineFor, quote, preview, requote, srcOf, MAX_LEGS, legOf, joint, build, fromParams, LADDER,
+  // peças comuns com o motor do basquete (feeds/bbasket.js)
+  common: { fair, minimize, nb, lgamma, LADDER, ladderDown, EXTRA, MAX_LEGS, CHECK } };
