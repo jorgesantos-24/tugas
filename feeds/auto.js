@@ -61,6 +61,10 @@ function rule(q, m, sport) {
     const set = new Set(parts);
     return set.has('home') && set.has('draw') ? 'hd' : set.has('away') && set.has('draw') ? 'da' : set.has('home') && set.has('away') ? 'ha' : null;
   };
+  /* dupla chance: vale o texto com os nomes das equipas. O código "1X"/"X2" da bet365 segue a ordem em que ela mostra
+     as equipas — na NBA e na NHL a de fora vem primeiro ("1X" = fora ou empate) —, por isso só serve no futebol (casa
+     sempre primeiro) e só sem texto. Basquete 30/10: "MEM Grizzlies or Draw" (fora) vinha liquidado como casa ou empate. */
+  const dcPick = () => dcOf(q.label) || dcOf(q.side) || (sport === 'soccer' ? { '1X': 'hd', 12: 'ha', X2: 'da', '2X': 'da' }[q.n2] : null);
   if (sport === 'soccer') {
     // ---- combinações ----
     if (g === 'Match Result/Both Teams To Score' || g === 'Result/Both Teams To Score') return cond('ft', [who(q.line) && `res=${who(q.line)}`, yn(q.side) && `btts=${yn(q.side)}`]);
@@ -79,7 +83,7 @@ function rule(q, m, sport) {
     if (g === 'Alternative Corners' || g === 'Match Corners') { const n = Number(q.handicap ?? q.line), s = String(q.side ?? '').toLowerCase(); const op = { over: 'gt', under: 'lt', exactly: 'eq' }[s]; return op && Number.isInteger(n) ? cond('corners', [`tot=${op}:${n}`]) : null; }
     if (g === 'Total Corners') { const r = range(q.label); return r ? cond('corners', [`tot=in:${r}`]) : null; }
     if (g === 'Half Time Result') return { k: 'p1x2', scope: 'h1', pick: res3() };
-    if (g === 'Half Time Double Chance') return { k: 'pdc', scope: 'h1', pick: { '1X': 'hd', 12: 'ha', X2: 'da', '2X': 'da' }[q.n2] };
+    if (g === 'Half Time Double Chance') return { k: 'pdc', scope: 'h1', pick: dcPick() };
     if (g === 'Half Time Correct Score') return { k: 'pcs', scope: 'h1', pick: orient(q.side, q.label) };
     if ((x = /^(1st|2nd) Half Goals$/.exec(g)) || (x = /^(?:Additional )?(1st|2nd) Half Goal Line$/.exec(g))) return { k: 'ptot', scope: HALF[x[1]], pick: ou(q.side), line: lineOf(q) };
     if ((x = /^(?:Alternative )?(1st|2nd) Half Asian Handicap$/.exec(g)) || (x = /^(1st|2nd) Half Handicap 2-Way$/.exec(g))) return { k: 'pspr', scope: HALF[x[1]], pick: who(q.side), line: lineOf(q) };
@@ -250,7 +254,7 @@ function rule(q, m, sport) {
     }
     if (g === 'Odd/Even') { const s = { Match: 'ft', '1st Half': 'h1', '2nd Half': 'h2', '1st Quarter': 'q1', '2nd Quarter': 'q2', '3rd Quarter': 'q3', '4th Quarter': 'q4' }[txt(q.line)], p = oe(q.side); return s && p ? { k: 'poe', scope: s, pick: p } : null; }
     if ((x = /^(1st Half|1st Quarter) Result \(Incl\. Tie\)$/.exec(g))) return { k: 'p1x2', scope: sc(x[1]), pick: who(q.label ?? q.side) };
-    if ((x = /^(1st Half|1st Quarter|2nd Quarter|3rd Quarter) Double Chance$/.exec(g))) return { k: 'pdc', scope: sc(x[1]), pick: { '1X': 'hd', 12: 'ha', X2: 'da', '2X': 'da' }[q.n2] || dcOf(q.label) };
+    if ((x = /^(1st Half|1st Quarter|2nd Quarter|3rd Quarter) Double Chance$/.exec(g))) return { k: 'pdc', scope: sc(x[1]), pick: dcPick() };
     if ((x = /^(1st|2nd|3rd|4th) Quarter 3 Way Lines$/.exec(g))) return txt(q.line) === 'To Win' ? { k: 'p1x2', scope: QUARTER[x[1]], pick: who(q.side) } : null;
     if (g === 'Tied at End Of Regulation?') { const y = yn(q.label) || yn(q.side); return y ? cond('reg', ['res=draw'], y === 'no') : null; }
     // a parte com mais pontos (as duas equipas juntas): tempos (o 2º com prorrogação) ou quartos (sem prorrogação)
@@ -299,7 +303,7 @@ function rule(q, m, sport) {
     }
     if (g === 'Team Scoring 1st Wins Game') { const y = yn(q.label); return y ? { k: 'hng', scope: 'ft', pick: `firstwins:${y}` } : null; }
     if (g === '3-Way' && q.line === 'Total') { const op = { Over: 'gt', Under: 'lt', Exactly: 'eq' }[txt(q.side)], n = lineOf(q); const c = op && Number.isInteger(n) ? cond('reg', [`tot=${op}:${n}`]) : null; return c && { ...c, sub: `t${n}`, mname: `Total de gols a 3 opções ${n} (tempo regulamentar)`, name: `${{ gt: 'Mais de', lt: 'Menos de', eq: 'Exatamente' }[op]} ${n}` }; }
-    if ((x = /^(1st|2nd|3rd) Period Double Chance$/.exec(g))) return { k: 'pdc', scope: PERIOD[x[1]], pick: { '1X': 'hd', 12: 'ha', X2: 'da', '2X': 'da' }[q.n2] };
+    if ((x = /^(1st|2nd|3rd) Period Double Chance$/.exec(g))) return { k: 'pdc', scope: PERIOD[x[1]], pick: dcPick() };
     if ((x = /^(1st|2nd|3rd) Period Both Teams to Score at Least 1 Goal$/i.exec(g))) return { k: 'pbtts', scope: PERIOD[x[1]], pick: yn(q.label) };
     if (g === 'Exact Total Goals') {
       const t = val(); let y, r = null;
@@ -329,10 +333,19 @@ function rule(q, m, sport) {
   return null;
 }
 
+/* linha do texto ≠ linha da cotação (bet365 30/10, POR 1º tempo: texto "Over 61.5", linha 62.5): o cliente lê uma linha
+   e liquidava-se outra → a seleção não se oferece. Só números .5 soltos no texto (um nome como "76ers" não conta). */
+function lineClash(r, q) {
+  if (!['ptot', 'pspr', 'pteam'].includes(r.k) || r.line == null) return false;
+  const nums = [q.label, q.side].flatMap((t) => String(t ?? '').match(/(?<![\w.])[+-]?\d+\.5(?![\w.])/g) || []).map(Number);
+  return nums.length > 0 && !nums.some((v) => Math.abs(v) === Math.abs(r.line));
+}
+
 // a cotação genérica (nome traduzido, secção) ganha a regra de liquidação, se houver
 function apply(gen, q, m, sport) {
   const r = rule(q, m, sport);
   if (!r || !r.pick || ('line' in r && !isFinite(r.line))) return gen;
+  if (lineClash(r, q)) return null;
   // sub: o mesmo grupo da fonte dividido em mercados (ex.: "3-Way" do hóquei = vencedor + handicap + total)
   // per: o mesmo mercado pode juntar vários grupos da fonte (ex.: totais de uma equipa)
   const s = { ...gen, k: r.k, per: r.per || `${r.scope}|${q.group_id}${r.sub ? ':' + r.sub : ''}`, pick: r.pick };
