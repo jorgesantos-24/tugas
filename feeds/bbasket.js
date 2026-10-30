@@ -529,13 +529,15 @@ function preview(E, items, cands) {
 function paramsOf(E, specs) {
   const pl = {};
   for (const s of specs || Object.keys(E.pl).map((k) => ({ market: 'bp', pick: `1##${E.pl[k].name}` }))) if (s?.market === 'bp') { const k = playerOf(s).key; if (E.pl[k]) pl[k] = E.pl[k]; }
-  // ao vivo: do box score só os jogadores que contam (todos no modelo para o navegador; na aposta, os escolhidos)
-  const live = E.live && { ...E.live, roster: (E.live.roster || []).filter((x) => pl[x.key]).map(({ key, side, pts, reb, ast, tpm, stl, blk }) => ({ key, side, pts, reb, ast, tpm, stl, blk })) };
+  // ao vivo: do box score só os jogadores que contam (todos no modelo para o navegador; na aposta, os escolhidos).
+  // Quartos acabados como { h, a }: o Firestore não guarda listas dentro de listas (fromParams volta a [c, f])
+  const live = E.live && { ...E.live, q: E.live.q.map(([h, a]) => ({ h, a })), roster: (E.live.roster || []).filter((x) => pl[x.key]).map(({ key, side, pts, reb, ast, tpm, stl, blk }) => ({ key, side, pts, reb, ast, tpm, stl, blk })) };
   return { sport: 'basketball', home: E.home, away: E.away, P: E.P, pl, ...(live ? { live } : {}) };
 }
 function fromParams(X) {
-  const E = { home: X.home, away: X.away, P: X.P, pl: X.pl || {}, live: X.live || null };
-  E.S = X.live ? simulateLive(X.P, X.live) : simulate(X.P);
+  const live = X.live ? { ...X.live, q: (X.live.q || []).map((x) => (Array.isArray(x) ? x : [x.h, x.a])) } : null;
+  const E = { home: X.home, away: X.away, P: X.P, pl: X.pl || {}, live };
+  E.S = live ? simulateLive(X.P, live) : simulate(X.P);
   return E;
 }
 // duração do jogo: NBA 48 minutos, o resto 40 (a prorrogação é sempre de 5)
