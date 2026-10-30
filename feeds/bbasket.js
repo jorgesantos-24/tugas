@@ -419,12 +419,14 @@ function jointBits(list) {
 }
 
 /* ---------------- preço no site ----------------
-   odd = 1 / (e^a · p^b) — a margem da bet365, medida nas 427 combinações prontas dela no basquete (resultado/handicap
-   + total) — com pelo menos 6% de margem (nas combinações curtas a curva dava quase a odd justa), e a nossa margem
-   extra (+3%); arredonda-se para baixo na escada de odds. */
-const CAL = { a: -0.12064, b: 0.81626, min: 1.06 };
-const oddOf = (p) => 1 / Math.max(Math.exp(CAL.a) * p ** CAL.b, p * CAL.min) / EXTRA;
-const priceOf = (p) => ladderDown(oddOf(p));
+   odd = R / p / EXTRA: p = probabilidade da combinação (com as ligações entre as seleções), R = a margem que a bet365
+   já põe em cada seleção (odd mostrada × probabilidade do modelo, no máximo 0.97), multiplicadas, e a nossa margem
+   extra (+3%); arredonda-se para baixo na escada de odds. Seleções independentes ≈ odds multiplicadas − 3%.
+   (A curva única por probabilidade, como no futebol, cobrava ~35% nas combinações ao vivo de jogadores: 30/10.) */
+const R_MAX = 0.97;
+const rOf = (p1, odds) => Math.min(R_MAX, odds * p1);
+const priceOf = (p, R) => ladderDown(R / p / EXTRA);
+const prodR = (rs, mask) => rs.reduce((t, r, i) => ((mask >> i) & 1 ? t * r : t), 1);
 // a mesma seleção em mercados diferentes da fonte (handicap principal e alternativo...) conta como o mesmo mercado
 function mkOf(l) {
   const scope = scopeOfLeg(l), k = l.market;
@@ -436,13 +438,13 @@ function mkOf(l) {
   return `${k}|${l.per ?? ''}`;
 }
 // juntar uma seleção nunca baixa a odd: a combinação paga pelo menos o que paga qualquer parte dela
-function floorOdds(bits, singles) {
+function floorOdds(bits, singles, rs) {
   const n = bits.length, full = (1 << n) - 1;
   let best = Math.max(...singles);
   for (let mask = 1; mask < full; mask++) {
     if ((mask & (mask - 1)) === 0) continue;
     const p = jointBits(bits.filter((_, i) => (mask >> i) & 1));
-    if (p >= 1e-4) best = Math.max(best, priceOf(p));
+    if (p >= 1e-4) best = Math.max(best, priceOf(p, prodR(rs, mask)));
   }
   return best;
 }
@@ -459,7 +461,10 @@ function legFor(E, spec) {
   c.set(key, r);
   return r;
 }
-const offCheck = (p1, odds) => Math.abs(Math.log(oddOf(p1) * EXTRA / odds)) > Math.log(1 + CHECK) + 0.15;
+/* o modelo e a odd mostrada não concordam: a seleção fica de fora. Por baixo (odd × prob. < 0.4) aceita-se mais: é a
+   margem grande da bet365 nas zebras, e a margem de cada seleção já vai no preço (R), o que anula o erro do modelo.
+   Por cima (o modelo acha muito mais provável do que a bet365) mantém-se o limite do futebol. */
+const offCheck = (p1, odds) => { const r = odds * p1; return r < 0.4 || Math.log(r) > Math.log(1 + CHECK) + 0.15; };
 
 /* preço de uma combinação: items [{ q (spec da seleção), odds (mostrada), name, key }] → { odds, p, params } ou { reason } */
 function quote(E, items) {
@@ -479,7 +484,8 @@ function quote(E, items) {
     const rest = jointBits(bits.filter((_, j) => j !== i));
     if (p >= rest * 0.999) return { reason: `"${items[i].name}" já está incluída nas outras seleções`, bad: items[i].key };
   }
-  const odds = Math.max(priceOf(p), floorOdds(bits, items.map((it) => it.odds)));
+  const rs = legs.map((l, i) => rOf(l.p1, items[i].odds));
+  const odds = Math.max(priceOf(p, prodR(rs, (1 << legs.length) - 1)), floorOdds(bits, items.map((it) => it.odds), rs));
   if (odds < 1.02) return { reason: 'odd demasiado baixa para esta combinação' };
   return { odds, p, params: paramsOf(E, items.map((it) => it.q)) };
 }
@@ -493,10 +499,11 @@ function preview(E, items, cands) {
   AND[0] = null;
   for (let mask = 1; mask <= full; mask++) { const i = 31 - Math.clz32(mask), rest = mask ^ (1 << i); AND[mask] = rest ? andInto(AND[rest], legs[i].b) : legs[i].b; }
   const pOf = (mask) => (mask ? count(AND[mask]) / N : 1);
+  const rs = legs.map((l, i) => rOf(l.p1, items[i].odds));
   const base = n ? pOf(full) : 1;
   let floorBase = 0;
   if (n === 1) floorBase = items[0].odds;
-  else if (n > 1) { floorBase = Math.max(priceOf(base), ...items.map((it) => it.odds)); for (let mask = 1; mask < full; mask++) if (mask & (mask - 1)) { const pt = pOf(mask); if (pt >= 1e-4) floorBase = Math.max(floorBase, priceOf(pt)); } }
+  else if (n > 1) { floorBase = Math.max(priceOf(base, prodR(rs, full)), ...items.map((it) => it.odds)); for (let mask = 1; mask < full; mask++) if (mask & (mask - 1)) { const pt = pOf(mask); if (pt >= 1e-4) floorBase = Math.max(floorBase, priceOf(pt, prodR(rs, mask))); } }
   const out = {};
   for (const c of cands) {
     out[c.key] = 0;
@@ -509,8 +516,9 @@ function preview(E, items, cands) {
     if (p < 1e-4 || (n && p >= base * 0.999)) continue; // impossível, ou já garantida pelas escolhidas
     // ou torna uma das escolhidas redundante
     if (legs.some((_, i) => { const r = pm[full ^ (1 << i)]; return p >= r * 0.999; })) continue;
-    let odds = Math.max(priceOf(p), floorBase, c.odds);
-    for (let mask = 1; mask < full; mask++) if (pm[mask] >= 1e-4) odds = Math.max(odds, priceOf(pm[mask]));
+    const rc = rOf(l.p1, c.odds);
+    let odds = Math.max(priceOf(p, prodR(rs, full) * rc), floorBase, c.odds);
+    for (let mask = 1; mask < full; mask++) if (pm[mask] >= 1e-4) odds = Math.max(odds, priceOf(pm[mask], prodR(rs, mask) * rc));
     if (odds >= 1.02) out[c.key] = odds;
   }
   return out;
@@ -551,7 +559,8 @@ function requote(params, kept) {
   if (bits.some((b) => !b)) return kept.reduce((t, k) => t * k.odds, 1);
   const p = jointBits(bits);
   if (!p) return 1;
-  return Math.max(1, priceOf(p), floorOdds(bits, kept.map((k) => k.odds)));
+  const rs = bits.map((b, i) => rOf(count(b) / N, kept[i].odds));
+  return Math.max(1, priceOf(p, prodR(rs, (1 << bits.length) - 1)), floorOdds(bits, kept.map((k) => k.odds), rs));
 }
 
 /* ---------------- ao vivo ----------------
@@ -576,8 +585,9 @@ function buildLive(m) {
   return E;
 }
 // pesos do que falta: o resto do quarto atual (fCur) e os quartos seguintes inteiros
+// cc: ritmo do resto do quarto atual (o fim de um quarto costuma ter mais pontos: faltas, últimas posses)
 function liveWeights(P, L) {
-  return [0, 1, 2, 3].map((q) => (q < L.period - 1 ? 0 : q === L.period - 1 ? P.w[q] * L.fCur : P.w[q]));
+  return [0, 1, 2, 3].map((q) => (q < L.period - 1 ? 0 : q === L.period - 1 ? P.w[q] * L.fCur * (P.cc ?? 1) : P.w[q]));
 }
 function fitLive(m, L, fCur, k, base) {
   const live = { q: L.q.slice(0, L.period - 1), cur: L.cur || [0, 0], period: L.period, fCur };
@@ -600,17 +610,17 @@ function fitLive(m, L, fCur, k, base) {
     list.forEach((s, i) => T.push({ l: s, pt: Pf[i], w: (FIT_W[s.market] || 1) / list.length }));
   }
   if (!T.length) return null;
-  const unpack = (p) => ({ mh: p[0], ma: p[1], w: [0.25, 0.25, 0.25, 0.25], sp: p[2], ss: p[3], se: p[4], rho: GAME_DEF.rho, k });
+  const unpack = (p) => ({ mh: p[0], ma: p[1], w: [0.25, 0.25, 0.25, 0.25], sp: p[2], ss: p[3], se: p[4], rho: GAME_DEF.rho, k, cc: p[5] });
   // seleção ao vivo pelas contas da normal: a parte = o que já aconteceu nela + o que falta (pesos de liveWeights)
   const sc = (remT / wLeft) / 160;
-  const prior = [null, null, GAME_DEF.sp * sc, GAME_DEF.ss * sc, GAME_DEF.se * sc], pscale = [1, 1, 1.5 * sc, 1.5 * sc, 2 * sc];
+  const prior = [null, null, GAME_DEF.sp * sc, GAME_DEF.ss * sc, GAME_DEF.se * sc, 1], pscale = [1, 1, 1.5 * sc, 1.5 * sc, 2 * sc, 0.4];
   const err = (p) => {
     const P = unpack(p); let e = p.reduce((t, x, i) => (prior[i] == null ? t : t + ((x - prior[i]) / pscale[i]) ** 2), 0) * PRIOR;
     for (const t of T) { const v = analyticLive(P, live, t.l); if (v != null) e += t.w * (v - t.pt) ** 2; }
     return e;
   };
-  const p0 = [remT / wLeft / 2 + remD / wLeft / 2, remT / wLeft / 2 - remD / wLeft / 2, GAME_DEF.sp * sc, GAME_DEF.ss * sc, GAME_DEF.se * sc];
-  const r = minimize(err, p0, [3, 3, 1, 1, 1], [10, 10, 0, 0, 2], [260, 260, 25, 25, 30], 250);
+  const p0 = [remT / wLeft / 2 + remD / wLeft / 2, remT / wLeft / 2 - remD / wLeft / 2, GAME_DEF.sp * sc, GAME_DEF.ss * sc, GAME_DEF.se * sc, 1];
+  const r = minimize(err, p0, [3, 3, 1, 1, 1, 0.1], [10, 10, 0, 0, 2, 0.5], [260, 260, 25, 25, 30, 2], 300);
   return { ...unpack(r.p), fitErr: r.e };
 }
 // parte já jogada (placar) e o que falta nela (momentos da normal) para uma seleção ao vivo
@@ -702,4 +712,4 @@ function engineFor(id, m, maxAge) {
   return E;
 }
 
-module.exports = { supports, engineFor, build, fromParams, modelOf, quote, preview, requote, srcOf, MAX_LEGS, bitsOf, legFor, jointBits, analytic, fitGame, fitPlayers, N, CAL };
+module.exports = { supports, engineFor, build, fromParams, modelOf, quote, preview, requote, srcOf, MAX_LEGS, bitsOf, legFor, jointBits, analytic, fitGame, fitPlayers, N, R_MAX };
