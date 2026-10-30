@@ -702,8 +702,10 @@ function findSel(key) {
    a partir de todas as odds da bet365 desse jogo. Pode juntar-se a outros jogos numa múltipla. */
 const BB_SPORTS = { soccer: BB, basketball: BK, tennis: TN }; // motor de cada modalidade (basquete: feeds/bbasket.js; ténis: feeds/btennis.js)
 const bbEngine = (ev) => BB_SPORTS[ev.sport];
-const bbEligible = (ev) => !!ev && !ev.manual && !!BB_SPORTS[ev.sport] && !M.isSuspended(ev) && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting));
-const BB_OFF = 'Criar aposta: só no futebol, no basquete e no tênis, antes do jogo ou ao vivo';
+// modalidades sem motor nosso: Criar aposta só antes do jogo e só com a odd do Bet Builder da bet365
+const B365_ONLY = new Set(['mma', 'hockey', 'tabletennis']);
+const bbEligible = (ev) => !!ev && !ev.manual && !M.isSuspended(ev) && ((!!BB_SPORTS[ev.sport] && ((ev.state === 'pre' && now() < +ev.date) || (ev.state === 'in' && !ev.awaiting))) || (B365_ONLY.has(ev.sport) && B365.enabled() && ev.state === 'pre' && now() < +ev.date));
+const BB_OFF = 'Criar aposta indisponível neste jogo';
 /* ao vivo: cotações de agora + o que já aconteceu (placar do site, intervalo, escanteios, cartões, jogadores).
    Só no tempo regulamentar; com expulsões os cartões ficam de fora (as casas contam o vermelho de formas diferentes). */
 function bbLiveMatch(ev) {
@@ -771,6 +773,17 @@ function srcQuote(ev, o) {
 function bbQuote(keys, maxAge) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
   if (!bbEligible(ev)) return { reason: BB_OFF };
+  // sem motor nosso: as seleções vão tal como estão para a bet365 (bbFinal)
+  if (B365_ONLY.has(ev.sport)) {
+    const items = [];
+    for (const key of keys) {
+      const { sel } = findSel(key);
+      if (!sel || sel.locked) return { reason: `mercado suspenso${sel?.name ? ` (${sel.name})` : ''}`, bad: key };
+      if (!sel.bb || sel.manual) return { reason: `"${sel.name}" não entra no Criar aposta`, bad: key };
+      items.push({ key, sel, q: null, odds: sel.odds, name: sel.name });
+    }
+    return { odds: 0, params: null, items, only365: true };
+  }
   const m = bbMatchOf(ev);
   const E = m && bbEngine(ev).engineFor(evId, m, maxAge);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
@@ -787,16 +800,22 @@ function bbQuote(keys, maxAge) {
 /* odd final de um Criar aposta: antes do jogo, a do Bet Builder da bet365 (as mesmas seleções, pela MoviOdds); ao vivo,
    ou quando a bet365 não dá preço (recusa, sem resposta, limite de pedidos), a do nosso motor. Nunca acima da odd máxima.
    Só se usa o preço da bet365 se as odds de cada seleção que ela devolve batem com as do site (cotações da mesma leitura).
-   → { ...q, odds, model (a do nosso motor), via: 'bet365' | 'motor', capped } */
+   Modalidades sem motor nosso (B365_ONLY): sem preço da bet365 não há Criar aposta; model = odds multiplicadas.
+   → { ...q, odds, model (a do nosso motor), via: 'bet365' | 'motor', capped } ou { reason } */
 async function bbFinal(ev, q, maxAge) {
-  let odds = q.odds, via = 'motor';
+  let odds = q.odds, via = 'motor', why = null;
   if (ev.state === 'pre' && B365.enabled()) {
     const src = q.items.map((it) => srcQuote(ev, it.sel));
-    if (src.every((x) => x?.sel_id)) {
+    if (!src.every((x) => x?.sel_id)) why = 'no';
+    else {
       const b = await B365.price(ev.id, src.map((x) => x.sel_id), maxAge);
       const same = b.odds && q.items.every((it, i) => { const l = b.legs.find((x) => x.sel_id === String(src[i].sel_id)); return l && Math.abs(l.odds / it.sel.odds - 1) <= 0.04; });
-      if (same) { odds = M.round2(b.odds); via = 'bet365'; }
+      if (same) { odds = M.round2(b.odds); via = 'bet365'; } else why = b.odds ? 'retry' : b.retry ? 'retry' : 'no';
     }
+  }
+  if (q.only365) {
+    if (via !== 'bet365') return { reason: why === 'no' ? 'estas seleções não podem ser combinadas' : 'Criar aposta indisponível agora, tente de novo' };
+    q = { ...q, odds: q.items.reduce((p, it) => p * it.sel.odds, 1) };
   }
   const cap = BB_MAX_ODDS[ev.state === 'in' ? 'in' : 'pre'], capped = odds > cap;
   return { ...q, odds: capped ? cap : odds, model: q.odds, via, capped };
@@ -805,7 +824,7 @@ const bbCap = (ev) => BB_MAX_ODDS[ev?.state === 'in' ? 'in' : 'pre'];
 // aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
 function bbPreview(keys) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
-  if (!bbEligible(ev)) return { reason: BB_OFF };
+  if (!bbEligible(ev) || B365_ONLY.has(ev.sport)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
   const E = m && bbEngine(ev).engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
@@ -827,7 +846,7 @@ function bbPreview(keys) {
 const BB_FIELDS = ['group_name', 'group_id', 'side', 'label', 'line', 'handicap', 'n2'];
 function bbModel(evId) {
   const ev = events.get(evId);
-  if (!bbEligible(ev)) return { reason: BB_OFF };
+  if (!bbEligible(ev) || B365_ONLY.has(ev.sport)) return { reason: BB_OFF };
   const m = bbMatchOf(ev);
   const E = m && bbEngine(ev).engineFor(evId, m);
   if (!E) return { reason: 'Criar aposta indisponível neste jogo' };
@@ -1095,6 +1114,8 @@ function betFactor(row, legs) {
     if (gl.every((l) => l.value === 1)) { f *= g.odds; continue; }
     try {
       const kept = gl.filter((l) => l.value > 0).map((l) => ({ src: l.src, odds: l.odds }));
+      // só com a odd da bet365 (sem motor nosso): as que ficam multiplicadas, na proporção da odd da aposta, nunca acima dela
+      if (!g.params) { const p = kept.reduce((t, l) => t * l.odds, 1); f *= kept.length ? Math.max(1, Math.min(g.odds, kept.length === 1 ? p : p * (g.odds / (g.model || g.odds)))) : 1; continue; }
       let r = (BB_SPORTS[g.params?.sport] || BB).requote(g.params, kept);
       // odd da aposta ≠ a do nosso motor (preço da bet365 ou odd máxima): as que ficam na mesma proporção, nunca acima da odd da aposta
       if (kept.length >= 2 && g.model > 1 && g.odds !== g.model) r = Math.max(1, Math.min(g.odds, r * (g.odds / g.model)));
@@ -1697,6 +1718,7 @@ const routes = {
           const q0 = bbQuote(ks, events.get(evId)?.state === 'in' ? 2000 : undefined);
           if (q0.reason) { reason = q0.reason; break; }
           const q = await bbFinal(events.get(evId), q0, 30000);
+          if (q.reason) { reason = q.reason; break; }
           if (!acceptAny && tk.bbSeen[evId] != null && Number(tk.bbSeen[evId]) !== q.odds) { reason = 'odds alteradas'; break; }
           bbq[evId] = q;
         }
@@ -1711,7 +1733,7 @@ const routes = {
             key: sel.key, evId: ev.id, feed: ev.manual ? 'equipa' : 'moviodds', league: ev.league, sport: ev.sport, market: sel.market, pick: sel.pick, line: sel.line ?? null, base: sel.base ?? null, per: sel.per ?? null,
             name: sel.name, marketName: sel.marketName, event: M.evLabel(ev), leagueName: ev.leagueName,
             startsAt: +ev.date, liveAtPlacement: ev.state === 'in' ? `${ev.clock} (${ev.home.score}-${ev.away.score})` : null, odds: sel.odds, result: null,
-            ...(grp ? { bb: ev.id, src: bbEngine(ev).srcOf(grp.items.find((x) => x.key === sel.key).q) } : {}),
+            ...(grp ? { bb: ev.id, ...(bbEngine(ev) ? { src: bbEngine(ev).srcOf(grp.items.find((x) => x.key === sel.key).q) } : {}) } : {}),
           });
         }
         if (reason) { rejected.push({ index: i, reason }); continue; }
@@ -1781,7 +1803,7 @@ const routes = {
         const q = bbQuote(keys);
         if (q.reason) return { reason: q.reason, bad: q.bad || null };
         const f = await bbFinal(events.get(keys[0].split('|')[0]), q);
-        return { odds: f.odds, via: f.via, capped: f.capped || undefined };
+        return f.reason ? { reason: f.reason } : { odds: f.odds, via: f.via, capped: f.capped || undefined };
       })),
     };
   },

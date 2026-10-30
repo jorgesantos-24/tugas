@@ -325,7 +325,7 @@ function toggleSel(key) {
     if (!sel || sel.locked || isSuspended(ev)) { toast('Mercado suspenso', 'err'); return; }
     if (S.slip.length >= 20) { toast('Máximo de 20 seleções', 'err'); return; }
     const same = S.slip.filter((s) => s.evId === ev.id).length;
-    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples (Criar aposta é só no futebol, no basquete e no tênis)', 'err');
+    if (same && !bbOk(ev)) toast('Várias seleções deste jogo: só como apostas simples', 'err');
     else if (same >= BB_MAX) { toast(`Criar aposta: máximo de ${BB_MAX} seleções por jogo`, 'err'); return; }
     S.slip.push({ key, evId: ev.id, odds: sel.odds });
     // Criar aposta: o boletim mostra logo a odd calculada aqui; a do servidor substitui-a quando chegar
@@ -347,9 +347,11 @@ function toggleSel(key) {
 
 /* Criar aposta: seleções do mesmo jogo de futebol ou basquete (antes do início ou ao vivo) numa odd só, calculada pelo servidor */
 const BB_MAX = 6;
-const bbOk = (ev) => !!ev && (ev.sport === 'soccer' || ev.sport === 'tennis' || (ev.sport === 'basketball' && !(ev.state === 'in' && ev.league === 'ncaab'))) && (ev.state === 'pre' || (ev.state === 'in' && !ev.awaiting)) && !ev.manual;
+// MMA, hóquei e tênis de mesa: Criar aposta só antes do jogo (odd do Bet Builder da bet365, sem motor no navegador)
+const BB365_ONLY = new Set(['mma', 'hockey', 'tabletennis']);
+const bbOk = (ev) => !!ev && (ev.sport === 'soccer' || ev.sport === 'tennis' || (ev.sport === 'basketball' && !(ev.state === 'in' && ev.league === 'ncaab')) || (BB365_ONLY.has(ev.sport) && ev.state === 'pre')) && (ev.state === 'pre' || (ev.state === 'in' && !ev.awaiting)) && !ev.manual;
 // motor do Criar aposta no navegador (/bbengine.js): futebol BBE, basquete BBK
-const bbEng = (ev) => (ev?.sport === 'basketball' ? window.BBK : ev?.sport === 'tennis' ? window.BBT : window.BBE);
+const bbEng = (ev) => (ev?.sport === 'basketball' ? window.BBK : ev?.sport === 'tennis' ? window.BBT : ev?.sport === 'soccer' ? window.BBE : null);
 const slipGroups = () => { const g = new Map(); for (const s of S.slip) g.set(s.evId, [...(g.get(s.evId) || []), s]); return g; };
 const bbKey = (list) => list.map((s) => s.key).sort().join('~');
 const bbOf = (list) => S.bbq[bbKey(list)] || null;
@@ -443,7 +445,7 @@ function bbLocal(ev, mine) {
 let bbpBusy = false;
 async function ensurePreview() {
   const ev = S.view === 'event' && S.events.get(S.eventId);
-  if (!bbOk(ev) || S.evTab?.id !== ev.id || S.evTab.tab !== 'bb') return;
+  if (!bbOk(ev) || BB365_ONLY.has(ev.sport) || S.evTab?.id !== ev.id || S.evTab.tab !== 'bb') return; // sem motor: odds da aba ficam as simples
   const mine = S.slip.filter((s) => s.evId === ev.id);
   if (!mine.length || bbpBusy || bbLocal(ev, mine) !== undefined) return;
   const k = bbKey(mine), c = S.bbPrev;

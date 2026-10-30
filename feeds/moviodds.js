@@ -460,6 +460,8 @@ function toEvent(m0, serverNow, sport, full = true) {
     else if (sport === 'basketball' && !(live && lg.key === 'ncaab') && BK.supports({ market: s.k, per: s.per, pick: s.pick, line: s.line })) sel.bb = 1;
     // ténis (antes e ao vivo): pela forma da seleção
     else if (sport === 'tennis' && TN.supports({ market: s.k, per: s.per, pick: s.pick, line: s.line })) sel.bb = 1;
+    // MMA, hóquei e tênis de mesa (só antes do jogo): sem motor nosso, a odd do Criar aposta é a do Bet Builder da bet365
+    else if ((sport === 'mma' || sport === 'hockey' || sport === 'tabletennis') && !live && q.sel_id) sel.bb = 1;
     if (s.line != null) sel.line = s.line;
     if (s.base) sel.base = s.base;
     // um mercado por tipo e por parte do jogo (ex.: "vencedor do game" do 1º set game 9 ≠ game 10)
