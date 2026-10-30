@@ -893,8 +893,8 @@ function renderMain() {
   else {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
-      html += boostsBlock();
       html += homeHero(live);
+      html += boostsBlock();
       html += homeCasino();
       html += sportTabs();
       const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
