@@ -12,7 +12,7 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } ca
 
 const S = {
   site: {}, // dados da empresa (/api/site): e-mail de suporte, CNPJ...
-  events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(),
+  events: new Map(), leagueEvents: new Map(), oddsCache: new Map(), moves: new Map(), boosts: [], // boosts: Super Odds (/api/boosts)
   view: 'home', league: null, sport: null, eventId: null, query: '', sportTab: 'all', openSport: null, openCountries: new Set(), betOpen: new Set(), openMkts: new Set(),
   slipTab: 'slip', slipMode: 'single', slip: [], stakes: {}, comboStake: '', bbq: {},
   acceptAnyLocal: lsGet('gl_acceptAny', true), streamHidden: lsGet('gl_streamHidden', false),
@@ -762,6 +762,44 @@ function heroCard(ev) {
   </div>`;
 }
 
+/* ---------------- Super Odds ----------------
+   Combinações escolhidas pelo sistema (ligas top) com a odd aumentada: no topo da página inicial e das modalidades.
+   Um clique põe as seleções no boletim como Criar aposta; a odd é a do servidor (/api/betbuilder/price). */
+async function loadBoosts() {
+  try { const r = await api('GET', '/api/boosts'); S.boosts = r.boosts || []; } catch { /* fica a lista anterior */ }
+}
+function boostsBlock(sport, league) {
+  const list = S.boosts.filter((b) => (!sport || b.sport === sport) && (!league || S.events.get(b.evId)?.league === league) && S.events.get(b.evId)?.state === 'pre');
+  if (!list.length) return '';
+  const cards = list.map((b) => {
+    const ev = S.events.get(b.evId);
+    const on = b.legs.every((l) => S.slip.some((s) => s.key === l.key)) && S.slip.filter((s) => s.evId === b.evId).length === b.legs.length;
+    return `<div class="boost-card ${on ? 'on' : ''}" data-boost="${esc(b.id)}">
+      <div class="boost-top"><span class="boost-tag">⚡ Super Odd</span><span class="lg">${SPORTS[ev.sport].icon} ${esc(ev.leagueName)} · ${esc(dateLabel(ev.date))}</span></div>
+      <div class="boost-match">${esc(ev.home.name)} x ${esc(ev.away.name)}</div>
+      <div class="boost-legs">${b.legs.map((l) => `<div class="boost-leg"><span class="bb-dot"></span><div><div>${esc(l.name)}</div><div class="si-market">${esc(l.marketName)}</div></div></div>`).join('')}</div>
+      <div class="boost-odds"><span class="old">${fmtOdd(b.base)}</span><span class="new">${fmtOdd(b.odds)}</span></div>
+    </div>`;
+  }).join('');
+  return `<div class="section-head"><h2>⚡ Super Odds</h2><span class="muted">odds aumentadas</span></div><div class="hero boosts">${cards}</div>`;
+}
+// as seleções da Super Odd no boletim (no lugar das que lá estavam desse jogo); outro clique tira-as
+async function addBoost(id) {
+  const b = S.boosts.find((x) => x.id === id);
+  if (!b) return;
+  const mine = S.slip.filter((s) => s.evId === b.evId);
+  const same = mine.length === b.legs.length && b.legs.every((l) => mine.some((s) => s.key === l.key));
+  S.slip = S.slip.filter((s) => s.evId !== b.evId);
+  if (!same) {
+    if (S.slip.length + b.legs.length > 20) { toast('Máximo de 20 seleções', 'err'); return; }
+    for (const l of b.legs) S.slip.push({ key: l.key, evId: b.evId, odds: l.odds });
+  }
+  S.slipMode = S.slip.length >= 2 ? 'multiple' : 'single';
+  S.slipTab = 'slip';
+  render();
+  if (!same) { await loadFull([b.evId]); ensureBB(true); render(); }
+}
+
 function homeBanner() {
   if (!S.user) return `<div class="banner"><div><h3>Crie sua conta grátis</h3><p>Cadastre-se em 1 minuto, deposite via PIX e aposte nos jogos que estão rolando agora.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-ghost" data-action="login">Entrar</button><button class="btn btn-green" data-action="register">Cadastrar</button></div></div>`;
   if (isPaused()) return `<div class="banner"><div><h3>Conta em pausa</h3><p>Até ${fmtDT(S.user.excludedUntil)} não pode depositar nem apostar. Pode sacar o saldo quando quiser.</p></div><button class="btn btn-ghost" data-action="withdraw">Sacar</button></div>`;
@@ -855,6 +893,7 @@ function renderMain() {
   else {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
+      html += boostsBlock();
       html += homeHero(live);
       html += homeCasino();
       html += sportTabs();
@@ -879,6 +918,8 @@ function renderMain() {
       };
       const list = filtered(preds[v]);
       if (v === 'live' || v === 'all') html += sportTabs();
+      if (v === 'sport') html += boostsBlock(S.sport);
+      if (v === 'league') html += boostsBlock(null, S.league);
       if (v === 'sport' || v === 'league') html += sportTop(v === 'sport' ? (e) => e.sport === S.sport : (e) => e.league === S.league);
       html += `<div class="section-head">${v === 'live' ? '<span class="live-dot"></span>' : ''}<h2>${esc(titles[v])}</h2><span class="muted">${list.length} eventos</span></div>`;
       if (v === 'league') {
@@ -1199,7 +1240,7 @@ function bbPanel(ev) {
   if (mine.length < 2) return `<div class="bb-hint"><span class="bb-tag">Criar aposta</span><span>${mine.length ? 'Escolha mais uma seleção deste jogo para juntar numa odd só' : `Escolha de 2 a ${BB_MAX} seleções deste jogo e junte numa odd só`}</span></div>`;
   const q = bbOf(mine);
   return `<div class="slip-bb bb-panel ${q?.reason ? 'bad' : ''}">
-    <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
+    <div class="bb-head"><span class="bb-tag ${q?.boost ? 'boost' : ''}">${q?.boost ? '⚡ Super Odd' : 'Criar aposta'}</span><span class="bb-odd">${q?.odds ? `${q.boost && q.base ? `<span class="old">${fmtOdd(q.base)}</span>` : q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
     <div class="bb-chain">${mine.map((s) => { const { sel } = findSel(s.key); return `<div class="bb-leg ${s.key === q?.bad ? 'bad' : ''}"><button class="x" data-remove="${esc(s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(sel ? sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(sel ? sel.marketName : '')}</div></div></div>`; }).join('')}</div>
     ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
   </div>`;
@@ -1623,7 +1664,7 @@ function renderSlip() {
       const q = bbOf(grp), gi = grp.map((g) => items.find((i) => i.s.key === g.key));
       const bad = q?.bad;
       html += `<div class="slip-bb ${q?.reason || gi.some((i) => i.suspended) ? 'bad' : ''}">
-        <div class="bb-head"><span class="bb-tag">Criar aposta</span><span class="bb-odd">${q?.odds ? `${q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
+        <div class="bb-head"><span class="bb-tag ${q?.boost ? 'boost' : ''}">${q?.boost ? '⚡ Super Odd' : 'Criar aposta'}</span><span class="bb-odd">${q?.odds ? `${q.boost && q.base ? `<span class="old">${fmtOdd(q.base)}</span>` : q.prev && q.prev !== q.odds ? `<span class="old">${fmtOdd(q.prev)}</span>` : ''}${fmtOdd(q.odds)}` : q?.reason ? '—' : '…'}</span></div>
         <div class="si-event">${ev ? esc(evLabel(ev)) : ''}</div>
         <div class="bb-chain">${gi.map((i) => `<div class="bb-leg ${i.s.key === bad ? 'bad' : ''}"><button class="x" data-remove="${esc(i.s.key)}" title="Remover">×</button><span class="bb-dot"></span><div><div>${esc(i.sel ? i.sel.name : 'Seleção indisponível')}</div><div class="si-market">${esc(i.sel ? i.sel.marketName : '')}</div></div></div>`).join('')}</div>
         ${q?.reason ? `<div class="si-warn red">${esc(q.reason)}</div>` : !q?.odds ? '<div class="si-warn">A calcular a odd…</div>' : ''}
@@ -2110,7 +2151,7 @@ window.addEventListener('popstate', () => { const r = routeFromPath(); go(r.view
 function closeDrawers() { $('#sidebar').classList.remove('open'); $('#slip').classList.remove('open'); document.documentElement.classList.remove('drawer-open'); if (!$('#modal').classList.contains('show')) $('#overlay').classList.remove('show'); }
 
 document.addEventListener('click', async (e) => {
-  const t = e.target.closest('button, a, .ev-row, .hero-card');
+  const t = e.target.closest('button, a, .ev-row, .boost-card, .hero-card');
   if (!t) return;
   // Ctrl/Cmd/Shift + clique num link de secção: deixa o navegador abrir noutra aba
   if (t.tagName === 'A' && (e.ctrlKey || e.metaKey || e.shiftKey) && /^\/([^/]|$)/.test(t.getAttribute('href') || '')) return;
@@ -2122,6 +2163,7 @@ document.addEventListener('click', async (e) => {
     abrir(); return;
   }
   if (d.key) { e.stopPropagation(); toggleSel(d.key); return; }
+  if (d.boost) { addBoost(d.boost); return; }
   if (d.cashout) {
     if (S.cashoutConfirm === d.cashout) doCashout(d.cashout);
     else { S.cashoutConfirm = d.cashout; render(); setTimeout(() => { if (S.cashoutConfirm === d.cashout) { S.cashoutConfirm = null; render(); } }, 5000); }
@@ -2160,7 +2202,13 @@ document.addEventListener('click', async (e) => {
   }
   if (d.league) { e.preventDefault(); go('league', { league: d.league }); return; }
   if (d.sport) { e.preventDefault(); go('sport', { sport: d.sport }); return; }
-  if (d.togglesport) { S.openSport = S.openSport === d.togglesport ? null : d.togglesport; S.sideAnim = S.openSport; renderSidebar(); return; }
+  // o desporto abre a sua página (Super Odds no topo) e as ligas; outro clique na mesma página só fecha a lista
+  if (d.togglesport) {
+    const sk = d.togglesport, here = S.view === 'sport' && S.sport === sk;
+    S.openSport = here && S.openSport === sk ? null : sk; S.sideAnim = S.openSport;
+    if (here) renderSidebar(); else { e.preventDefault(); go('sport', { sport: sk }); }
+    return;
+  }
   if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.listLimit = LIST_STEP; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
@@ -2282,6 +2330,8 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
   // abre a secção do endereço (ex.: /cassino, /ao-vivo, /liga/bra.1) e corrige endereços antigos/desconhecidos
   Object.assign(S, routeFromPath());
   syncUrl(true);
+  loadBoosts().then(() => safeRender());
+  setInterval(async () => { if (!document.hidden) { await loadBoosts(); safeRender(); } }, 60000);
   await loadFull(); // endereço de um jogo (/evento/...) e boletim guardado: mercados completos já na primeira vista
   render();
   startStream();

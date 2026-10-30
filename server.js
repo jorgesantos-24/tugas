@@ -36,6 +36,7 @@ const BB = require('./feeds/betbuilder.js'); // Criar aposta (várias seleções
 const BK = require('./feeds/bbasket.js'); // Criar aposta do basquete
 const TN = require('./feeds/btennis.js'); // Criar aposta do tênis
 const B365 = require('./feeds/bb365.js'); // Bet Builder da bet365 (MoviOdds, só antes do jogo): a odd do Criar aposta
+const BOOST = require('./feeds/boosts.js'); // Super Odds: combinações escolhidas pelo sistema, com a odd aumentada
 const LOGOS = require('./feeds/logos.js');   // emblemas das equipas
 const ESPN = require('./feeds/espn.js');     // futebol: resultado do prolongamento e dos penáltis
 const { db, auth, FieldValue, col, verifyPassword, sendPasswordReset, sendEmailVerification, WEB_CONFIG, EMULATOR } = FB;
@@ -63,6 +64,8 @@ const MAX_WIN = 50000000; // R$ 500.000 em centavos
 // Criar aposta: odd máxima (antes do jogo / ao vivo) e prêmio máximo por aposta com Criar aposta
 const BB_MAX_ODDS = { pre: Number(process.env.BB_MAX_ODDS_PRE || 251), in: Number(process.env.BB_MAX_ODDS_LIVE || 101) };
 const BB_MAX_WIN = Math.round(Number(process.env.BB_MAX_WIN || 20000) * 100);
+// Super Odds: aposta máxima (uma por cliente em cada Super Odd)
+const BOOST_MAX_STAKE = Math.round(Number(process.env.BOOST_MAX_STAKE || 100) * 100);
 // mercados liquidados pela equipa (escanteios, cartões, jogadores...): aposta e prêmio máximos mais baixos
 const MANUAL_MAX_STAKE = Math.round(Number(process.env.MANUAL_MAX_STAKE || 100) * 100);
 const MANUAL_MAX_WIN = Math.round(Number(process.env.MANUAL_MAX_WIN || 5000) * 100);
@@ -821,6 +824,79 @@ async function bbFinal(ev, q, maxAge) {
   return { ...q, odds: capped ? cap : odds, model: q.odds, via, capped };
 }
 const bbCap = (ev) => BB_MAX_ODDS[ev?.state === 'in' ? 'in' : 'pre'];
+
+/* ---------------- Super Odds ----------------
+   A cada 4 minutos: 3 combinações por modalidade (futebol com o Brasileirão primeiro, NBA, ATP/WTA), antes do jogo.
+   A odd "antes" é a do Criar aposta (bet365, ou o nosso motor); a Super Odd é essa × BOOST.FACTOR. Quem montar as mesmas
+   seleções no boletim recebe a Super Odd (a odd é sempre recalculada com a odd de agora). Escolha sempre pela mesma ordem:
+   enquanto as odds não mudam, as Super Odds são as mesmas. */
+let boosts = []; // { id, sport, evId, keys (ordenadas), base, odds, at }
+const boostKey = (keys) => [...keys].map(String).sort().join('~');
+const boostFor = (keys) => { const k = boostKey(keys); return boosts.find((b) => b.key === k) || null; };
+const boostOk = (ev) => !!ev && ev.state === 'pre' && !ev.manual && !M.isSuspended(ev) && +ev.date > now() + 15 * 60000 && BOOST.leagueRank(ev) >= 0;
+// odd de um grupo de seleções do mesmo jogo, com a Super Odd quando é uma delas → resultado de bbFinal (+ boost) ou { reason }
+async function bbPriced(keys, maxAge) {
+  const ev = events.get(String(keys[0]).split('|')[0]);
+  const q = bbQuote(keys, ev?.state === 'in' ? maxAge ?? 2000 : undefined);
+  if (q.reason) return q;
+  const f = await bbFinal(ev, q, maxAge);
+  if (f.reason) return f;
+  const b = boostOk(ev) && boostFor(keys);
+  if (!b) return f;
+  return { ...f, odds: Math.min(bbCap(ev), BOOST.boosted(f.odds)), base: f.odds, boost: { id: b.id, base: f.odds } };
+}
+let boosting = false;
+async function makeBoosts() {
+  if (boosting || !events.size) return;
+  boosting = true;
+  try {
+    const next = [];
+    for (const sport of ['soccer', 'basketball', 'tennis']) {
+      const pool = [...events.values()].filter((ev) => ev.sport === sport && boostOk(ev) && ev.markets && +ev.date < now() + 72 * 3600000)
+        .sort((a, b) => BOOST.leagueRank(a) - BOOST.leagueRank(b) || a.date - b.date);
+      const mine = [], used = new Set();
+      const tryLegs = async (ev, legs) => {
+        const keys = legs.map((s) => s.key);
+        const q = bbQuote(keys);
+        // o nosso motor primeiro (sem gastar pedidos à bet365): fora da faixa, nem pergunta
+        if (q.reason || (q.odds && (q.odds < BOOST.MIN * 0.8 || q.odds > BOOST.MAX * 1.25))) return null;
+        const f = await bbFinal(ev, q);
+        if (f.reason || f.odds < BOOST.MIN || f.odds > BOOST.MAX) return null;
+        return { id: crypto.createHash('sha1').update(boostKey(keys)).digest('base64url').slice(0, 12), sport, evId: ev.id, key: boostKey(keys), keys, base: f.odds, odds: Math.min(bbCap(ev), BOOST.boosted(f.odds)), at: now() };
+      };
+      // um jogo por Super Odd; se faltarem jogos, outra combinação dos mesmos
+      for (const second of [false, true]) {
+        for (const ev of pool) {
+          if (mine.length >= BOOST.PER_SPORT) break;
+          if (!second && used.has(ev.id)) continue;
+          for (const legs of BOOST.prefer(BOOST.combosOf(ev, M.selections(ev)), BOOST.SIZES[mine.length] || 3)) {
+            if (mine.some((b) => b.key === boostKey(legs.map((s) => s.key)))) continue;
+            const r = await tryLegs(ev, legs);
+            if (r) { mine.push(r); used.add(ev.id); break; }
+          }
+        }
+      }
+      next.push(...mine);
+    }
+    boosts = next;
+  } catch (e) { console.error('[Super Odds]', e.message); }
+  finally { boosting = false; }
+}
+setInterval(() => { makeBoosts(); }, 4 * 60000);
+setTimeout(() => { makeBoosts(); }, 45000);
+setTimeout(() => { makeBoosts(); }, 150000); // os mercados extra do futebol (escanteios, jogadores) chegam 1–2 min depois do arranque
+// Super Odds para a página: só as que ainda se podem apostar
+function boostsPublic() {
+  const out = [];
+  for (const b of boosts) {
+    const ev = events.get(b.evId);
+    if (!boostOk(ev)) continue;
+    const legs = b.keys.map((k) => M.selections(ev).find((s) => s.key === k));
+    if (legs.some((s) => !s || s.locked)) continue;
+    out.push({ id: b.id, sport: b.sport, evId: b.evId, base: b.base, odds: b.odds, legs: legs.map((s) => ({ key: s.key, name: s.name, marketName: s.marketName, odds: s.odds })) });
+  }
+  return out;
+}
 // aba Criar aposta: com as seleções já escolhidas deste jogo, a odd de juntar cada uma das outras (0 = não junta)
 function bbPreview(keys) {
   const evId = String(keys[0]).split('|')[0], ev = events.get(evId);
@@ -1379,6 +1455,7 @@ const routes = {
   },
 
   // mercados completos de alguns jogos (página do jogo, boletim, apostas em aberto): ?ids=a,b,c (até 40)
+  'GET /api/boosts': () => ({ boosts: boostsPublic() }),
   'GET /api/events/full': (ctx) => {
     const ids = String(new URL(ctx.req.url, 'http://x').searchParams.get('ids') || '').split(',').filter(Boolean).slice(0, 40);
     ctx.res.setHeader('X-Server-Now', String(now()));
@@ -1715,10 +1792,12 @@ const routes = {
         const bbq = {};
         for (const [evId, ks] of tk.byEv) {
           if (ks.length < 2) continue;
-          const q0 = bbQuote(ks, events.get(evId)?.state === 'in' ? 2000 : undefined);
-          if (q0.reason) { reason = q0.reason; break; }
-          const q = await bbFinal(events.get(evId), q0, 30000);
+          const q = await bbPriced(ks, events.get(evId)?.state === 'in' ? 2000 : 30000);
           if (q.reason) { reason = q.reason; break; }
+          if (q.boost) {
+            if (tk.stake > BOOST_MAX_STAKE) { reason = `aposta máxima na Super Odd: ${brl(BOOST_MAX_STAKE)}`; break; }
+            if ([...openBets.values()].some((b) => b.userId === u.id && Object.values(b.bb || {}).some((g) => g.boost?.id === q.boost.id))) { reason = 'você já tem uma aposta nesta Super Odd'; break; }
+          }
           if (!acceptAny && tk.bbSeen[evId] != null && Number(tk.bbSeen[evId]) !== q.odds) { reason = 'odds alteradas'; break; }
           bbq[evId] = q;
         }
@@ -1756,7 +1835,7 @@ const routes = {
           id, userId: u.id, type: legs.length > 1 ? 'multiple' : 'single', stake: tk.stake, odds, potential,
           status: 'open', payout: null, placedAt: now(), settledAt: null, legs,
           // Criar aposta: odd de cada grupo e os números do modelo (para refazer a conta se uma seleção for anulada)
-          ...(Object.keys(bbq).length ? { bb: Object.fromEntries(Object.entries(bbq).map(([k, g]) => [k, { odds: g.odds, params: g.params, model: g.model, via: g.via }])) } : {}),
+          ...(Object.keys(bbq).length ? { bb: Object.fromEntries(Object.entries(bbq).map(([k, g]) => [k, { odds: g.odds, params: g.params, model: g.model, via: g.via, ...(g.boost ? { boost: g.boost } : {}) }])) } : {}),
         };
         try {
           await runTx([u.id], async (t) => {
@@ -1800,10 +1879,9 @@ const routes = {
         if (!Array.isArray(ks) || ks.length < 2 || ks.length > 20) return { reason: 'escolha pelo menos 2 seleções' };
         const keys = ks.map(String);
         if (new Set(keys.map((k) => k.split('|')[0])).size !== 1) return { reason: 'seleções de jogos diferentes' };
-        const q = bbQuote(keys);
-        if (q.reason) return { reason: q.reason, bad: q.bad || null };
-        const f = await bbFinal(events.get(keys[0].split('|')[0]), q);
-        return f.reason ? { reason: f.reason } : { odds: f.odds, via: f.via, capped: f.capped || undefined };
+        const f = await bbPriced(keys);
+        if (f.reason) return { reason: f.reason, bad: f.bad || null };
+        return { odds: f.odds, via: f.via, capped: f.capped || undefined, ...(f.boost ? { boost: f.boost.id, base: f.base } : {}) };
       })),
     };
   },

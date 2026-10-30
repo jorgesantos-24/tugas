@@ -750,3 +750,20 @@ html.drawer-open,html.drawer-open body{overflow:hidden;overscroll-behavior:none}
 .bp-sub{padding:10px 12px 0;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .pl-grid.bp-ou{grid-template-columns:minmax(140px,1.6fr) 56px minmax(64px,1fr) minmax(64px,1fr)}
 .bp-line{text-align:center;font-weight:800;color:var(--yellow)}
+/* Super Odds */
+.hero.boosts{grid-auto-columns:minmax(270px,1fr)}
+.boost-card{position:relative;cursor:pointer;border-radius:14px;padding:14px;background:linear-gradient(150deg,#3a2a00 0%,#1a1405 45%,#0b2a17 100%);border:1px solid rgba(255,204,31,.45);box-shadow:0 8px 24px rgba(255,204,31,.12);transition:transform .15s,box-shadow .15s,border-color .15s;display:flex;flex-direction:column;gap:8px}
+.boost-card:hover{transform:translateY(-2px);border-color:var(--yellow);box-shadow:0 10px 28px rgba(255,204,31,.25)}
+.boost-card.on{border-color:var(--green);box-shadow:0 0 0 2px var(--green) inset}
+.boost-top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;color:var(--muted)}
+.boost-top .lg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.boost-tag,.bb-tag.boost{background:linear-gradient(90deg,#ffcc1f,#ff9d1f);color:#1a1000;font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.4px;border-radius:5px;padding:2px 8px;white-space:nowrap;animation:boostPulse 2.4s ease-in-out infinite}
+@keyframes boostPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,204,31,.55)}50%{box-shadow:0 0 0 5px rgba(255,204,31,0)}}
+.boost-match{font-weight:800;font-size:15px}
+.boost-legs{display:flex;flex-direction:column;gap:6px;flex:1}
+.boost-leg{display:flex;gap:8px;align-items:flex-start;font-size:13px;font-weight:600}
+.boost-leg .bb-dot{margin-top:5px}
+.boost-odds{display:flex;justify-content:flex-end;align-items:baseline;gap:10px;margin-top:2px}
+.boost-odds .old{color:var(--muted);text-decoration:line-through;font-size:15px;font-weight:700}
+.boost-odds .new{background:var(--yellow);color:#10261a;font-weight:900;font-size:20px;border-radius:9px;padding:4px 14px}
+@media (max-width:640px){.hero.boosts{grid-auto-columns:minmax(250px,86%)}}
