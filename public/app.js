@@ -809,10 +809,10 @@ function homeBanner() {
 
 /* ---------------- cassino ---------------- */
 const CASINO_GAMES = [
-  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: '/img/slots/fortune-tiger.webp' },
-  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: '/img/slots/fortune-ox.webp' },
   { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: '/img/decola-capa.webp?v=4' },
   { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: '/img/mines-capa.webp?v=1' },
+  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: '/img/slots/fortune-tiger.webp' },
+  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: '/img/slots/fortune-ox.webp' },
   { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: '/img/slots/fortune-dragon.webp' },
   { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: '/img/slots/fortune-rabbit.webp' },
   { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: '/img/slots/fortune-mouse.webp' },
