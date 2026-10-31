@@ -37,6 +37,7 @@ const TENNIS_FIRST_SRV = new Set(['tfswin', 'tfsg', 'tfsw', 'tfsd', 'tfsa', 'tfs
 const TENNIS_POINTS = new Set(['tg1p', 'tgsa', 'tgpb', 'tgbp', 'tfsa', 'tfsbp', 'ttblead', 'ttbsa', 'ttbpb']);
 
 const PARTS = require('./feeds/parts.js');
+const TTN = require('./feeds/tabletennis.js').NEED; // tênis de mesa: sets para ganhar
 const BPL = require('./feeds/bplayers.js');
 const PLAYERS = require('./feeds/players.js');
 const SCOPE_PT = (s) => ({ ft: 'jogo', h1: '1º tempo', h2: '2º tempo', corners: 'escanteios', cards: 'cartões' }[s]
@@ -266,6 +267,110 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     return { v, sig: JSON.stringify([sets.slice(0, sN || 1), need, ptSig]), text: setTxt ? `sets ${setTxt}` : `${need.length} games` };
   }
 
+  /* ---- ténis: set a decorrer — o que já ficou decidido antes do fim do set (e "quebras no set N") ----
+     · placar do set (vencedor, placar exato, grupos, total de games, handicap): decidido quando TODOS os placares finais
+       ainda possíveis dão o mesmo resultado (ex.: "6-2" a 3-3 perde; "mais de 9,5 games" a 5-5 ganha). 7-6 conta também
+       como podendo continuar (set sem tie-break), por precaução. Pares no set decisivo ficam de fora (super tie-break);
+     · "X quebra o saque no set?": decidido quando X quebra;
+     · total de quebras no set / quebras de X no set N: "mais de" ganha / "menos de" perde ao passar a linha; com o set
+       acabado, decidido nos dois sentidos;
+     · vencedor + total de games com "menos de": perde quando o total da partida passa a linha. */
+  const SET_SCORE = new Set(['tsw', 'tscs', 'tscg', 'tsca', 'tsgt', 'tsgh']);
+  function setFinals(x, y) {
+    const out = [], seen = new Set();
+    const rec = (h, a) => {
+      if (seen.has(h * 1000 + a)) return;
+      seen.add(h * 1000 + a);
+      const fin = okSet([h, a]), hi = Math.max(h, a), lo = Math.min(h, a);
+      if (fin) out.push([h, a]);
+      if ((!fin || (hi === 7 && lo === 6)) && h + a < 40) { rec(h + 1, a); rec(h, a + 1); }
+    };
+    rec(x, y);
+    return out;
+  }
+  function tennisMid(leg, ev) {
+    const k = leg.market;
+    const [pa, pb] = String(leg.per ?? '').split(/[:/]/);
+    const perSetBrk = k === 'tpbrk' && Number(pb) >= 1;
+    if (!SET_SCORE.has(k) && k !== 'tsbrk' && k !== 'tsbt' && !perSetBrk && k !== 'tmrt') return null;
+    const st = liveStats(ev.id);
+    const hs = st?.home?.sets, as = st?.away?.sets;
+    if (!Array.isArray(hs) || !Array.isArray(as) || !hs.length || hs.length !== as.length) return null;
+    const sets = hs.map((x, i) => [Number(x), Number(as[i])]);
+    if (sets.some(([x, y]) => !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0)) return null;
+    const log = TEN.gameLog({ home: ev.home.name, away: ev.away.name, stats: st }, sets);
+    if (!log) return null;
+    const brk = (e) => e.srv && e.w !== e.srv;
+    const ou = (cur) => (cur > leg.line ? (leg.pick === 'over' ? 1 : leg.pick === 'under' ? -1 : null) : null);
+    const out = (v, text) => (v == null ? null : { v, sig: `mid:${k}:${v}`, text });
+    if (k === 'tmrt') {
+      const tot = sets.reduce((q, x) => q + x[0] + x[1], 0);
+      return String(leg.pick).split(':')[1] === 'under' && tot > leg.line ? out(-1, `games ${tot}`) : null;
+    }
+    const sN = perSetBrk ? Number(pb) : Number(pa);
+    if (!(sN >= 1 && sN <= sets.length)) return null;
+    const cur = sets[sN - 1], gs = log.filter((e) => e.s === sN);
+    const finished = sN < sets.length || okSet(cur);
+    if (perSetBrk) {
+      if (finished) return out(M.legOutcome(leg, { h: 0, a: 0, sets, log }), `${sN}º set ${cur.join('-')}`);
+      return out(ou(gs.filter((e) => brk(e) && e.w === pa).length), `quebras no ${sN}º set`);
+    }
+    if (finished) return null; // set acabado: tennis() trata
+    if (k === 'tsbrk') {
+      const [p1, p2] = String(leg.pick).split(':');
+      return gs.some((e) => brk(e) && e.w === p1) ? out(p2 === 'yes' ? 1 : -1, `quebra no ${sN}º set`) : null;
+    }
+    if (k === 'tsbt') return out(ou(gs.filter(brk).length), `quebras no ${sN}º set`);
+    // placar do set: todos os finais possíveis
+    const dbl = /\//.test(ev.home.name) && /\//.test(ev.away.name);
+    if (dbl && sN === sets.length && sN >= 3) return null; // pares: o set decisivo pode ser super tie-break
+    // só com sets normais (a 6 games): um set anterior acabado normalmente ou este já com 5 games de alguém
+    // (Fast4 / sets a 4 games acabam antes e dariam outros placares)
+    if (!(sets.slice(0, sN - 1).length ? sets.slice(0, sN - 1).every(okSet) : Math.max(...cur) >= 5)) return null;
+    if (sets.slice(0, sN - 1).some((x) => !okSet(x))) return null;
+    const outs = new Set();
+    for (const f of setFinals(cur[0], cur[1])) {
+      const all = sets.slice(); all[sN - 1] = f;
+      outs.add(M.legOutcome(leg, { h: 0, a: 0, sets: all, log }));
+      if (outs.size > 1) return null;
+    }
+    return outs.size === 1 ? out([...outs][0], `${sN}º set ${cur.join('-')}`) : null;
+  }
+
+  /* ---- tênis de mesa: sets acabados (ev.ttGames, do placar ao vivo) ----
+     vencedor/handicap/pontos de um set, placar após N sets: quando esse set acaba; partida (vencedor, handicap de sets,
+     placar em sets, 1º set + resultado): quando todos os finais possíveis dão o mesmo; pontos "mais de" passados. */
+  const TT_SET = new Set(['ttgw', 'ttgh', 'ttgt', 'ttgwt', 'ttgp', 'ttgm', 'ttgx', 'ttoe']);
+  function tableTennis(leg, ev) {
+    if (ev.sport !== 'tabletennis' || !Array.isArray(ev.ttGames)) return null;
+    const fin = ev.ttGames, k = leg.market, [a] = String(leg.per ?? '').split(':');
+    const h = fin.filter(([x, y]) => x > y).length, w = fin.length - h;
+    if (h >= TTN || w >= TTN) return null; // partida acabada: fica para o resultado final
+    const txt = fin.map((g) => g.join('-')).join(' ');
+    const out = (v) => (v == null ? null : { v, sig: `tt:${k}:${v}:${fin.length}`, text: `sets ${txt}` });
+    const R = { h, a: w, sets: fin, tt: true };
+    if (TT_SET.has(k) && !(k === 'ttoe' && a === 'M')) { const n = Number(a); return n >= 1 && fin.length >= n ? out(M.legOutcome(leg, R)) : null; }
+    if (k === 'ttcs' && a !== 'M') { const n = Number(a); return n >= 1 && fin.length >= n ? out(M.legOutcome(leg, R)) : null; }
+    if (k === 'ml' || k === 'ttsh' || k === 'ttdr' || (k === 'ttcs' && a === 'M')) {
+      if (k === 'ttdr' && !fin.length) return null;
+      const outs = new Set();
+      const rec = (x, y, extra) => {
+        if (outs.size > 1) return;
+        if (x === TTN || y === TTN) { outs.add(M.legOutcome(leg, { h: x, a: y, sets: fin.concat(extra), tt: true })); return; }
+        rec(x + 1, y, [...extra, [11, 0]]); rec(x, y + 1, [...extra, [0, 11]]);
+      };
+      rec(h, w, []);
+      return outs.size === 1 ? out([...outs][0]) : null;
+    }
+    const hp = fin.reduce((t, x) => t + x[0], 0), ap = fin.reduce((t, x) => t + x[1], 0);
+    if (k === 'ttpt' || k === 'ttmp') {
+      const v = k === 'ttpt' ? hp + ap : a === 'home' ? hp : ap;
+      return v > leg.line ? out(leg.pick === 'over' ? 1 : leg.pick === 'under' ? -1 : null) : null;
+    }
+    if (k === 'ttrt') return String(leg.pick).split(':')[1] === 'under' && hp + ap > leg.line ? out(-1) : null;
+    return null;
+  }
+
   // ---- ténis: mercados da partida decididos antes do fim ----
   // nº de sets para ganhar: a fonte diz o formato ("best_of_3" / "best_of_5"); sem ele não se adianta nada
   const setsToWin = (st) => (st?.format === 'best_of_5' ? 3 : st?.format === 'best_of_3' ? 2 : null);
@@ -350,7 +455,7 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     const ev = events.get(leg.evId);
     const key = `${betId}|${leg.evId}|${leg.key}`;
     if (!ev || ev.state !== 'in') { seen.delete(key); return false; }
-    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || basket(leg, ev) || race(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : null);
+    const d = regulationEnd(leg, ev) || mono(leg, ev) || part(leg, ev) || player(leg, ev) || basket(leg, ev) || race(leg, ev) || (ev.sport === 'tennis' ? tennis(leg, ev) || tennisMid(leg, ev) || tennisMatch(leg, ev) : ev.sport === 'esports' ? esportsMap(leg, ev) : ev.sport === 'tabletennis' ? tableTennis(leg, ev) : null);
     if (!d) { seen.delete(key); return false; }
     const t = now();
     const sig = `${d.sig}|${d.v}`;

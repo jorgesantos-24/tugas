@@ -337,6 +337,72 @@ function earlyMatch() {
   eq(runLog(s2, w2, 'tslead', 'draw', '2:6'), null, '2º set a 2-2: "após 6 games" ainda por decidir');
   eq(runLog(s2, w2, 'tsrace', 'home', '2:2'), 'won', '2º set: Ana chegou primeiro a 2 games → ganha já');
   eq(runLog(s2, w2, 'tsrace', 'home', '2:3'), null, '2º set: "primeiro a 3 games" ainda por decidir');
+  // set a decorrer: o que já ficou decidido antes do fim do set (31/10)
+  // jogos: [vencedor 'h'|'a', 'h' = confirmou o saque | 'b' = quebrou]
+  const runG = (sets, games, market, pick, per, line, names) => {
+    const nm = names || ['Ana Casa', 'Bia Fora'];
+    ev.home.name = nm[0]; ev.away.name = nm[1];
+    const summary = games.map(([w, t], i) => `Game ${i + 1} - ${w === 'h' ? nm[0] : nm[1]} - ${t === 'b' ? 'breaks' : 'holds'} to 15`);
+    st = { sport: 'tennis', format: 'best_of_3', home: { sets: sets.map((x) => x[0]) }, away: { sets: sets.map((x) => x[1]) }, summary };
+    const leg = { market, pick, per, line, evId: 'e1', key: `k${++n}` };
+    E.check('b', leg); T += 200000; E.check('b', leg); T += 200000;
+    ev.home.name = 'Ana Casa'; ev.away.name = 'Bia Fora';
+    return leg.result || null;
+  };
+  const S1 = [['h', 'h'], ['a', 'h'], ['h', 'h'], ['a', 'h'], ['h', 'h'], ['a', 'h'], ['h', 'h'], ['a', 'h'], ['h', 'h'], ['h', 'b']]; // 6-4, Ana quebrou no fim
+  const brk22 = [...S1, ['h', 'h'], ['a', 'b'], ['h', 'b'], ['a', 'h']]; // 2º set 2-2: Bia e Ana quebram
+  const s222 = [[6, 4], [2, 2]];
+  eq(runG(s222, brk22, 'tsbrk', 'away:yes', '2'), 'won', '2º set: "Bia quebra o saque? Sim" ganha logo que quebra');
+  eq(runG(s222, brk22, 'tsbrk', 'away:no', '2'), 'lost', '2º set: "Bia quebra? Não" perde logo que quebra');
+  const noBrk = [...S1, ['h', 'h'], ['a', 'h'], ['h', 'h'], ['a', 'h']];
+  eq(runG(s222, noBrk, 'tsbrk', 'away:yes', '2'), null, '2º set sem quebra da Bia: por decidir');
+  eq(runG(s222, brk22, 'tsbt', 'over', '2', 1.5), 'won', '2º set: 2 quebras → "mais de 1,5 quebras" ganha já');
+  eq(runG(s222, brk22, 'tsbt', 'under', '2', 1.5), 'lost', '2º set: 2 quebras → "menos de 1,5" perde já');
+  eq(runG(s222, brk22, 'tsbt', 'over', '2', 2.5), null, '2º set: 2 quebras → "mais de 2,5" por decidir');
+  eq(runG(s222, brk22, 'tpbrk', 'over', 'away:2', 0.5), 'won', 'quebras da Bia no 2º set: "mais de 0,5" ganha já');
+  eq(runG(s222, brk22, 'tpbrk', 'under', 'away:1', 0.5), 'won', 'quebras da Bia no 1º set (acabado, 0): "menos de 0,5" ganha já');
+  eq(runG(s222, brk22, 'tpbrk', 'over', 'home:1', 0.5), 'won', 'quebras da Ana no 1º set (acabado, 1): "mais de 0,5" ganha já');
+  // total de games / placar do set: todos os finais possíveis
+  const g55 = [...S1, ...Array.from({ length: 10 }, (_, i) => [i % 2 ? 'a' : 'h', 'h'])];
+  eq(runG([[6, 4], [5, 5]], g55, 'tsgt', 'over', '2', 9.5), 'won', '2º set 5-5: "mais de 9,5 games" ganha já');
+  eq(runG([[6, 4], [5, 5]], g55, 'tsgt', 'under', '2', 9.5), 'lost', '2º set 5-5: "menos de 9,5" perde já');
+  eq(runG([[6, 4], [5, 5]], g55, 'tsgt', 'over', '2', 12.5), null, '2º set 5-5: "mais de 12,5" por decidir (7-6?)');
+  const g33 = [...S1, ...Array.from({ length: 6 }, (_, i) => [i % 2 ? 'a' : 'h', 'h'])];
+  eq(runG([[6, 4], [3, 3]], g33, 'tscs', '6-2', '2'), 'lost', '2º set 3-3: placar exato "6-2" perde já');
+  eq(runG([[6, 4], [3, 3]], g33, 'tscs', '6-4', '2'), null, '2º set 3-3: placar exato "6-4" por decidir');
+  eq(runG([[6, 4], [3, 3]], g33, 'tsw', 'home', '2'), null, '2º set 3-3: vencedor do set por decidir');
+  // 1º set a 3-3 sem mais pistas do formato (podia ser Fast4): não se adianta
+  const t33 = Array.from({ length: 6 }, (_, i) => [i % 2 ? 'a' : 'h', 'h']);
+  eq(runG([[3, 3]], t33, 'tscs', '6-2', '1'), null, '1º set 3-3: formato por confirmar (Fast4?) → espera');
+  // pares no set decisivo (super tie-break): não se adianta
+  const dbl = ['A / B', 'C / D'];
+  eq(runG([[6, 4], [4, 6], [3, 3]], [...S1, ...Array.from({ length: 10 }, (_, i) => [i < 6 ? (i % 2 ? 'a' : 'h') : 'a', 'h']), ...t33], 'tscs', '6-2', '3', undefined, dbl), null, 'pares, set decisivo: espera');
+  // vencedor + total de games "menos de": perde ao passar a linha
+  eq(runG([[6, 4], [5, 5]], g55, 'tmrt', 'home:under', null, 19.5), 'lost', 'vencedor + "menos de 19,5 games" com 20 games: perde já');
+  eq(runG([[6, 4], [5, 5]], g55, 'tmrt', 'home:over', null, 19.5), null, 'vencedor + "mais de": espera pelo vencedor');
+
+  // tênis de mesa: sets acabados ao vivo
+  const tt = { id: 'e2', sport: 'tabletennis', state: 'in', home: { name: 'X', score: 0 }, away: { name: 'Y', score: 0 }, markets: [{ k: 'ml', sels: [{ pick: 'home', odds: 1.5, lock: false }] }], date: new Date(0) };
+  events.set('e2', tt);
+  const runT = (games, market, pick, per, line) => {
+    tt.ttGames = games;
+    const leg = { market, pick, per, line, evId: 'e2', key: `k${++n}` };
+    E.check('b', leg); T += 200000; E.check('b', leg); T += 200000;
+    return leg.result || null;
+  };
+  const t2 = [[11, 8], [9, 11]];
+  eq(runT(t2, 'ttgw', 'home', '1'), 'won', 'tênis de mesa: vencedor do 1º set pago logo que o set acaba');
+  eq(runT(t2, 'ttgw', 'home', '2'), 'lost', 'tênis de mesa: vencedor do 2º set');
+  eq(runT(t2, 'ttgw', 'home', '3'), null, 'tênis de mesa: 3º set por jogar');
+  eq(runT(t2, 'ttgt', 'over', '1', 18.5), 'won', 'tênis de mesa: total de pontos do 1º set (19)');
+  eq(runT(t2, 'ttcs', '1-1', '2'), 'won', 'tênis de mesa: placar após 2 sets 1-1');
+  eq(runT(t2, 'ml', 'home'), null, 'tênis de mesa: vencedor da partida por decidir');
+  eq(runT([[11, 8], [11, 9]], 'ttdr', 'away:w'), 'lost', 'tênis de mesa: "Y ganha o 1º set e a partida" com o 1º set do X → perde já');
+  eq(runT([[11, 8], [11, 9]], 'ttdr', 'home:w'), null, 'tênis de mesa: "X ganha o 1º set e a partida" por decidir');
+  eq(runT([[11, 8], [11, 9], [3, 11]], 'ttcs', '3-0', 'M'), 'lost', 'tênis de mesa: placar em sets 3-0 já impossível');
+  eq(runT(t2, 'ttpt', 'over', null, 38.5), 'won', 'tênis de mesa: total de pontos 39 → "mais de 38,5" ganha');
+  eq(runT(t2, 'ttpt', 'over', null, 39.5), null, 'tênis de mesa: "mais de 39,5" por decidir');
+  eq(runT([[11, 8], [11, 9], [11, 5]], 'ttgw', 'home', '1'), null, 'tênis de mesa: partida acabada → resultado final');
   // resultado final: desistência entre sets num melhor de 5
   const F = require(path.join(ROOT, 'feeds', 'moviodds.js'));
   eq(F.tennisResult({ final_score: '6-4,3-6,6-2', stats: { format: 'best_of_5' } }).done, false, 'melhor de 5 parado a 2-1 (desistência entre sets): fica para a equipa');

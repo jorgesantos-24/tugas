@@ -392,12 +392,13 @@ function toEvent(m0, serverNow, sport, full = true) {
   }
   const kick = Date.parse(m.kickoff_utc);
   const xs = live ? STATS.build(sport, st, m) : null; // estatísticas no formato da página do jogo
-  let score = null, clock;
+  let score = null, clock, ttGames = null;
   if (live && sport === 'mma') clock = 'Luta a decorrer'; // sem placar: a fonte não dá nada durante a luta
   else if (live && sport === 'tabletennis') { // "11-7,13-11,7-11": sets acabados no placar, o set a meio no relógio
     const gs = String(m.score || '').split(',').map((x) => parseScore(x)).filter(Boolean);
     const fin = gs.filter(TT.okGame), cur = gs.length && !TT.okGame(gs[gs.length - 1]) ? gs[gs.length - 1] : null;
     score = [fin.filter(([x, y]) => x > y).length, fin.filter(([x, y]) => y > x).length];
+    ttGames = fin; // sets acabados (liquidação antecipada: early.js)
     clock = cur ? `${gs.length}º set · ${cur[0]}-${cur[1]}` : 'Ao vivo';
   }
   else if (live) {
@@ -541,6 +542,7 @@ function toEvent(m0, serverNow, sport, full = true) {
     ...(live && sport === 'soccer' ? soccerClock(m.clock, serverNow) : null),
     home: team(m.home, 'h', score ? score[0] : null, xs?.form?.home), away: team(m.away, 'a', score ? score[1] : null, xs?.form?.away), details: xs?.details || [],
     venue: '',
+    ...(ttGames ? { ttGames } : {}),
     markets: markets.length ? markets : null,
     // antes do jogo: as apostas fecham no início (reabrem quando o jogo aparecer ao vivo)
     ...(live ? {} : { closesAt: kick }),
