@@ -21,6 +21,6 @@ console.log(`\nTUGAS — modo de teste local (sem chaves, sem dinheiro real)\nA 
 // corre o servidor e desliga tudo no fim
 const child = spawn('firebase emulators:exec --only firestore,auth --project golaco-ac746 "node server.js"', {
   cwd: ROOT, shell: true, stdio: 'inherit',
-  env: { ...process.env, NO_EXTERNAL: '1', PORT, SITE_URL: `http://localhost:${PORT}` },
+  env: { ...process.env, CASINO_TEST: '1', NO_EXTERNAL: '1', PORT, SITE_URL: `http://localhost:${PORT}` },
 });
 child.on('exit', (code) => process.exit(code ?? 0));

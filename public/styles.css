@@ -546,7 +546,51 @@ form .btn-block{margin-top:14px}
   .wallet .btn{padding:7px 8px;font-size:12px}
 }
 
+/* ---- cassino (lobby) ---- */
+.casino-only{display:none!important}
+.has-casino .casino-only{display:flex!important}
+/* faixa do topo do cassino: nome + botão à esquerda, capa do jogo à direita a desvanecer */
+.cg-hero{position:relative;display:flex;align-items:center;height:150px;padding:0 26px;margin-bottom:22px;border-radius:16px;overflow:hidden;isolation:isolate;text-decoration:none;color:#fff;background:radial-gradient(60% 120% at 80% 50%,rgba(255,170,0,.18),transparent 70%),#0b0f0d;border:1px solid rgba(255,204,31,.35);box-shadow:0 10px 30px rgba(255,170,0,.1)}
+.cg-hero-bg{position:absolute;top:0;right:0;bottom:0;z-index:-1;width:58%;height:100%;object-fit:cover;object-position:center 30%;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 45%);mask-image:linear-gradient(90deg,transparent 0%,#000 45%);transition:transform .5s}
+.cg-hero:hover .cg-hero-bg{transform:scale(1.05)}
+.cg-hero-txt{display:flex;flex-direction:column;align-items:flex-start;gap:4px;min-width:0;max-width:60%}
+.cg-hero-txt small{color:var(--yellow);font-size:11px;font-weight:800;letter-spacing:1.6px;text-transform:uppercase}
+.cg-hero-txt b{font-size:32px;font-weight:800;line-height:1.05;letter-spacing:-.6px}
+.cg-hero-play{margin-top:10px;display:inline-flex;align-items:center;gap:8px;padding:10px 20px;border-radius:999px;background:linear-gradient(180deg,#ffdc4f,#f5b400);color:#211800;font-weight:800;font-size:14px;box-shadow:0 6px 20px rgba(255,204,31,.35);transition:transform .15s}
+.cg-hero-play span{font-size:10px}
+.cg-hero:hover .cg-hero-play{transform:scale(1.05)}
+@media (max-width:640px){
+  .cg-hero{height:132px;padding:0 16px;margin-bottom:16px}
+  .cg-hero-bg{width:68%}
+  .cg-hero-txt b{font-size:23px}
+  .cg-hero-play{margin-top:8px;padding:9px 16px;font-size:13px}
+}
+.cg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px}
+.cg-card{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow:hidden;transition:transform .15s,border-color .15s}
+a.cg-card:hover{transform:translateY(-3px);border-color:var(--yellow);box-shadow:0 8px 24px rgba(255,204,31,.15)}
+.cg-art{position:relative;aspect-ratio:4/3;background:radial-gradient(120% 100% at 0% 100%,#0f5a31 0%,#04200f 70%);display:grid;place-items:center;overflow:hidden}
+.cg-svg{position:absolute;inset:0;width:100%;height:100%}
+.cg-cover{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transition:transform .35s}
+a.cg-card:hover .cg-cover{transform:scale(1.06)}.cg-img{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);height:84%;width:auto;max-width:92%;object-fit:contain}
+.cg-play{position:relative;background:var(--green);color:#03200f;font-weight:800;padding:8px 16px;border-radius:999px;opacity:0;transform:translateY(6px);transition:.15s}
+a.cg-card:hover .cg-play{opacity:1;transform:none}
+.cg-info{padding:10px 12px 12px;display:flex;flex-direction:column;gap:2px}
+.cg-info b{font-size:15px}
+.cg-info span{color:var(--muted);font-size:12px}
+.cg-card.soon{opacity:.55}
+.cg-card.soon .cg-art{background:var(--panel2)}
+.cg-card.soon{cursor:not-allowed}
+.cg-card.soon .cg-cover{filter:grayscale(1)}
+.cg-soon{position:relative;background:rgba(0,0,0,.75);color:#fff;font-weight:800;font-size:12px;letter-spacing:.4px;text-transform:uppercase;padding:6px 12px;border-radius:999px}
+.cg-lock{font-size:28px;opacity:.6}
+@media (max-width:640px){ .cg-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px} .cg-play{opacity:1;transform:none;font-size:12px;padding:6px 12px} }
+.side-casino-sep{margin:10px 0 8px;border-top:1px solid var(--line)}
+.side-casino-title{margin-top:10px;border-top:1px solid var(--line);padding-top:16px;color:var(--yellow)}
 .side-item .cnt.hot{background:var(--red);color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:8px;letter-spacing:.4px}
+.see-all{margin-left:auto;color:var(--yellow);font-weight:700;font-size:13px}
+.see-all:hover{text-decoration:underline}
+.cg-row{grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:22px}
+@media (max-width:640px){.cg-row{display:flex;overflow-x:auto;scrollbar-width:none}.cg-row .cg-card{flex:0 0 46%}}
 
 /* Lista de jogos: as colunas adaptam-se ao espaço da coluna do meio (e não ao ecrã inteiro),
    porque o menu lateral e o boletim ao lado podem deixá-la estreita mesmo num ecrã grande. */
@@ -578,6 +622,8 @@ form .btn-block{margin-top:14px}
 @media (max-width:900px){
   .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(62px + env(safe-area-inset-bottom));padding:0 4px env(safe-area-inset-bottom);background:linear-gradient(180deg,#0e1712,#090d0b);border-top:1px solid var(--line);box-shadow:0 -6px 20px rgba(0,0,0,.45)}
   .bn-item{flex:1 1 0;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;background:none;border:0;color:var(--muted);font:600 10.5px/1.1 Inter,system-ui,sans-serif;text-align:center;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent}
+  .bn-item.casino-only{display:none!important}
+  .has-casino .bn-item.casino-only{display:flex!important}
   .bn-ic{position:relative;display:grid;place-items:center;width:26px;height:26px}
   .bn-ic svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .bn-item.active{color:var(--yellow)}
@@ -593,6 +639,7 @@ form .btn-block{margin-top:14px}
   .toasts{bottom:calc(84px + env(safe-area-inset-bottom))}
   .footer-in{padding-bottom:calc(140px + env(safe-area-inset-bottom))}
 }
+.view-casino .slip-fab{display:none!important}
 .acc-sac{display:flex;align-items:center;gap:12px;margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);color:var(--text);text-decoration:none}
 .acc-sac:hover{border-color:var(--yellow)}
 .acc-sac-ic{font-size:22px;line-height:1}
@@ -625,6 +672,9 @@ form .btn-block{margin-top:14px}
 .hb-team em{font-style:normal;font-size:12px;font-weight:700;color:#dfe8e3;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .hb-score{font-size:40px;font-weight:800;color:#fff;letter-spacing:1px;text-shadow:0 4px 18px rgba(238,43,63,.5)}
 .hb-score small{margin:0 4px;color:var(--yellow);font-size:32px}
+/* slide do cassino */
+.hb-casino{background:radial-gradient(60% 120% at 80% 50%,rgba(255,170,0,.2),transparent 70%),#0b0f0d}
+.hb-bg{position:absolute;top:0;right:0;bottom:0;z-index:-1;width:60%;height:100%;object-fit:cover;object-position:center 30%;-webkit-mask-image:linear-gradient(90deg,transparent 0%,#000 45%);mask-image:linear-gradient(90deg,transparent 0%,#000 45%)}
 /* pontinhos */
 .hb-dots{position:absolute;left:30px;bottom:12px;display:flex;gap:6px}
 .hb-dots button{width:7px;height:7px;padding:0;border:0;border-radius:999px;background:rgba(255,255,255,.3);cursor:pointer;transition:width .3s,background .3s}
@@ -645,6 +695,7 @@ form .btn-block{margin-top:14px}
   .hb-team em{display:none}
   .hb-score{font-size:22px;line-height:1}
   .hb-score small{font-size:18px;margin:0 2px}
+  .hb-bg{width:70%}
   .hb-dots{left:16px;bottom:9px}
 }
 /* slide da marca: cores de Portugal + Galo Tuga */
