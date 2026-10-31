@@ -1,0 +1,101 @@
+/* Tema de Halloween — só vale com <html class="theme-halloween"> (ligado por /halloween.js entre 24/10 e 01/11).
+   As cores de estado (verde = ganhou, vermelho = perdeu/ao vivo) ficam iguais de propósito. */
+html.theme-halloween{
+  --bg:#0b0810; --panel:#141019; --panel2:#1c1624; --panel3:#261e31; --line:#2e2440;
+  --muted:#a59cb3; --odd:#1d1727; --odd-h:#2b2140;
+  --yellow:#ff8a1f;               /* destaque principal vira laranja abóbora */
+  --purple:#a855f7;
+  --flag:linear-gradient(90deg,#3b0764 0%,#7c3aed 28%,#ff8a1f 50%,#7c3aed 72%,#3b0764 100%);
+  background:radial-gradient(1000px 520px at -10% -10%,rgba(168,85,247,.16),transparent 60%),radial-gradient(900px 520px at 110% 110%,rgba(255,138,31,.10),transparent 60%),var(--bg);
+  background-attachment:fixed;
+}
+/* o fundo passa do body para o html para a camada de morcegos ficar ATRÁS do conteúdo */
+html.theme-halloween body{background:transparent}
+
+/* ---- barra de topo ---- */
+html.theme-halloween .topbar{background:linear-gradient(90deg,#1d0b2e,#100b16 50%,#2a1206)}
+html.theme-halloween .logo::after{content:"🎃";font-size:22px;line-height:1;margin-left:6px;display:inline-block;animation:hwBob 2.6s ease-in-out infinite;transform-origin:50% 90%}
+html.theme-halloween .hw-web{position:absolute;left:0;top:0;width:58px;height:58px;pointer-events:none;opacity:.22;z-index:0}
+html.theme-halloween .topbar > *{position:relative;z-index:1}
+html.theme-halloween .topbar > .hw-web{position:absolute;z-index:0}
+
+/* ---- botões e destaques ---- */
+html.theme-halloween .btn-green{background:linear-gradient(180deg,#ffa14a,#f06d00);color:#2a1200;box-shadow:0 4px 14px rgba(255,138,31,.35)}
+html.theme-halloween .btn-green:hover{background:linear-gradient(180deg,#ffb36b,#ff7a0a);box-shadow:0 6px 22px rgba(255,138,31,.55)}
+html.theme-halloween .btn-green:disabled{background:#3a2a22;color:#9a8678;box-shadow:none}
+html.theme-halloween .search input:focus,
+html.theme-halloween .stake:focus-within{border-color:var(--yellow)}
+html.theme-halloween .league-head{background:linear-gradient(90deg,rgba(168,85,247,.20),var(--panel2) 45%);box-shadow:inset 3px 0 0 var(--purple)}
+html.theme-halloween .odd:hover{border-color:var(--yellow);box-shadow:0 0 0 1px rgba(255,138,31,.25),0 4px 12px rgba(255,138,31,.15)}
+html.theme-halloween .banner{border-color:rgba(255,138,31,.3);background:linear-gradient(110deg,#5b1f99 0%,#2d0f4d 40%,#3a1606 85%,#8a3a06 100%)}
+html.theme-halloween .slip-fab,
+html.theme-halloween .bn-main .bn-ic{background:linear-gradient(180deg,#ffa14a,#f06d00);color:#2a1200}
+html.theme-halloween .bn-main .bn-ic{box-shadow:0 0 0 4px #0f0a14,0 6px 18px rgba(255,138,31,.4)}
+html.theme-halloween .bottomnav{background:linear-gradient(180deg,#160f1e,#0b0810)}
+html.theme-halloween .tabs button.active{background:linear-gradient(135deg,#ffa14a,#f06d00);color:#2a1200;box-shadow:0 4px 14px rgba(255,138,31,.3)}
+html.theme-halloween .sport-tabs button.active .tab-cnt{color:#2a1200}
+html.theme-halloween .hero-card{background:linear-gradient(160deg,#3d1766 0%,#1d0d33 60%,#3a1606 100%)}
+html.theme-halloween .hb-acc{background:radial-gradient(60% 140% at 85% 50%,rgba(168,85,247,.3),transparent 70%),radial-gradient(50% 120% at 100% 100%,rgba(255,138,31,.25),transparent 70%),#0d0912}
+html.theme-halloween .hb-live{background:radial-gradient(55% 140% at 82% 50%,rgba(238,43,63,.3),transparent 70%),radial-gradient(60% 120% at 60% 120%,rgba(168,85,247,.22),transparent 70%),#0d0912}
+html.theme-halloween .hb-casino{background:radial-gradient(60% 120% at 80% 50%,rgba(255,138,31,.24),transparent 70%),#0d0912}
+html.theme-halloween .avatar{background:linear-gradient(135deg,#7c3aed,#3b0764)}
+html.theme-halloween *{scrollbar-color:#5b2a8a transparent}
+html.theme-halloween ::-webkit-scrollbar-thumb{background:#5b2a8a}
+
+/* ---- faixa de aviso ---- */
+.hw-strip{display:none}
+html.theme-halloween .hw-strip{display:flex;align-items:center;justify-content:center;gap:10px;margin:3px 0 0;padding:8px 40px 8px 14px;position:relative;
+  background:linear-gradient(90deg,rgba(59,7,100,.85),rgba(42,18,6,.85));border-bottom:1px solid var(--line);font-weight:700;font-size:13px;text-align:center;color:#ffe2c4}
+html.theme-halloween .hw-strip b{color:var(--yellow)}
+html.theme-halloween .hw-strip button{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:50%;color:var(--muted);font-size:18px;line-height:1}
+html.theme-halloween .hw-strip button:hover{background:rgba(255,255,255,.08);color:var(--text)}
+html.theme-halloween.hw-strip-off .hw-strip{display:none}
+
+/* ---- camada de decoração: fixa, atrás do conteúdo, nunca recebe cliques ---- */
+.hw-layer{display:none}
+html.theme-halloween .hw-layer{display:block;position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}
+.hw-layer .hw-moon{position:absolute;right:6%;top:90px;width:120px;height:120px;border-radius:50%;
+  background:radial-gradient(circle at 38% 38%,#fff4d6,#ffd58a 55%,#e8a948);box-shadow:0 0 60px 18px rgba(255,200,110,.18);opacity:.35}
+.hw-layer .hw-corner{position:absolute;width:190px;height:190px;opacity:.16}
+.hw-layer .hw-corner.l{left:0;top:62px}
+.hw-layer .hw-corner.r{right:0;bottom:0;transform:rotate(180deg)}
+.hw-layer .hw-spider{position:absolute;left:150px;top:62px;width:2px;height:120px;background:linear-gradient(#ffffff40,#ffffff20);transform-origin:top;animation:hwDrop 6s ease-in-out infinite}
+.hw-layer .hw-spider::after{content:"🕷️";position:absolute;left:50%;bottom:-16px;transform:translateX(-50%);font-size:22px;opacity:.7}
+.hw-layer .hw-bat{position:absolute;left:-60px;width:44px;height:22px;opacity:.5;color:#000;animation:hwFly linear infinite}
+.hw-layer .hw-bat svg{width:100%;height:100%;fill:#1a0f24;filter:drop-shadow(0 0 6px rgba(168,85,247,.45));animation:hwFlap .28s ease-in-out infinite alternate;transform-origin:50% 50%}
+.hw-layer .hw-bat:nth-child(1){top:14%;animation-duration:22s;animation-delay:-3s}
+.hw-layer .hw-bat:nth-child(2){top:38%;animation-duration:28s;animation-delay:-14s;transform:scale(.7)}
+.hw-layer .hw-bat:nth-child(3){top:62%;animation-duration:25s;animation-delay:-8s}
+.hw-layer .hw-bat:nth-child(4){top:24%;animation-duration:34s;animation-delay:-20s;transform:scale(.55)}
+.hw-layer .hw-bat:nth-child(5){top:80%;animation-duration:30s;animation-delay:-26s;transform:scale(.8)}
+
+@keyframes hwFly{
+  0%{translate:0 0}
+  25%{translate:28vw -40px}
+  50%{translate:55vw 30px}
+  75%{translate:82vw -25px}
+  100%{translate:calc(100vw + 120px) 0}
+}
+@keyframes hwFlap{from{transform:scaleY(1)}to{transform:scaleY(.45)}}
+@keyframes hwBob{0%,100%{transform:rotate(-8deg)}50%{transform:rotate(8deg) translateY(-1px)}}
+@keyframes hwDrop{0%,100%{transform:scaleY(.55)}50%{transform:scaleY(1)}}
+
+/* ---- telemóvel ---- */
+@media (max-width:900px){
+  /* no telemóvel o conteúdo ocupa a largura toda: os morcegos voam por cima, pequenos e bem transparentes, sem bloquear toques */
+  html.theme-halloween .hw-layer{z-index:44}
+  .hw-layer .hw-bat{width:30px;height:15px;opacity:.28}
+  .hw-layer .hw-bat:nth-child(n+4){display:none}
+  .hw-layer .hw-moon,.hw-layer .hw-corner,.hw-layer .hw-spider{display:none}
+  html.theme-halloween .hw-strip{font-size:12px;padding:7px 38px 7px 10px;justify-content:flex-start;text-align:left}
+}
+@media (max-width:420px){
+  html.theme-halloween .logo::after{font-size:18px;margin-left:4px}
+  html.theme-halloween .hw-strip .hw-long{display:none}
+}
+
+/* quem pediu menos animação no sistema não vê nada a mexer */
+@media (prefers-reduced-motion:reduce){
+  html.theme-halloween .logo::after,.hw-layer .hw-spider,.hw-layer .hw-bat,.hw-layer .hw-bat svg{animation:none}
+  .hw-layer .hw-bat{display:none}
+}
