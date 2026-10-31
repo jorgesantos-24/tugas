@@ -1378,7 +1378,7 @@ function renderEvent() {
       <div><div class="big-score">${score}</div>${status}${shootoutHtml(ev)}</div>
       <div class="hero-team">${crest(ev.away)}${esc(ev.away.name)}${form(ev.away.form)}</div>
     </div>
-  </div>${streamBlock(ev)}`;
+  </div>${streamBlock(ev)}${tennisBoard(ev)}${pbpPanel(ev)}`;
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
@@ -1447,13 +1447,60 @@ function renderEvent() {
   return html;
 }
 
+/* Ténis ao vivo, como no Flashscore: placar por set (com os pontos do tie-break em cima) e o game a decorrer */
+function tennisBoard(ev) {
+  const st = ev.state === 'in' && ev.sport === 'tennis' ? ev.stats : null;
+  const p = st?.periods;
+  if (!p?.labels?.length) return '';
+  const tbs = {};
+  for (const x of st.pbp?.sets || []) if (x.tb) tbs[x.n] = x.tb;
+  const curSet = st.pbp?.cur?.s || p.labels.length;
+  const row = (side, i) => {
+    const t = side ? ev.away : ev.home, sc = side ? ev.away.score : ev.home.score;
+    const sets = p.labels.map((_, k) => {
+      const v = (side ? p.away : p.home)[k], tb = tbs[k + 1];
+      return `<td class="${k + 1 === curSet ? 'tb-cur' : ''}">${esc(v ?? '')}${tb ? `<sup>${tb[side]}</sup>` : ''}</td>`;
+    }).join('');
+    const srv = ev.serve === (side ? 'away' : 'home') ? '<i class="tsrv" title="Ao serviço"></i>' : '<i class="tsrv off"></i>';
+    return `<tr><td class="tb-name">${srv}<span>${esc(t.name)}</span></td><td class="tb-sets">${esc(sc ?? 0)}</td>${sets}<td class="tb-pt">${esc(ev.point?.[side] ?? '')}</td></tr>`;
+  };
+  return `<div class="tboard"><table><thead><tr><th></th><th>Sets</th>${p.labels.map((_, k) => `<th>${k + 1}</th>`).join('')}<th>Pts</th></tr></thead><tbody>${row(0)}${row(1)}</tbody></table></div>`;
+}
+/* Ponto a ponto (Flashscore): um separador por set; cada game com o placar depois de cada ponto, quem sacou,
+   quebras e BP / SP / MP. O game a decorrer fica em cima. */
+const PBP_FEW = 4;
+function pbpPanel(ev) {
+  const P = ev.state === 'in' && ev.sport === 'tennis' ? ev.stats?.pbp : null;
+  if (!P?.sets?.length) return '';
+  const want = S.pbpSet?.id === ev.id ? S.pbpSet.n : P.cur?.s || P.sets[P.sets.length - 1].n;
+  const set = P.sets.find((x) => x.n === want) || P.sets[P.sets.length - 1];
+  const nm = (w) => esc((w === 'home' ? ev.home : ev.away).short || (w === 'home' ? ev.home : ev.away).name);
+  const games = set.games.slice().reverse();
+  const all = S.pbpAll === ev.id;
+  const shown = all ? games : games.slice(0, PBP_FEW);
+  const LP = { 0: '0', 15: '15', 30: '30', 40: '40' };
+  const row = (g) => {
+    const head = g.cur ? '<span class="pbp-now"><span class="live-dot"></span> Agora</span>' : `<b>${g.sc[0]}-${g.sc[1]}</b>`;
+    const who = g.tb ? '<span class="pbp-tbl">Tie-break</span>' : g.srv ? `<span class="pbp-srv"><i class="tsrv"></i>${nm(g.srv)}</span>` : '';
+    const brk = g.brk ? '<span class="pbp-brk">Quebra</span>' : '';
+    let pts;
+    if (g.none) pts = `<span class="pbp-none">${g.w ? `${nm(g.w)} ${g.tb ? 'ganhou o tie-break' : g.brk ? 'quebrou' : 'confirmou o saque'}${g.lp != null ? ` · adversário com ${LP[g.lp] ?? g.lp}` : ''}` : ''} · pontos não gravados</span>`;
+    else if (!g.pts.length) pts = '<span class="pbp-none">0:0</span>';
+    else pts = g.pts.map(([x, m], i) => `${g.gapAt?.includes(i) ? '<span class="pbp-gap" title="Pontos que chegaram juntos (não se sabe a ordem)">…</span>' : ''}<span class="pbp-p">${esc(x)}${m ? m.split(' ').map((k) => `<em class="${k.toLowerCase()}">${k}</em>`).join('') : ''}</span>`).join('');
+    return `<div class="pbp-g${g.cur ? ' cur' : ''}${g.brk ? ' brk' : ''}"><div class="pbp-h">${head}${who}${brk}</div><div class="pbp-pts">${pts}</div></div>`;
+  };
+  const tabs = P.sets.length > 1 ? `<div class="pbp-tabs">${P.sets.map((x) => `<button class="${x.n === set.n ? 'active' : ''}" data-pbpset="${x.n}">${x.n}º set</button>`).join('')}</div>` : '';
+  const more = games.length > PBP_FEW ? `<button class="mkt-tog" data-pbpall="1">${all ? 'Mostrar menos ▴' : `Ver todos os games (${games.length}) ▾`}</button>` : '';
+  return `<div class="pbp"><div class="pbp-title">Ponto a ponto<small>${set.n}º set</small></div>${tabs}${shown.map(row).join('')}${more}</div>`;
+}
+
 /* Estatísticas ao vivo (vêm da fonte pelo servidor, já traduzidas): parciais por período/set/mapa e barras casa x fora */
 function statsPanel(ev) {
   const st = ev.state === 'in' ? ev.stats : null;
-  if (!st || (!st.rows?.length && !st.periods && !st.players)) return '';
+  if (!st || (!st.rows?.length && !(st.periods && ev.sport !== 'tennis') && !st.players)) return '';
   let html = `<div class="section-head" style="margin-top:16px"><h2 style="font-size:16px">Estatísticas ao vivo</h2></div><div class="live-stats">`;
   const p = st.periods;
-  if (p && p.labels?.length) {
+  if (p && p.labels?.length && ev.sport !== 'tennis') { // ténis: o placar por set já está em cima (tennisBoard)
     const cells = (list) => p.labels.map((_, i) => `<td>${esc(list[i] ?? '')}</td>`).join('');
     html += `<div class="ls-table"><table><thead><tr><th></th>${p.labels.map((l) => `<th>${esc(l)}</th>`).join('')}</tr></thead><tbody>` +
       `<tr><td class="ls-team">${esc(ev.home.short)}</td>${cells(p.home)}</tr><tr><td class="ls-team">${esc(ev.away.short)}</td>${cells(p.away)}</tr></tbody></table></div>`;
@@ -2229,6 +2276,8 @@ document.addEventListener('click', async (e) => {
   }
   if (d.togglecountry != null) { const c = d.togglecountry; if (S.openCountries.has(c)) S.openCountries.delete(c); else S.openCountries.add(c); renderSidebar(); return; }
   if (d.sporttab) { S.sportTab = d.sporttab; S.listLimit = LIST_STEP; S.keepScroll = true; renderMain(); return; }
+  if (d.pbpset) { S.pbpSet = { id: S.eventId, n: Number(d.pbpset) }; S.keepScroll = true; renderMain(); return; }
+  if (d.pbpall) { S.pbpAll = S.pbpAll === S.eventId ? null : S.eventId; S.keepScroll = true; renderMain(); return; }
   if (d.evtab) { S.evTab = { id: S.eventId, tab: d.evtab }; S.keepScroll = true; renderMain(); return; }
   if (d.bpstat || d.bpteam) { if (d.bpstat) S.bpStat = d.bpstat; else S.bpTeam = d.bpteam; S.keepScroll = true; renderMain(); return; }
   if (d.mkt != null) { const k = `${S.eventId}|${d.mkt}`; if (S.openMkts.has(k)) S.openMkts.delete(k); else S.openMkts.add(k); S.keepScroll = true; renderMain(); return; }

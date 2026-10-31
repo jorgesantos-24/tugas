@@ -5,6 +5,7 @@
    Só entra o que a fonte trouxer; um valor que falta não aparece. */
 
 const BP = require('./bplayers.js');
+const PBP = require('./pbp.js'); // ténis: ponto a ponto (como no Flashscore)
 const fin = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 function rowsOf(h, a, spec) {
   const out = [];
@@ -80,6 +81,7 @@ function build(sport, st, m) {
     if (Array.isArray(h.sets) && Array.isArray(a.sets) && h.sets.length) out.periods = { labels: h.sets.map((_, i) => `${i + 1}º set`), home: h.sets, away: a.sets.slice(0, h.sets.length) };
     if (h.point != null && a.point != null) out.point = [String(h.point), String(a.point)];
     out.serve = h.serving ? 'home' : a.serving ? 'away' : null;
+    try { const p = m?.id != null ? PBP.build(m.id, st, m.home, m.away) : null; if (p) out.pbp = p; } catch (e) { console.error('[Ponto a ponto]', m?.id, e.message); }
   } else if (sport === 'hockey') {
     out.rows = rowsOf(h, a, HOCKEY);
     if (Array.isArray(h.periods) && Array.isArray(a.periods) && h.periods.length) out.periods = { labels: h.periods.map((_, i) => `${i + 1}º P`), home: h.periods, away: a.periods.slice(0, h.periods.length) };

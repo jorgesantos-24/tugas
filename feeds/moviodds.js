@@ -549,7 +549,7 @@ function toEvent(m0, serverNow, sport, full = true) {
     // ténis: pontos do game e quem serve (aparecem na lista); o resto só na página do jogo
     if (xs.point) ev.point = xs.point;
     if (xs.serve) ev.serve = xs.serve;
-    if (xs.rows.length || xs.periods || xs.players) ev.stats = { rows: xs.rows, ...(xs.periods ? { periods: xs.periods } : {}), ...(xs.players ? { players: xs.players } : {}) };
+    if (xs.rows.length || xs.periods || xs.players || xs.pbp) ev.stats = { rows: xs.rows, ...(xs.periods ? { periods: xs.periods } : {}), ...(xs.players ? { players: xs.players } : {}), ...(xs.pbp ? { pbp: xs.pbp } : {}) };
   }
   return ev;
 }

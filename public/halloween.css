@@ -38,6 +38,7 @@ html.theme-halloween .hero-card{background:linear-gradient(160deg,#3d1766 0%,#1d
 html.theme-halloween .hb-acc{background:radial-gradient(60% 140% at 85% 50%,rgba(168,85,247,.3),transparent 70%),radial-gradient(50% 120% at 100% 100%,rgba(255,138,31,.25),transparent 70%),#0d0912}
 html.theme-halloween .hb-live{background:radial-gradient(55% 140% at 82% 50%,rgba(238,43,63,.3),transparent 70%),radial-gradient(60% 120% at 60% 120%,rgba(168,85,247,.22),transparent 70%),#0d0912}
 html.theme-halloween .hb-casino{background:radial-gradient(60% 120% at 80% 50%,rgba(255,138,31,.24),transparent 70%),#0d0912}
+html.theme-halloween .ev-detail-head{background:linear-gradient(160deg,#3d1766 0%,#1d0d33 55%,#3a1606 100%)}
 html.theme-halloween .avatar{background:linear-gradient(135deg,#7c3aed,#3b0764)}
 html.theme-halloween *{scrollbar-color:#5b2a8a transparent}
 html.theme-halloween ::-webkit-scrollbar-thumb{background:#5b2a8a}
