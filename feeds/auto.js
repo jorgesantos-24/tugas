@@ -76,8 +76,7 @@ function rule(q, m, sport) {
     }
     if ((x = /^(Match|1st Half|2nd Half) Goals Range$/.exec(g))) { const r = range(q.line), y = yn(q.side); return y ? cond({ Match: 'ft', '1st Half': 'h1', '2nd Half': 'h2' }[x[1]], [r && `tot=in:${r}`], y === 'no') : null; }
     if (g === 'Team Goals Range') { const w = who(q.line), r = range(q.handicap), y = yn(q.side); return y && (w === 'home' || w === 'away') ? cond('ft', [r && `t${w[0]}=in:${r}`], y === 'no') : null; }
-    if (g === 'Results/Goals Range') { const w = who(q.line), r = range(q.handicap), y = yn(q.side); return y ? cond('ft', [w && `res=${w}`, r && `tot=in:${r}`], y === 'no') : null; }
-    if (g === 'Double Chance/Goals Range') { const d = dcOf(q.line), r = range(q.handicap), y = yn(q.side); return y ? cond('ft', [d && `dc=${d}`, r && `tot=in:${r}`], y === 'no') : null; }
+    // "Results/Goals Range" e "Double Chance/Goals Range": retirados (ver OFF_GROUPS)
     // ao vivo a bet365 usa outros nomes: "Match Corners" (= Alternative Corners), "Asian Corners" e "2-Way Corners" (= totais)
     if (g === 'Asian Corners' || g === '2-Way Corners') return { k: 'ptot', scope: 'corners', pick: ou(q.side), line: lineOf(q) };
     if (g === 'Alternative Corners' || g === 'Match Corners') { const n = Number(q.handicap ?? q.line), s = String(q.side ?? '').toLowerCase(); const op = { over: 'gt', under: 'lt', exactly: 'eq' }[s]; return op && Number.isInteger(n) ? cond('corners', [`tot=${op}:${n}`]) : null; }
@@ -353,8 +352,15 @@ function lineClash(r, q) {
   return nums.length > 0 && !nums.some((v) => Math.abs(v) === Math.abs(r.line));
 }
 
+/* Mercados retirados (2026-10-31): não se oferecem de forma nenhuma (nem como mercado da equipa).
+   Resultado/Faixa e Dupla Chance/Faixa de gols: o "Não" da bet365 é "o resultado acontece com os gols FORA da faixa"
+   (Não Coritiba 1-5 @34 = Coritiba ganha com 6+ gols), não o contrário do "Sim" — liquidado como contrário,
+   ganhava sempre que o resultado falhava e pagava muito acima do justo. */
+const OFF_GROUPS = new Set(['Results/Goals Range', 'Double Chance/Goals Range']);
+
 // a cotação genérica (nome traduzido, secção) ganha a regra de liquidação, se houver
 function apply(gen, q, m, sport) {
+  if (OFF_GROUPS.has(String(q.group_name ?? '').trim())) return null;
   const r = rule(q, m, sport);
   if (!r || !r.pick || ('line' in r && !isFinite(r.line))) return gen;
   if (lineClash(r, q)) return null;

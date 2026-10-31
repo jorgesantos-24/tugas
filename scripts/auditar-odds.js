@@ -5,7 +5,10 @@
    1) odd = odd da fonte (arredondada a 2 casas, como a bet365 mostra) — nenhuma odd inventada ou transformada;
    2) lado certo: o jogador/equipa, Mais/Menos, Sim/Não, Par/Ímpar e a linha que o site mostra estão no texto da
       cotação original (apanha lados trocados na leitura);
-   3) nenhum mercado completo paga mais do que o possível (apostar em todos os resultados não pode dar lucro). */
+   3) nenhum mercado completo paga mais do que o possível (apostar em todos os resultados não pode dar lucro);
+   4) o "Não" de cada "Sim" (pick X / !X, ou yes / no, na mesma linha) é mesmo o contrário: as duas odds juntas
+      não podem prometer menos de 100% (apanha um "Não" da fonte que quer dizer outra coisa, como o de
+      Resultado/Faixa de gols, retirado a 2026-10-31). */
 const path = require('path');
 process.env.MOVIODDS_WS = '0'; process.env.NO_EXTERNAL = '1';
 const ROOT = path.join(__dirname, '..');
@@ -25,13 +28,13 @@ const SRC = { tennis: 'tennis', soccer: 'soccer', basketball: 'basketball', hock
 
 (async () => {
   const sports = process.argv.slice(2).length ? process.argv.slice(2) : Object.keys(SRC);
-  const tot = { selecoes: 0, comOrigem: 0, oddDiferente: 0, ladoErrado: 0, linhaErrada: 0, lucroGarantido: 0, oddsSemFonte: 0 };
+  const tot = { selecoes: 0, comOrigem: 0, oddDiferente: 0, ladoErrado: 0, linhaErrada: 0, lucroGarantido: 0, oddsSemFonte: 0, naoErrado: 0 };
   const bad = [];
   for (const sport of sports) {
     let lists;
     try { lists = await Promise.all([`https://moviodds.com/odds?sport=${SRC[sport]}&in_play=1`, `https://moviodds.com/odds?sport=${SRC[sport]}`].map(async (u) => (await fetch(u, { signal: AbortSignal.timeout(90000) })).json())); }
     catch (e) { console.log(`${sport}: fonte indisponível (${e.message})`); continue; }
-    const c = { selecoes: 0, comOrigem: 0, oddDiferente: 0, ladoErrado: 0, linhaErrada: 0, lucroGarantido: 0, oddsSemFonte: 0 };
+    const c = { selecoes: 0, comOrigem: 0, oddDiferente: 0, ladoErrado: 0, linhaErrada: 0, lucroGarantido: 0, oddsSemFonte: 0, naoErrado: 0 };
     for (const j of lists) for (const m of j.matches || []) {
       curMatch = m.id; origin.clear(); // só as cotações desta lista (o mesmo jogo pode vir ao vivo e antes do jogo, com odds de momentos diferentes)
       const ev = F.toEvent(m, Date.parse(j.server_time || j.generated_at) || Date.now(), sport, true);
@@ -47,6 +50,14 @@ const SRC = { tennis: 'tennis', soccer: 'soccer', basketball: 'basketball', hock
         for (const g of byLine.values()) {
           const p = g.map((s) => String(s.pick)).sort().join(',');
           if (['away,home', 'no,yes', 'even,odd', 'over,under', 'away,draw,home'].includes(p) && g.every((s) => !s.lock) && g.reduce((a, s) => a + 1 / s.odds, 0) < 1) { c.lucroGarantido++; bad.push(`[${sport}] lucro garantido: ${m.home} x ${m.away} ${mk.k} ${g.map((s) => `${s.pick}@${s.odds}`).join(' ')}`); }
+        }
+        // 4) "Não" que não é o contrário do "Sim"
+        const twin = new Map(mk.sels.map((s) => [`${s.pick}@${s.line ?? ''}`, s]));
+        for (const s of mk.sels) {
+          const p = String(s.pick);
+          if (p.startsWith('!') || s.lock) continue;
+          const t = twin.get(`!${p}@${s.line ?? ''}`) || (/(^|:)yes$/.test(p) ? twin.get(`${p.replace(/yes$/, 'no')}@${s.line ?? ''}`) : null);
+          if (t && !t.lock && 1 / s.odds + 1 / t.odds < 0.97) { c.naoErrado++; bad.push(`[${sport}] "Não" não é o contrário do "Sim": ${m.home} x ${m.away} ${mk.k} ${p} @${s.odds} / ${t.pick} @${t.odds}`); }
         }
         for (const s of mk.sels) {
           c.selecoes++;
@@ -89,14 +100,14 @@ const SRC = { tennis: 'tennis', soccer: 'soccer', basketball: 'basketball', hock
         }
       }
     }
-    console.log(`${sport.padEnd(10)} ${String(c.selecoes).padStart(7)} seleções · ${c.comOrigem} com a cotação de origem conferida · odd diferente ${c.oddDiferente} · lado errado ${c.ladoErrado} · linha errada ${c.linhaErrada} · odd sem fonte ${c.oddsSemFonte} · lucro garantido ${c.lucroGarantido}`);
+    console.log(`${sport.padEnd(10)} ${String(c.selecoes).padStart(7)} seleções · ${c.comOrigem} com a cotação de origem conferida · odd diferente ${c.oddDiferente} · lado errado ${c.ladoErrado} · linha errada ${c.linhaErrada} · odd sem fonte ${c.oddsSemFonte} · lucro garantido ${c.lucroGarantido} · "Não" errado ${c.naoErrado}`);
     for (const k of Object.keys(tot)) tot[k] += c[k];
     origin.clear();
   }
   const dup = F.guardRemoved.filter((x) => x.includes('[duas odds na fonte]'));
   console.log(`
 seleções tiradas por terem duas odds diferentes na fonte: ${dup.length}`); dup.slice(0, 6).forEach((x) => console.log('   ', x.slice(25)));
-  const errs = tot.oddDiferente + tot.ladoErrado + tot.linhaErrada + tot.oddsSemFonte + tot.lucroGarantido;
+  const errs = tot.oddDiferente + tot.ladoErrado + tot.linhaErrada + tot.oddsSemFonte + tot.lucroGarantido + tot.naoErrado;
   console.log(`\nTOTAL ${tot.selecoes} seleções · problemas: ${errs}`);
   bad.slice(0, 40).forEach((x) => console.log('  ✘', x));
   process.exit(errs ? 1 : 0);
