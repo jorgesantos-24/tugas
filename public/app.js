@@ -1378,7 +1378,7 @@ function renderEvent() {
       <div><div class="big-score">${score}</div>${status}${shootoutHtml(ev)}</div>
       <div class="hero-team">${crest(ev.away)}${esc(ev.away.name)}${form(ev.away.form)}</div>
     </div>
-  </div>${streamBlock(ev)}${tennisBoard(ev)}${pbpPanel(ev)}`;
+  </div>${streamBlock(ev)}${tennisBoard(ev)}`;
   if (ev.state !== 'post') {
     if ((ev.suspendedUntil || 0) > Date.now()) html += `<div class="suspended-banner">🔒 Mercados suspensos temporariamente (gol / lance perigoso). Reabrem em instantes.</div>`;
     if (!sels.length) html += `<div class="empty-state">Nenhum mercado aberto para este evento no momento.</div>`;
@@ -1466,7 +1466,8 @@ function tennisBoard(ev) {
   };
   return `<div class="tboard"><table><thead><tr><th></th><th>Sets</th>${p.labels.map((_, k) => `<th>${k + 1}</th>`).join('')}<th>Pts</th></tr></thead><tbody>${row(0)}${row(1)}</tbody></table></div>`;
 }
-/* Ponto a ponto (Flashscore): um separador por set; cada game com o placar depois de cada ponto, quem sacou,
+/* DESLIGADO a pedido (página cheia demais, 31/10): para voltar, pôr ${pbpPanel(ev)} depois de ${tennisBoard(ev)} em renderEvent.
+   Ponto a ponto (Flashscore): um separador por set; cada game com o placar depois de cada ponto, quem sacou,
    quebras e BP / SP / MP. O game a decorrer fica em cima. */
 const PBP_FEW = 4;
 function pbpPanel(ev) {
