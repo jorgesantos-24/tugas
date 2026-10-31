@@ -838,13 +838,13 @@ const CASINO_GAMES = [
   { abrir: 'treasures-aztec', name: 'Treasures of Aztec', tag: 'PG Soft', href: '#', desc: 'Tesouros astecas', img: '/img/slots/treasures-aztec.webp' },
   { abrir: 'three-cz-pigs', name: 'Three Crazy Piggies', tag: 'PG Soft', href: '#', desc: 'Três porquinhos', img: '/img/slots/three-cz-pigs.webp' },
 ];
-// só os jogos ligados no servidor; os slots dependem do serviço de slots estar ligado
-const casinoGames = () => CASINO_GAMES.filter((g) => (S.games && (g.abrir ? S.games.slots : S.games[g.id])));
+// Aviator e Mines só se estiverem ligados no servidor; os slots aparecem sempre ("Em breve" até haver licença oficial)
+const casinoGames = () => CASINO_GAMES.filter((g) => (S.games && (g.abrir ? true : S.games[g.id])));
 // provisório: só estes jogos podem ser jogados; os restantes aparecem como indisponíveis
 const CASINO_AVAILABLE = new Set(['decola', 'mines', 'fortune-tiger', 'fortune-ox']);
-const isSoon = (g) => !CASINO_AVAILABLE.has(g.abrir || g.id);
+const isSoon = (g) => !CASINO_AVAILABLE.has(g.abrir || g.id) || (!!g.abrir && !S.games.slots);
 const casinoCard = (g) => isSoon(g)
-  ? `<div class="cg-card soon" title="${esc(g.name)} — indisponível no momento" aria-disabled="true"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"><span class="cg-soon">Indisponível</span></div></div>`
+  ? `<div class="cg-card soon" title="${esc(g.name)} — em breve" aria-disabled="true"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"><span class="cg-soon">Em breve</span></div></div>`
   : `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
 // página inicial: uma fila só com os jogos disponíveis (Fortune Tiger e Fortune Ox primeiro)
 function homeCasino() {
