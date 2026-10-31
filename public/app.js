@@ -301,9 +301,8 @@ const RES_PT = { won: 'Ganhou', halfwon: 'Meio ganho', void: 'Devolvida', halflo
 
 async function loadAccount(silent) {
   try {
-    const { user, payments, liveDelays, casino, games, testMode } = await api('GET', '/api/me');
+    const { user, payments, liveDelays, testMode } = await api('GET', '/api/me');
     S.testMode = !!testMode; // servidor de teste (emuladores): sem BravoPay, com saldo de teste
-    S.casino = !!casino; S.games = games || {}; document.body.classList.toggle('has-casino', S.casino);
     if (liveDelays) S.liveDelays = liveDelays; // segundos de espera ao vivo, por modalidade
     S.user = user;
     if (payments) { S.payments = payments; document.body.classList.toggle('live-pay', !!payments.live); }
@@ -688,13 +687,13 @@ const isToday = (ev) => sameDay(ev.date, new Date());
 const isTomorrow = (ev) => { const t = new Date(); t.setDate(t.getDate() + 1); return sameDay(ev.date, t); };
 
 /* ---------------- carrossel de destaques (topo da página inicial) ---------------- */
-// slides: conta (criar / 1.º depósito), jogo ao vivo em destaque, cassino
+// slides: conta (criar / 1.º depósito), jogo ao vivo em destaque
 function homeHero(live) {
   if (S.user && isPaused()) return homeBanner(); // conta em pausa: só o aviso, sem promover jogos
   const slides = [];
   // marca: cores de Portugal e o mascote Galo Tuga
   slides.push(`<div class="hb-slide hb-brand">
-      <div class="hb-txt"><small><span class="hb-flag" aria-hidden="true"></span>TugasBet</small><b>Futebol com sotaque <span class="hb-pt">português</span></b><p>Odds ao vivo, cassino e PIX na hora. Bora com o Galo Tuga!</p>
+      <div class="hb-txt"><small><span class="hb-flag" aria-hidden="true"></span>TugasBet</small><b>Futebol com sotaque <span class="hb-pt">português</span></b><p>Odds ao vivo e PIX na hora. Bora com o Galo Tuga!</p>
       <span class="hb-cta">${S.user ? '<button class="hb-btn" data-view="live">Apostar ao vivo</button>' : '<button class="hb-btn" data-action="register">Entrar no time</button>'}</span></div>
       <img class="hb-galo" src="/img/galo-tuga.svg" alt="Galo Tuga, o mascote da TugasBet"></div>`);
   if (!S.user) slides.push(`<div class="hb-slide hb-acc">
@@ -715,11 +714,6 @@ function homeHero(live) {
       <span class="hb-cta"><button class="hb-btn" data-ev="${ev.id}">Apostar</button><button class="hb-btn hb-btn-ghost" data-view="live">Ver todos</button></span></div>
       <div class="hb-art hb-match">${team(ev.home)}<span class="hb-score">${ev.home.score ?? 0}<small>:</small>${ev.away.score ?? 0}</span>${team(ev.away)}</div></div>`);
   }
-  const g = S.casino && casinoGames().find((x) => !isSoon(x));
-  if (g) slides.push(`<div class="hb-slide hb-casino">
-      <img class="hb-bg" src="${g.img}" alt="" onerror="this.onerror=null;this.style.display='none'">
-      <div class="hb-txt"><small>Cassino</small><b>${esc(g.name)}</b><p>Com o mesmo saldo das suas apostas.</p>
-      <span class="hb-cta">${gameLink(g, 'hb-btn', 'Jogar agora <span aria-hidden="true">▶</span>')}</span></div></div>`);
   if (!slides.length) return '';
   const dots = slides.length > 1 ? `<div class="hb-dots">${slides.map((_, i) => `<button type="button" data-hb="${i}" aria-label="Destaque ${i + 1}"></button>`).join('')}</div>` : '';
   return `<div class="hb" id="homeHero" data-n="${slides.length}"><div class="hb-track">${slides.join('')}</div>${dots}</div>`;
@@ -807,75 +801,6 @@ function homeBanner() {
   return '';
 }
 
-/* ---------------- cassino ---------------- */
-const CASINO_GAMES = [
-  { abrir: 'fortune-tiger', name: 'Fortune Tiger', tag: 'PG Soft', href: '#', desc: 'O tigre que paga', img: '/img/slots/fortune-tiger.webp' },
-  { abrir: 'fortune-ox', name: 'Fortune Ox', tag: 'PG Soft', href: '#', desc: 'Touro da fortuna', img: '/img/slots/fortune-ox.webp' },
-  { id: 'decola', name: 'Aviator', tag: 'Crash', href: '/decola', desc: 'Quanto mais alto, maior o multiplicador', img: '/img/decola-capa.webp?v=4' },
-  { id: 'mines', name: 'Mines', tag: 'Minas', href: '/mines', desc: 'Encontre os diamantes e fuja das minas', img: '/img/mines-capa.webp?v=1' },
-  { abrir: 'fortune-dragon', name: 'Fortune Dragon', tag: 'PG Soft', href: '#', desc: 'Dragão da fortuna', img: '/img/slots/fortune-dragon.webp' },
-  { abrir: 'fortune-rabbit', name: 'Fortune Rabbit', tag: 'PG Soft', href: '#', desc: 'Coelho da sorte', img: '/img/slots/fortune-rabbit.webp' },
-  { abrir: 'fortune-mouse', name: 'Fortune Mouse', tag: 'PG Soft', href: '#', desc: 'Rato da fortuna', img: '/img/slots/fortune-mouse.webp' },
-  { abrir: 'bikini-paradise', name: 'Bikini Paradise', tag: 'PG Soft', href: '#', desc: 'Praia e prémios', img: '/img/slots/bikini-paradise.webp' },
-  { abrir: 'jungle-delight', name: 'Jungle Delight', tag: 'PG Soft', href: '#', desc: 'Selva selvagem', img: '/img/slots/jungle-delight.webp' },
-  { abrir: 'ganesha-gold', name: 'Ganesha Gold', tag: 'PG Soft', href: '#', desc: 'Deus da prosperidade', img: '/img/slots/ganesha-gold.webp' },
-  { abrir: 'double-fortune', name: 'Double Fortune', tag: 'PG Soft', href: '#', desc: 'Fortuna em dobro', img: '/img/slots/double-fortune.webp' },
-  { abrir: 'dragon-tiger-luck', name: 'Dragon Tiger Luck', tag: 'PG Soft', href: '#', desc: 'Dragão contra tigre', img: '/img/slots/dragon-tiger-luck.webp' },
-  { abrir: 'ninja-raccoon', name: 'Ninja Raccoon Frenzy', tag: 'PG Soft', href: '#', desc: 'Guaxinim ninja', img: '/img/slots/ninja-raccoon.webp' },
-  { abrir: 'lucky-clover', name: 'Lucky Clover Lady', tag: 'PG Soft', href: '#', desc: 'Trevo da sorte', img: '/img/slots/lucky-clover.webp' },
-  { abrir: 'ultimate-striker', name: 'Ultimate Striker', tag: 'PG Soft', href: '#', desc: 'Futebol e prémios', img: '/img/slots/ultimate-striker.webp' },
-  { abrir: 'prosper-ftree', name: 'Prosperity Fortune Tree', tag: 'PG Soft', href: '#', desc: 'Árvore da prosperidade', img: '/img/slots/prosper-ftree.webp' },
-  { abrir: 'chicky-run', name: 'Chicky Run', tag: 'PG Soft', href: '#', desc: 'A galinha corredora', img: '/img/slots/chicky-run.webp' },
-  { abrir: 'butterfly-blossom', name: 'Butterfly Blossom', tag: 'PG Soft', href: '#', desc: 'Borboletas douradas', img: '/img/slots/butterfly-blossom.webp' },
-  { abrir: 'piggy-gold', name: 'Piggy Gold', tag: 'PG Soft', href: '#', desc: 'Porquinho da fortuna', img: '/img/slots/piggy-gold.webp' },
-  { abrir: 'wild-bandito', name: 'Wild Bandito', tag: 'PG Soft', href: '#', desc: 'Fora da lei', img: '/img/slots/wild-bandito.webp' },
-  { abrir: 'zombie-outbreak', name: 'Zombie Outbreak', tag: 'PG Soft', href: '#', desc: 'Zumbis na cidade', img: '/img/slots/zombie-outbreak.webp' },
-  { abrir: 'majestic-ts', name: 'Majestic Treasures', tag: 'PG Soft', href: '#', desc: 'Tesouros majestosos', img: '/img/slots/majestic-ts.webp' },
-  { abrir: 'thai-river', name: 'Thai River Wonders', tag: 'PG Soft', href: '#', desc: 'Rio tailandês', img: '/img/slots/thai-river.webp' },
-  { abrir: 'gdn-ice-fire', name: 'Guardians of Ice & Fire', tag: 'PG Soft', href: '#', desc: 'Gelo e fogo', img: '/img/slots/gdn-ice-fire.webp' },
-  { abrir: 'rise-apollo', name: 'Rise of Apollo', tag: 'PG Soft', href: '#', desc: 'O deus do sol', img: '/img/slots/rise-apollo.webp' },
-  { abrir: 'wild-bounty-sd', name: 'Wild Bounty Showdown', tag: 'PG Soft', href: '#', desc: 'Caça ao tesouro', img: '/img/slots/wild-bounty-sd.webp' },
-  { abrir: 'treasures-aztec', name: 'Treasures of Aztec', tag: 'PG Soft', href: '#', desc: 'Tesouros astecas', img: '/img/slots/treasures-aztec.webp' },
-  { abrir: 'three-cz-pigs', name: 'Three Crazy Piggies', tag: 'PG Soft', href: '#', desc: 'Três porquinhos', img: '/img/slots/three-cz-pigs.webp' },
-];
-// só os jogos ligados no servidor; os slots dependem do serviço de slots estar ligado
-const casinoGames = () => CASINO_GAMES.filter((g) => (S.games && (g.abrir ? S.games.slots : S.games[g.id])));
-// provisório: só estes jogos podem ser jogados; os restantes aparecem como indisponíveis
-const CASINO_AVAILABLE = new Set(['decola', 'mines', 'fortune-tiger', 'fortune-ox']);
-const isSoon = (g) => !CASINO_AVAILABLE.has(g.abrir || g.id);
-const casinoCard = (g) => isSoon(g)
-  ? `<div class="cg-card soon" title="${esc(g.name)} — indisponível no momento" aria-disabled="true"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"><span class="cg-soon">Indisponível</span></div></div>`
-  : `<a class="cg-card" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}"><div class="cg-art"><img src="${g.img}" class="cg-cover" alt="${esc(g.name)}" loading="lazy" onerror="this.onerror=null;this.style.display='none'"></div></a>`;
-// página inicial: uma fila só com os jogos disponíveis (Fortune Tiger e Fortune Ox primeiro)
-function homeCasino() {
-  if (!S.casino) return '';
-  const games = casinoGames().filter((g) => !isSoon(g));
-  if (!games.length) return '';
-  // data-key: o bloco só é recriado quando a lista de jogos muda (ver renderMain)
-  return `<div id="homeCasino" data-key="${esc(games.map((g) => g.abrir || g.id).join(','))}">
-    <div class="section-head"><h2>Cassino</h2><a href="/cassino" class="see-all" data-view="casino">Ver todos ›</a></div>
-    <div class="cg-grid cg-row">${games.map(casinoCard).join('')}</div></div>`;
-}
-// abre um jogo: os slots usam data-abrir, o Aviator e o Mines têm página própria
-const gameLink = (g, cls, inner) =>
-  `<a class="${cls}" href="${g.href}"${g.abrir ? ` data-abrir="${g.abrir}" data-nome="${esc(g.name)}"` : ''} title="${esc(g.name)}">${inner}</a>`;
-// faixa do topo do cassino: um só destaque (o primeiro jogo disponível, o Fortune Tiger)
-function casinoHero() {
-  const g = casinoGames().find((x) => !isSoon(x));
-  if (!g) return '';
-  return gameLink(g, 'cg-hero', `<img class="cg-hero-bg" src="${g.img}" alt="" onerror="this.onerror=null;this.style.display='none'">
-    <span class="cg-hero-txt"><small>Em destaque</small><b>${esc(g.name)}</b>
-    <span class="cg-hero-play">Jogar agora <span aria-hidden="true">▶</span></span></span>`);
-}
-function renderCasino() {
-  if (!S.casino) return `<div class="empty-state">O cassino não está disponível neste momento.</div>`;
-  const card = casinoCard;
-  return `${casinoHero()}
-    <div class="section-head"><h2>Jogos</h2><span class="muted">${casinoGames().filter((g) => !isSoon(g)).length} disponíveis</span></div>
-    <div class="cg-grid">${casinoGames().map(card).join('')}</div>
-    <p class="muted" style="font-size:12px;margin-top:18px">18+ · Jogue com responsabilidade. Os seus limites de perda e a pausa da conta valem também para o cassino.</p>`;
-}
-
 function renderMain() {
   const main = $('#main');
   if (!S.loaded) return;
@@ -889,13 +814,11 @@ function renderMain() {
   const v = S.view;
   if (v === 'event') html = renderEvent();
   else if (v === 'mybets') html = renderMyBetsPage();
-  else if (v === 'casino') html = renderCasino();
   else {
     const live = filtered((e) => e.state === 'in');
     if (v === 'home') {
       html += homeHero(live);
       html += boostsBlock();
-      html += homeCasino();
       html += sportTabs();
       const featured = live.filter((e) => e.markets || e.cm).sort((a, b) => LEAGUE_BY_KEY[a.league].order - LEAGUE_BY_KEY[b.league].order).slice(0, 8);
       if (featured.length) html += `<div class="section-head"><span class="live-dot"></span><h2>Ao vivo agora</h2><span class="muted">${live.length} eventos</span></div><div class="hero">${featured.map(heroCard).join('')}</div>`;
@@ -1767,18 +1690,13 @@ function renderSidebar() {
     }
     html += `</div>`;
   }
-  if (S.casino) {
-    // só a entrada "Cassino"; os jogos ficam na página do cassino
-    html += `<div class="side-casino-sep"></div>
-    <button class="side-item side-sport ${S.view === 'casino' ? 'active' : ''}" data-view="casino"><span class="ic">🎲</span>Cassino</button>`;
-  }
   S.sideAnim = null;
   // só mexe no menu se mudou (redesenhar a cada atualização fazia-o piscar e perder a posição)
   const sb = $('#sidebar');
   if (sb.dataset.html !== html) { morph(sb, html); sb.dataset.html = html; }
   $('#liveCountNav').textContent = liveN;
   $('#liveCountBn').textContent = liveN > 99 ? '99+' : liveN || '';
-  document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.view === S.view || (a.dataset.view === 'home' && !['live', 'mybets', 'casino'].includes(S.view))));
+  document.querySelectorAll('.topnav a').forEach((a) => a.classList.toggle('active', a.dataset.view === S.view || (a.dataset.view === 'home' && !['live', 'mybets'].includes(S.view))));
 }
 
 function renderHeader() {
@@ -1790,8 +1708,6 @@ function renderHeader() {
   } else {
     w.innerHTML = `<button class="btn btn-ghost" data-action="login">Entrar</button><button class="btn btn-green" data-action="register">Cadastrar</button>`;
   }
-  // no cassino não há apostas esportivas: esconde o botão do Boletim
-  document.body.classList.toggle('view-casino', S.view === 'casino');
   // barra de baixo: marca a secção atual
   document.querySelectorAll('#bottomNav [data-bn]').forEach((b) => b.classList.toggle('active', b.dataset.bn === S.view));
   if (S.lastUpdate) $('#lastUpdate').textContent = '· Última atualização ' + new Date(S.lastUpdate).toLocaleTimeString('pt-BR');
@@ -2111,7 +2027,7 @@ async function logout() {
 
 /* ---------------- navegação / eventos ---------------- */
 /* rotas: cada secção tem o seu endereço (o servidor devolve o index.html para todas) */
-const ROUTES = { home: '/', live: '/ao-vivo', mybets: '/minhas-apostas', casino: '/cassino', all: '/todos', today: '/hoje', tomorrow: '/amanha', results: '/resultados' };
+const ROUTES = { home: '/', live: '/ao-vivo', mybets: '/minhas-apostas', all: '/todos', today: '/hoje', tomorrow: '/amanha', results: '/resultados' };
 function pathFor() {
   if (S.view === 'league' && S.league) return '/liga/' + encodeURIComponent(S.league);
   if (S.view === 'sport' && S.sport) return '/esporte/' + encodeURIComponent(S.sport);
@@ -2120,7 +2036,6 @@ function pathFor() {
 }
 // lê o endereço atual e devolve a secção correspondente (endereço desconhecido → esportes)
 function routeFromPath() {
-  if (location.hash === '#cassino') return { view: 'casino' }; // links antigos
   const p = location.pathname.replace(/\/+$/, '') || '/';
   const m = p.match(/^\/(liga|esporte|evento)\/([^/]+)$/);
   if (m) {
@@ -2174,12 +2089,6 @@ document.addEventListener('click', async (e) => {
   // Ctrl/Cmd/Shift + clique num link de secção: deixa o navegador abrir noutra aba
   if (t.tagName === 'A' && (e.ctrlKey || e.metaKey || e.shiftKey) && /^\/([^/]|$)/.test(t.getAttribute('href') || '')) return;
   const d = t.dataset;
-  if (d.abrir) { // slots: abre o jogo (sem conta: pede login e abre o jogo logo a seguir)
-    e.preventDefault();
-    const abrir = () => window.abrirFortuneTiger && window.abrirFortuneTiger(d.abrir, d.nome);
-    if (!S.user) { afterAuth = abrir; openLogin(`Entre na sua conta para jogar ${d.nome || 'este jogo'}.`); return; }
-    abrir(); return;
-  }
   if (d.key) { e.stopPropagation(); toggleSel(d.key); return; }
   if (d.boost) { addBoost(d.boost); return; }
   if (d.cashout) {
@@ -2304,7 +2213,7 @@ document.addEventListener('input', (e) => {
     t.value = maskCpf(t.value);
   } else if (t.id === 'search') {
     S.query = t.value;
-    if (['event', 'mybets', 'casino'].includes(S.view)) { S.view = 'today'; syncUrl(true); }
+    if (['event', 'mybets'].includes(S.view)) { S.view = 'today'; syncUrl(true); }
     renderMain();
   }
 });
@@ -2332,10 +2241,6 @@ $('#overlay').onclick = () => { afterAuth = null; closeModal(); }; // fechou sem
 $('#menuBtn').onclick = () => { $('#sidebar').classList.add('open'); $('#overlay').classList.add('show'); document.documentElement.classList.add('drawer-open'); };
 $('#slipFab').onclick = () => { $('#slip').classList.add('open'); $('#overlay').classList.add('show'); document.documentElement.classList.add('drawer-open'); };
 
-/* ---------------- slots (Fortune Tiger) ---------------- */
-// o modal vive no index.html; aqui só expomos uma função para o site refrescar o saldo ao fechar
-window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } catch { /* ignora */ } };
-
 /* ---------------- início ---------------- */
 (async function start() {
   renderHeader();
@@ -2345,7 +2250,7 @@ window.tugasRefreshSaldo = async () => { try { await loadAccount(); render(); } 
     const parts = [site.company, site.cnpj && 'CNPJ ' + site.cnpj, site.license && 'Autorização SPA/MF: ' + site.license, site.supportEmail].filter(Boolean);
     const el = $('#siteInfo'); if (el) el.textContent = parts.join(' · ');
   }).catch(() => { });
-  // abre a secção do endereço (ex.: /cassino, /ao-vivo, /liga/bra.1) e corrige endereços antigos/desconhecidos
+  // abre a secção do endereço (ex.: /ao-vivo, /liga/bra.1) e corrige endereços antigos/desconhecidos
   Object.assign(S, routeFromPath());
   syncUrl(true);
   loadBoosts().then(() => safeRender());
