@@ -53,7 +53,7 @@ async function boot() {
   // conta sem acesso: volta ao site sem revelar nada sobre o painel
   if (!A.me.isAdmin) return location.replace('/');
   if (!A.me.emailVerified) { $('#main').innerHTML = `<div class="center-box"><h3>Confirme o seu e-mail</h3><p class="sub">Para usar o painel, confirme primeiro o e-mail ${esc(A.me.email)} (no site: Minha conta → Perfil).</p><a class="btn btn-green btn-block" href="/">Ir ao site</a></div>`; return; }
-  $('#who').textContent = A.me.email;
+  $('#who').innerHTML = `<span>${esc(A.me.email)}</span><b>${esc((A.me.name || A.me.email || '?').trim()[0].toUpperCase())}</b>`;
   renderTabs();
   go(location.hash.slice(1) || 'saques');
   setInterval(() => { if (A.view === 'saques' && !$('#modal').classList.contains('show')) render(); else loadSummary(); }, 20000);
@@ -66,17 +66,29 @@ function showLogin() {
     <div class="form-err" id="formErr"></div><button class="btn btn-green btn-block" type="submit" style="margin-top:14px">Entrar</button></form></div>`;
 }
 
+// menu lateral, por área: [área, [[vista, nome, ícone, contador]]]
 function renderTabs() {
   const s = A.summary;
   const open = s ? s.withdrawals.pending + s.withdrawals.processing : 0;
-  const tabs = [['saques', 'Saques', open], ['depositos', 'Depósitos', s ? s.deposits.review : 0], ['apostas', 'Apostas', s && s.bets ? s.bets.late : 0], ['mercados', 'Mercados por liquidar', s && s.bets ? s.bets.pendingMarkets : 0], ['aovivo', 'Ao vivo suspeitas', s ? s.liveAlerts24h || 0 : 0], ['esportes', 'Esportes e mercados', 0], ['jogadores', 'Jogadores', 0], ['registo', 'Registo', 0]];
-  $('#tabs').innerHTML = tabs.map(([k, l, n]) => `<button class="${A.view === k || (k === 'jogadores' && A.view === 'jogador') || (k === 'esportes' && A.view === 'esporte-ev') ? 'active' : ''}" data-go="${k}">${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('');
+  const groups = [
+    ['Dinheiro', [['saques', 'Saques', '💸', open], ['depositos', 'Depósitos', '🏦', s ? s.deposits.review : 0]]],
+    ['Apostas', [['apostas', 'Apostas', '🎟️', s && s.bets ? s.bets.late : 0], ['mercados', 'Mercados por liquidar', '⚖️', s && s.bets ? s.bets.pendingMarkets : 0], ['aovivo', 'Ao vivo suspeitas', '🚨', s ? s.liveAlerts24h || 0 : 0]]],
+    ['Conteúdo', [['esportes', 'Esportes e mercados', '🏟️', 0]]],
+    ['Pessoas', [['jogadores', 'Jogadores', '👥', 0]]],
+    ['Sistema', [['registo', 'Registo', '📜', 0]]],
+  ];
+  const isOn = (k) => A.view === k || (k === 'jogadores' && A.view === 'jogador') || (k === 'esportes' && A.view === 'esporte-ev');
+  $('#tabs').innerHTML = groups.map(([g, tabs]) => `<div class="adm-group"><span>${g}</span>${tabs.map(([k, l, ic, n]) => `<button class="${isOn(k) ? 'active' : ''}" data-go="${k}"><i>${ic}</i>${l}${n ? `<span class="cnt">${n}</span>` : ''}</button>`).join('')}</div>`).join('');
+  const cur = groups.find(([, tabs]) => tabs.some(([k]) => isOn(k)));
+  const tab = cur && cur[1].find(([k]) => isOn(k));
+  $('#pageTitle').innerHTML = tab ? `${tab[2]} ${esc(tab[1])} <small>· ${esc(cur[0])}</small>` : 'Painel';
   document.title = (open ? `(${open}) ` : '') + 'Painel da equipa';
 }
 async function loadSummary() {
   try { A.summary = await api('GET', '/api/admin/summary'); renderTabs(); } catch (e) { if (e.status === 401) location.reload(); }
 }
 function go(view, extra = {}) {
+  document.body.classList.remove('nav-open');
   Object.assign(A, { view }, extra);
   history.replaceState(null, '', '#' + view);
   render();
@@ -213,9 +225,22 @@ async function viewUser() {
 }
 
 /* ---------- registo ---------- */
+const LOG_KEYS = { amount: 'valor', credit: 'creditado', results: 'resultados', bets: 'apostas', user: 'jogador', proof: 'comprovante', note: 'nota', reason: 'motivo', event: 'evento', markets: 'mercados', market: 'mercado', state: 'estado', score: 'placar', name: 'nome', country: 'país', sport: 'esporte', hidden: 'oculto', result: 'resultado', status: 'estado' };
+const LOG_VERB = { paid: 'pago', processing: 'em processamento', pending: 'devolvido à fila', rejected: 'recusado', canceled: 'cancelado', credit: 'creditado', dismiss: 'descartado', ajuste: 'ajuste de saldo' };
+// "saque:paid" → "Saque · pago" (o código original fica no title)
+const logLabel = (a) => { const [obj, verb = ''] = String(a).split(':'); return `${obj.charAt(0).toUpperCase() + obj.slice(1)}${verb ? ' · ' + (LOG_VERB[verb] || verb) : ''}`; };
+const logKind = (a) => (/paid|pay|settle|liquid|abrir|open|create|criar/i.test(a) ? 'pay' : /reject|recus|suspend|arquivar|delete|apagar|ban|block/i.test(a) ? 'bad' : /edit|update|processing|corrig/i.test(a) ? 'edit' : '');
+// detalhes de uma ação como "campo: valor" (valores de saque, depósito e ajuste de saldo vêm em centavos)
+function logDetails(l) {
+  const d = l.details || {};
+  const cents = /^(saque|deposito|jogador):/.test(l.action);
+  const val = (k, v) => ((k === 'amount' || k === 'credit') && cents && Number.isFinite(v) ? money(v / 100) : Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'sim' : 'não') : v && typeof v === 'object' ? JSON.stringify(v) : String(v));
+  const kv = Object.entries(d).filter(([k, v]) => v != null && v !== '' && !/At$/.test(k));
+  return kv.length ? `<div class="kvs">${kv.map(([k, v]) => `<span><i>${esc(LOG_KEYS[k] || k)}</i>${esc(val(k, v))}</span>`).join('')}</div>` : '<span class="sub">—</span>';
+}
 async function viewLogs() {
   const { logs } = await api('GET', '/api/admin/logs');
-  const rows = logs.map((l) => `<tr><td>${dt(l.at)}</td><td>${esc(l.admin)}</td><td><b>${esc(l.action)}</b><div class="sub">${esc(l.target || '')}</div></td><td class="sub">${esc(JSON.stringify(l.details || {}))}</td></tr>`).join('');
+  const rows = logs.map((l) => `<tr><td>${dt(l.at)}<div class="sub">${ago(l.at)}</div></td><td>${esc(l.admin)}</td><td><span class="log-act ${logKind(l.action)}" title="${esc(l.action)}">${esc(logLabel(l.action))}</span><div class="sub">${esc(l.target || '')}</div></td><td>${logDetails(l)}</td></tr>`).join('');
   return `<div class="bar"><h2>Registo de ações da equipa</h2></div>
     <div class="tbl-wrap">${logs.length ? `<table><thead><tr><th>Quando</th><th>Quem</th><th>Ação</th><th>Detalhes</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Ainda sem ações.</div>'}</div>`;
 }
@@ -350,6 +375,8 @@ document.addEventListener('click', async (e) => {
   if (t.tagName === 'A' && (d.go || d.user)) e.preventDefault();
   try {
     if (d.action === 'close') return closeModal();
+    if (d.action === 'nav-open') return document.body.classList.add('nav-open');
+    if (d.action === 'nav-close') return document.body.classList.remove('nav-open');
     if (d.action === 'refresh') return render();
     if (d.copy) { await navigator.clipboard.writeText(d.copy).catch(() => {}); t.textContent = 'copiado!'; setTimeout(() => { t.textContent = 'copiar'; }, 1500); return; }
     if (d.go) { if (d.depfilter) A.depFilter = d.depfilter; return go(d.go); }

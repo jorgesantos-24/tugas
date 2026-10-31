@@ -1,0 +1,156 @@
+/* Painel da equipa (/admin): menu lateral, barra de cima, cartões, tabelas e formulários.
+   Usa as cores do site (styles.css). Aba "Esportes e mercados": admin-catalog.css */
+
+body{min-height:100vh}
+.adm-shell{display:flex;min-height:100vh}
+
+/* ---------- menu lateral ---------- */
+.adm-side{position:sticky;top:0;height:100vh;width:250px;flex:none;display:flex;flex-direction:column;background:linear-gradient(180deg,#0b1a12,#0a100d 60%,#120a0c);border-right:1px solid var(--line);z-index:40}
+.adm-side::after{content:"";position:absolute;top:0;bottom:0;right:-1px;width:2px;background:linear-gradient(180deg,#0a8f3c,#1fd36f 30%,#ffcc1f 55%,#ee2b3f 80%,transparent)}
+.adm-brand{display:flex;align-items:center;gap:10px;padding:18px 18px 14px;font-weight:800;font-size:17px}
+.adm-brand small{display:block;font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.3px}
+.adm-nav{flex:1;overflow-y:auto;padding:4px 10px 10px}
+.adm-group{margin-top:14px}
+.adm-group>span{display:block;padding:0 10px 6px;font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#5f7368}
+.adm-nav button{display:flex;align-items:center;gap:10px;width:100%;padding:9px 10px;border-radius:9px;color:var(--muted);font-weight:600;font-size:13.5px;text-align:left;transition:background .15s,color .15s}
+.adm-nav button i{font-style:normal;width:22px;text-align:center;font-size:15px;filter:saturate(.8)}
+.adm-nav button:hover{color:var(--text);background:var(--panel2)}
+.adm-nav button.active{color:var(--text);background:linear-gradient(90deg,rgba(31,211,111,.16),rgba(31,211,111,.04));box-shadow:inset 3px 0 0 var(--green)}
+.adm-nav .cnt{margin-left:auto;min-width:20px;text-align:center;background:var(--red);color:#fff;border-radius:10px;padding:1px 6px;font-size:11px;font-weight:700}
+.adm-side-foot{padding:12px 14px 16px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.adm-side-foot a{display:flex;align-items:center;justify-content:center;gap:6px;padding:9px;border-radius:9px;background:var(--panel2);color:var(--text);font-weight:600;font-size:13px}
+.adm-side-foot a:hover{background:var(--panel3)}
+
+/* ---------- barra de cima ---------- */
+.adm-body{flex:1;min-width:0;display:flex;flex-direction:column}
+.adm-top{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;height:60px;padding:0 24px;background:rgba(9,13,11,.82);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.adm-top h1{margin:0;font-size:17px;font-weight:700;display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.adm-top h1 small{color:var(--muted);font-weight:600;font-size:13px}
+.adm-who{margin-left:auto;display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12.5px;white-space:nowrap}
+.adm-who b{display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,var(--green),#0d8f4d);color:#04210f;font-size:13px}
+.adm-burger{display:none;font-size:20px;padding:6px 8px;border-radius:8px}
+.adm-burger:hover{background:var(--panel2)}
+.adm-main{width:100%;max-width:1280px;margin:0 auto;padding:22px 24px 70px}
+.adm-scrim{display:none}
+
+/* ---------- cartões de números ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:22px}
+.card{position:relative;overflow:hidden;background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px}
+.card::before{content:"";position:absolute;left:0;top:0;right:0;height:3px;background:var(--accent,var(--green))}
+.cards .card:nth-child(4n+1){--accent:var(--yellow)}
+.cards .card:nth-child(4n+2){--accent:var(--green)}
+.cards .card:nth-child(4n+3){--accent:var(--blue)}
+.cards .card:nth-child(4n+4){--accent:#a78bfa}
+.card small{display:block;color:var(--muted);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.card b{font-size:24px;font-weight:800;letter-spacing:-.3px}
+.card span{display:block;color:var(--muted);font-size:12px;margin-top:6px;line-height:1.45}
+
+/* ---------- títulos e filtros ---------- */
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.bar h2{margin:0 auto 0 0;font-size:19px;font-weight:700}
+.bar select,.bar input{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:9px;padding:9px 11px;font-size:13px;outline:none;color-scheme:dark}
+.bar select:focus,.bar input:focus,.mini:focus{border-color:var(--green)}
+.bar .btn{padding:9px 14px;font-size:13px}
+.note{color:var(--muted);font-size:12.5px;line-height:1.55;margin:12px 2px 0;padding:10px 12px;border-left:3px solid var(--line);background:rgba(255,255,255,.015);border-radius:0 8px 8px 0}
+
+/* ---------- tabelas ---------- */
+.tbl-wrap{overflow-x:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top}
+th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+tbody tr{transition:background .12s}
+tbody tr:hover{background:rgba(255,255,255,.025)}
+tr[data-user]{cursor:pointer}
+tr:last-child td{border-bottom:0}
+td .sub{color:var(--muted);font-size:12px;margin-top:3px}
+.num{text-align:right;white-space:nowrap;font-weight:700;font-variant-numeric:tabular-nums}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.acts .btn{padding:6px 11px;font-size:12px}
+.btn-red{background:var(--red);color:#fff}
+.btn-red:hover{background:#ff4558}
+.link{color:var(--blue)}
+.link:hover{text-decoration:underline}
+
+/* ---------- etiquetas ---------- */
+.pill{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;background:var(--panel3);color:var(--muted);white-space:nowrap}
+.pill.PENDING,.pill.REVIEW{background:#3a2f0b;color:var(--yellow)}
+.pill.PROCESSING{background:#0f2c4d;color:var(--blue)}
+.pill.PAID,.pill.ok{background:#123222;color:var(--green)}
+.pill.REJECTED,.pill.FAILED,.pill.DUPLICATE,.pill.CHARGEBACK,.pill.REFUNDED,.pill.bad{background:#3a1218;color:var(--red)}
+.key{font-family:ui-monospace,monospace;font-weight:700;letter-spacing:.3px}
+.copy{margin-left:6px;font-size:11px;color:var(--blue);padding:1px 6px;border-radius:6px;background:rgba(47,140,255,.1)}
+.copy:hover{background:rgba(47,140,255,.2)}
+.empty{padding:40px 20px;text-align:center;color:var(--muted)}
+.warn{display:flex;gap:8px;align-items:center;background:#2b240b;border:1px solid #4a3d10;color:var(--yellow);border-radius:12px;padding:11px 14px;font-size:13px;margin-bottom:16px}
+.warn::before{content:"⚠️"}
+
+/* ---------- registo ---------- */
+.log-act{display:inline-block;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:700;background:var(--panel3);white-space:nowrap}
+.log-act.pay{background:#123222;color:var(--green)}
+.log-act.bad{background:#3a1218;color:var(--red)}
+.log-act.edit{background:#0f2c4d;color:var(--blue)}
+.kvs{display:flex;flex-wrap:wrap;gap:5px}
+.kvs span{display:inline-flex;gap:5px;max-width:100%;padding:3px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);font-size:12px;overflow-wrap:anywhere}
+.kvs span i{font-style:normal;color:var(--muted)}
+
+/* ---------- perfil, formulários e caixas ---------- */
+.center-box{max-width:400px;margin:70px auto;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:26px;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.kv2{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13px}
+.kv2:last-child{border-bottom:0}
+.kv2 span{color:var(--muted)}
+.section{margin-top:26px}
+.section h3{font-size:15px;margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.section h3::before{content:"";width:4px;height:16px;border-radius:2px;background:var(--green)}
+.subtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;padding:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;width:fit-content;max-width:100%}
+.subtabs button{padding:8px 14px;border-radius:9px;color:var(--muted);font-weight:600;font-size:13px}
+.subtabs button:hover{color:var(--text)}
+.subtabs button.active{color:#04210f;background:var(--green)}
+.mini{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:7px 9px;font-size:13px;outline:none;min-width:0;color-scheme:dark}
+.mini.odd-in{width:84px;text-align:right;font-weight:700}
+.mk-card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:12px}
+.mk-card.settled{opacity:.8}
+.mk-head{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.mk-head .grow{flex:1;min-width:180px}
+.mk-card table td{padding:6px 8px;vertical-align:middle}
+.mk-card tbody tr:hover{background:none}
+.mk-foot{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.rm{color:var(--red);font-size:18px;padding:0 6px}
+.tpl{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 2px}
+.tpl button,.icons button{padding:5px 9px;border-radius:8px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--text)}
+.icons{display:flex;gap:4px;flex-wrap:wrap;margin-top:6px}
+.icons button{font-size:18px;padding:3px 7px}
+.ev-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+.ev-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+/* regras do jogo e placar ao vivo */
+.rules-box{margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)}
+.rules-box .grid2{gap:0 12px}
+.live-card{margin-top:12px;border-color:#2b5a3d}
+.lv-score{display:flex;align-items:center;justify-content:center;gap:18px;flex-wrap:wrap;margin:6px 0}
+.lv-num{font-size:38px;font-weight:800;min-width:120px;text-align:center;letter-spacing:1px}
+.lv-btn{display:flex;flex-direction:column;align-items:center;min-width:150px;padding:12px 16px;font-size:16px}
+.lv-btn small{font-size:12px;font-weight:600;opacity:.85;max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lv-btn:disabled{opacity:.4}
+.lv-maps{text-align:center;color:var(--muted);font-size:13px}
+tr.old-line td{opacity:.5}
+.map-sec{margin:18px 0 8px;font-size:13px;letter-spacing:.6px;text-transform:uppercase;color:var(--yellow)}
+textarea.inp{min-height:130px;font-family:ui-monospace,monospace;font-size:13px;resize:vertical}
+
+/* ---------- telas pequenas: o menu abre por cima ---------- */
+@media (max-width:900px){
+  .adm-side{position:fixed;left:0;top:0;transform:translateX(-100%);transition:transform .2s;box-shadow:12px 0 40px rgba(0,0,0,.5)}
+  body.nav-open .adm-side{transform:none}
+  body.nav-open .adm-scrim{display:block;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:35}
+  .adm-burger{display:block}
+  .adm-top{padding:0 12px}
+  .adm-main{padding:16px 12px 60px}
+  .adm-who span{display:none}
+  .grid2{grid-template-columns:1fr}
+  /* dois cartões por linha; tabelas com largura mínima (deslizam para o lado dentro da caixa) */
+  .cards{grid-template-columns:1fr 1fr;gap:10px}
+  .card{padding:13px 12px 12px}
+  .card b{font-size:19px}
+  .tbl-wrap table{min-width:680px}
+  .kvs{min-width:240px}
+  .bar h2{font-size:17px}
+}
