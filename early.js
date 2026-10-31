@@ -237,7 +237,12 @@ module.exports = function early({ M, TEN, events, liveStats, now, POINTS = null,
     // set terminado: há um set a seguir, ou o placar é final (6-4, 7-5, 7-6...) — e o histórico confirma-o
     const setDone = (n) => n >= 1 && n <= sets.length && (n < sets.length || okSet(sets[n - 1]));
     let need;
-    if (TENNIS_SET.has(k) || k === 'set1') { if (!setDone(sN)) return null; need = log.filter((e) => e.s === sN); }
+    // "após N games" / "primeiro a N games": decididos logo que esses games acabam (não é preciso esperar pelo fim do set)
+    const gsN = log.filter((e) => e.s === sN);
+    const raceAt = k === 'tsrace' ? gsN.findIndex((e, i) => gsN.slice(0, i + 1).filter((x) => x.w === e.w).length === N) : -1;
+    if ((k === 'tslead' || k === 'tsafter') && N >= 1 && gsN.length >= N && sN <= sets.length) need = gsN.slice(0, N);
+    else if (raceAt >= 0 && sN <= sets.length) need = gsN.slice(0, raceAt + 1);
+    else if (TENNIS_SET.has(k) || k === 'set1') { if (!setDone(sN)) return null; need = gsN; }
     else if (TENNIS_GAME.has(k) || TENNIS_GAME2.has(k)) {
       const gs = log.filter((e) => e.s === sN);
       const last = N + (TENNIS_GAME2.has(k) ? 1 : 0);

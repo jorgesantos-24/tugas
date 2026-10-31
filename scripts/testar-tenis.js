@@ -321,6 +321,22 @@ function earlyMatch() {
   eq(run(g22, 'gtotal', 'over', { line: 22.5 }), null, '22 games: "mais de 22,5" por decidir');
   eq(run(g22, 'tace', '10', { per: 'all', line: 10 }), 'won', 'aces 6+4: "10 ou mais" ganha já');
   eq(run(g22, 'tace', '11', { per: 'all', line: 11 }), null, 'aces 10: "11 ou mais" por decidir');
+  // "após N games" / "primeiro a N games": pagos quando esses games acabam, sem esperar pelo fim do set (caso real 31/10)
+  const runLog = (sets, wins, market, pick, per) => {
+    const summary = wins.map((w, i) => `Game ${i + 1} - ${w === 'h' ? 'Ana Casa' : 'Bia Fora'} - holds to 15`);
+    st = { sport: 'tennis', format: 'best_of_3', home: { sets: sets.map((x) => x[0]) }, away: { sets: sets.map((x) => x[1]) }, summary };
+    const leg = { market, pick, per, evId: 'e1', key: `k${++n}` };
+    E.check('b', leg); T += 200000; E.check('b', leg); T += 200000;
+    return leg.result || null;
+  };
+  const set1 = ['h', 'a', 'h', 'a', 'h', 'a', 'h', 'a', 'h', 'h']; // 6-4
+  const s2 = [[6, 4], [2, 2]], w2 = [...set1, 'h', 'a', 'h', 'a'];
+  eq(runLog(s2, w2, 'tslead', 'draw', '2:2'), 'won', '2º set a 2-2: "quem lidera após 2 games: empate" ganha já');
+  eq(runLog(s2, w2, 'tslead', 'home', '2:2'), 'lost', '2º set a 2-2: "após 2 games: Ana" perde já');
+  eq(runLog(s2, w2, 'tsafter', '1-1', '2:2'), 'won', '2º set a 2-2: "placar após 2 games: 1-1" ganha já');
+  eq(runLog(s2, w2, 'tslead', 'draw', '2:6'), null, '2º set a 2-2: "após 6 games" ainda por decidir');
+  eq(runLog(s2, w2, 'tsrace', 'home', '2:2'), 'won', '2º set: Ana chegou primeiro a 2 games → ganha já');
+  eq(runLog(s2, w2, 'tsrace', 'home', '2:3'), null, '2º set: "primeiro a 3 games" ainda por decidir');
   // resultado final: desistência entre sets num melhor de 5
   const F = require(path.join(ROOT, 'feeds', 'moviodds.js'));
   eq(F.tennisResult({ final_score: '6-4,3-6,6-2', stats: { format: 'best_of_5' } }).done, false, 'melhor de 5 parado a 2-1 (desistência entre sets): fica para a equipa');
